@@ -12,6 +12,7 @@ import {
 import { PrismaService } from '../../../prisma/prisma.service';
 import { FindEmployeeHistoryQueryDto } from './dto/employee-history.dto';
 import { LeaveBalanceSyncService } from '../../shared/leave-balances/leave-balance-sync.service';
+import { overlapDateWhere, resolveDateRange } from '../../../common/date-range';
 
 const historyRequestSelect = {
   id: true,
@@ -48,9 +49,8 @@ export class EmployeeHistoryService {
 
   async findAll(query: FindEmployeeHistoryQueryDto) {
     const user = await this.resolveUser(query.userId, query.userEmail);
-    const year = query.year ?? new Date().getUTCFullYear();
-    const yearStart = new Date(Date.UTC(year, 0, 1));
-    const nextYearStart = new Date(Date.UTC(year + 1, 0, 1));
+    const range = resolveDateRange(query, { defaultMode: 'year' });
+    const year = range.year;
 
     await this.leaveBalanceSync.syncUserYear(user.id, year);
 
@@ -58,8 +58,7 @@ export class EmployeeHistoryService {
       this.prisma.leaveRequest.findMany({
         where: {
           ownerId: user.id,
-          startDate: { lt: nextYearStart },
-          endDate: { gte: yearStart },
+          ...overlapDateWhere(range),
         },
         orderBy: [{ submittedAt: 'desc' }, { createdAt: 'desc' }],
         select: historyRequestSelect,
@@ -83,6 +82,8 @@ export class EmployeeHistoryService {
 
     return {
       year,
+      dateFrom: range.dateFromIso,
+      dateTo: range.dateToIso,
       user: {
         id: user.id,
         email: user.email,

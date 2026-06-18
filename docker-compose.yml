@@ -35,8 +35,8 @@ services:
       NODE_ENV: production
       PORT: 3000
       DATABASE_URL: postgresql://${POSTGRES_USER:-conges}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquant}@postgres:5432/${POSTGRES_DB:-conges}?schema=public
-      CORS_ORIGINS: ${CORS_ORIGINS:-https://app.example.com,http://app.example.com,http://203.0.113.10}
-      FRONTEND_URL: ${FRONTEND_URL:-https://app.example.com}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://conges.upowa.org,http://conges.upowa.org,http://203.0.113.10}
+      FRONTEND_URL: ${FRONTEND_URL:-https://conges.upowa.org}
       AUTH_SESSION_SECRET: ${AUTH_SESSION_SECRET:?AUTH_SESSION_SECRET manquant. Lancez docker/prepare-env.sh ou docker/prepare-env.ps1}
       AUTH_SESSION_TTL_HOURS: ${AUTH_SESSION_TTL_HOURS:-12}
       AUTH_ADMIN_PASSWORD_HASH: ${AUTH_ADMIN_PASSWORD_HASH:?AUTH_ADMIN_PASSWORD_HASH manquant. Lancez docker/prepare-env.sh ou docker/prepare-env.ps1}
@@ -76,7 +76,7 @@ services:
       backend:
         condition: service_healthy
     environment:
-      DOMAIN_NAME: ${DOMAIN_NAME:-app.example.com}
+      DOMAIN_NAME: ${DOMAIN_NAME:-conges.upowa.org}
       SERVER_IP: ${SERVER_IP:-203.0.113.10}
     ports:
       - "${NGINX_BIND_ADDRESS:-0.0.0.0}:${NGINX_HTTP_PORT:-8080}:80"
@@ -113,7 +113,7 @@ services:
       - --non-interactive
       - --keep-until-expiring
       - -d
-      - ${DOMAIN_NAME:-app.example.com}
+      - ${DOMAIN_NAME:-conges.upowa.org}
     networks:
       - conges_private
 

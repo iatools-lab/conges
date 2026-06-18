@@ -18,6 +18,11 @@ import {
   CreateRhSpecialLeaveDto,
   UpdateRhSpecialLeaveDto,
 } from './dto/rh-special-leave.dto';
+import {
+  fieldDateWhere,
+  overlapDateWhere,
+  resolveDateRange,
+} from '../../../common/date-range';
 
 type BadgeTone = 'valid' | 'pending' | 'rejected' | 'draft' | 'neutral';
 type PrismaClientLike = PrismaService | Prisma.TransactionClient;
@@ -91,15 +96,19 @@ export class RhSpecialLeavesService {
     private readonly emailService: EmailService,
   ) {}
 
-  async findAll(yearValue?: string) {
-    const year = this.parseYear(yearValue);
-    const yearStart = new Date(Date.UTC(year, 0, 1));
-    const nextYearStart = new Date(Date.UTC(year + 1, 0, 1));
+  async findAll(filters: {
+    year?: string;
+    dateFrom?: string;
+    dateTo?: string;
+  } = {}) {
+    const range = resolveDateRange(filters, { defaultMode: 'year' });
+    const year = range.year;
+    const eventDate = fieldDateWhere(range);
 
     const [requests, balances, events] = await Promise.all([
       this.prisma.leaveRequest.findMany({
         where: {
-          startDate: { gte: yearStart, lt: nextYearStart },
+          ...overlapDateWhere(range),
           leaveType: { category: LeaveCategory.CONGE_SPECIAL },
         },
         orderBy: [{ startDate: 'desc' }, { reference: 'desc' }],
@@ -117,6 +126,7 @@ export class RhSpecialLeavesService {
       }),
       this.prisma.event.findMany({
         where: {
+          ...(eventDate ? { eventDate } : {}),
           user: { status: { not: UserStatus.INACTIVE } },
           OR: [
             { description: null },
@@ -146,6 +156,8 @@ export class RhSpecialLeavesService {
 
     return {
       year,
+      dateFrom: range.dateFromIso,
+      dateTo: range.dateToIso,
       rows,
       totals: this.buildTotalsFromRows(rows),
     };

@@ -1,4 +1,11 @@
 import { AppShell } from "@/components/AppShell";
+import {
+  DateRangeFilter,
+  allDateRange,
+  appendDateRange,
+  dateRangeQueryKey,
+  type DateRangeValue,
+} from "@/components/DateRangeFilter";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge, Button, Card, CardHeader, StatCard } from "@/components/ui-kit";
 import { apiFetch } from "@/lib/api";
@@ -29,12 +36,13 @@ type EventsResponse = {
 
 const emptyRows: EventRow[] = [];
 
-function buildEventsPath(session: { id: string; email: string }) {
+function buildEventsPath(session: { id: string; email: string }, range: DateRangeValue) {
   const params = new URLSearchParams({
     userId: session.id,
     userEmail: session.email,
     limit: "50",
   });
+  appendDateRange(params, range);
 
   return `/employee/events?${params.toString()}`;
 }
@@ -50,11 +58,12 @@ export function Declarer() {
   const [comment, setComment] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [fileInputKey, setFileInputKey] = useState(0);
-  const queryKey = ["employee-events", session?.id, session?.email];
+  const [dateRange, setDateRange] = useState<DateRangeValue>(() => allDateRange());
+  const queryKey = ["employee-events", session?.id, session?.email, ...dateRangeQueryKey(dateRange)];
 
   const eventsQuery = useQuery({
     queryKey,
-    queryFn: () => apiFetch<EventsResponse>(buildEventsPath(session!)),
+    queryFn: () => apiFetch<EventsResponse>(buildEventsPath(session!, dateRange)),
     enabled: Boolean(session?.id && session?.email),
   });
 
@@ -114,6 +123,8 @@ export function Declarer() {
 
   return (
     <AppShell title="Déclarer un événement" subtitle="Suivi des déclarations transmises à la RH">
+      <DateRangeFilter value={dateRange} onChange={setDateRange} className="mb-4" />
+
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard label="Déclarations" value={rows.length} tone="blue" />
         <StatCard label="En attente RH" value={pendingCount} tone="orange" />

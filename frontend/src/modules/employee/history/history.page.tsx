@@ -9,6 +9,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DateRangeFilter,
+  appendDateRange,
+  currentYearRange,
+  dateRangeQueryKey,
+  dateRangeYear,
+  type DateRangeValue,
+} from "@/components/DateRangeFilter";
 import { Badge, Button, Card, CardHeader, StatCard } from "@/components/ui-kit";
 import { apiFetch } from "@/lib/api";
 import { useAuthSession } from "@/modules/auth/session";
@@ -49,12 +57,12 @@ type EmployeeHistoryResponse = {
 
 const emptyRows: HistoryRow[] = [];
 
-function buildHistoryPath(session: { id: string; email: string }, year: number) {
+function buildHistoryPath(session: { id: string; email: string }, range: DateRangeValue) {
   const params = new URLSearchParams({
     userId: session.id,
     userEmail: session.email,
-    year: String(year),
   });
+  appendDateRange(params, range);
 
   return `/employee/history?${params.toString()}`;
 }
@@ -114,17 +122,15 @@ function exportHistoryCsv(rows: HistoryRow[], year: number) {
 
 export function HistoriquePage() {
   const { session } = useAuthSession();
-  const [year, setYear] = useState(new Date().getFullYear());
+  const [dateRange, setDateRange] = useState<DateRangeValue>(() => currentYearRange());
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
   const [detail, setDetail] = useState<HistoryRow | null>(null);
-  const years = [year, year - 1, year - 2].filter(
-    (item, index, values) => values.indexOf(item) === index,
-  );
+  const year = dateRangeYear(dateRange);
 
   const historyQuery = useQuery({
-    queryKey: ["employee-history", session?.id, session?.email, year],
-    queryFn: () => apiFetch<EmployeeHistoryResponse>(buildHistoryPath(session!, year)),
+    queryKey: ["employee-history", session?.id, session?.email, ...dateRangeQueryKey(dateRange)],
+    queryFn: () => apiFetch<EmployeeHistoryResponse>(buildHistoryPath(session!, dateRange)),
     enabled: !!session,
   });
 
@@ -185,17 +191,7 @@ export function HistoriquePage() {
                   className="pl-8 pr-3 py-2 text-sm border rounded-md bg-card w-56"
                 />
               </div>
-              <select
-                value={year}
-                onChange={(event) => setYear(Number(event.target.value))}
-                className="border rounded-md px-3 py-2 text-sm bg-card"
-              >
-                {years.map((item) => (
-                  <option key={item} value={item}>
-                    {item}
-                  </option>
-                ))}
-              </select>
+              <DateRangeFilter value={dateRange} onChange={setDateRange} compact />
               <select
                 value={status}
                 onChange={(event) => setStatus(event.target.value)}
@@ -281,7 +277,7 @@ export function HistoriquePage() {
         </div>
         <div className="flex items-center justify-between px-5 py-3 border-t text-xs text-muted-foreground">
           <span>{filtered.length} demande(s) affichée(s)</span>
-          <span>Année {year}</span>
+          <span>{dateRange.dateFrom || "Tout"} - {dateRange.dateTo || "Tout"}</span>
         </div>
       </Card>
 

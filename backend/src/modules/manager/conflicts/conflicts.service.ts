@@ -17,6 +17,7 @@ import {
   FindManagerConflictsQueryDto,
   UpdateManagerConflictDto,
 } from './dto/manager-conflict.dto';
+import { resolveDateRange } from '../../../common/date-range';
 
 const conflictSelect = {
   id: true,
@@ -66,17 +67,16 @@ export class ManagerConflictsService {
       query.managerId,
       query.managerEmail,
     );
-    const year = query.year ?? new Date().getUTCFullYear();
-    const yearStart = new Date(Date.UTC(year, 0, 1));
-    const nextYearStart = new Date(Date.UTC(year + 1, 0, 1));
+    const range = resolveDateRange(query, { defaultMode: 'year' });
+    const year = range.year;
     const ownerWhere = this.buildManagedOwnerWhere(manager);
     const scopedDepartments = this.getManagedDepartments(manager);
     const departmentIds = scopedDepartments.map((department) => department.id);
 
     const rows = await this.prisma.conflict.findMany({
       where: {
-        periodStart: { lt: nextYearStart },
-        periodEnd: { gte: yearStart },
+        ...(range.endExclusive ? { periodStart: { lt: range.endExclusive } } : {}),
+        ...(range.dateFrom ? { periodEnd: { gte: range.dateFrom } } : {}),
         OR: [
           { request: { owner: ownerWhere } },
           ...(departmentIds.length
@@ -98,6 +98,8 @@ export class ManagerConflictsService {
 
     return {
       year,
+      dateFrom: range.dateFromIso,
+      dateTo: range.dateToIso,
       manager: {
         id: manager.id,
         name: this.fullName(manager),

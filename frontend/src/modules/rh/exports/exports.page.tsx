@@ -1,6 +1,13 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/components/AppShell";
+import {
+  DateRangeFilter,
+  allDateRange,
+  appendDateRange,
+  dateRangeQueryKey,
+  type DateRangeValue,
+} from "@/components/DateRangeFilter";
 import { Badge, Button, Card, CardHeader, StatCard } from "@/components/ui-kit";
 import { apiFetch } from "@/lib/api";
 import {
@@ -113,6 +120,12 @@ function getSessionActor(): SessionActor {
   }
 }
 
+function exportsPath(range: DateRangeValue) {
+  const params = appendDateRange(new URLSearchParams(), range);
+  const query = params.toString();
+  return `/rh/exports${query ? `?${query}` : ""}`;
+}
+
 function downloadGeneratedExport(exportFile: GeneratedExport) {
   const blob = new Blob([exportFile.content], { type: exportFile.mimeType });
   const url = URL.createObjectURL(blob);
@@ -129,10 +142,11 @@ export function RhExports() {
   const queryClient = useQueryClient();
   const [year, setYear] = useState(String(new Date().getFullYear()));
   const [search, setSearch] = useState("");
+  const [dateRange, setDateRange] = useState<DateRangeValue>(() => allDateRange());
 
   const exportsQuery = useQuery({
-    queryKey: ["rh-exports"],
-    queryFn: () => apiFetch<ExportsResponse>("/rh/exports"),
+    queryKey: ["rh-exports", ...dateRangeQueryKey(dateRange)],
+    queryFn: () => apiFetch<ExportsResponse>(exportsPath(dateRange)),
   });
 
   const templates = exportsQuery.data?.templates ?? emptyTemplates;
@@ -177,6 +191,8 @@ export function RhExports() {
 
   return (
     <AppShell title="Exports" subtitle="Générer et télécharger les rapports RH">
+      <DateRangeFilter value={dateRange} onChange={setDateRange} className="mb-4" />
+
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Exports ce mois" value={stats.exportsThisMonth} tone="blue" />
         <StatCard label="Programmés" value={stats.scheduledExports} tone="purple" />

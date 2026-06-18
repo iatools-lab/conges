@@ -1,10 +1,18 @@
 import { AppShell } from "@/components/AppShell";
+import {
+  DateRangeFilter,
+  appendDateRange,
+  currentYearRange,
+  dateRangeQueryKey,
+  type DateRangeValue,
+} from "@/components/DateRangeFilter";
 import { Badge, Button, Card, StatCard } from "@/components/ui-kit";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiFetch } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
+import { useState } from "react";
 import {
   AlertCircle,
   AlertTriangle,
@@ -67,6 +75,12 @@ type RhDashboardSummary = {
   requestLeaves: RhDashboardLeaveRow[];
   departments: DepartmentDistribution[];
 };
+
+function buildDashboardPath(range: DateRangeValue) {
+  const params = appendDateRange(new URLSearchParams(), range);
+  const query = params.toString();
+  return query ? `/rh/dashboard?${query}` : "/rh/dashboard";
+}
 
 const emptySummary: RhDashboardSummary = {
   year: new Date().getFullYear(),
@@ -237,9 +251,10 @@ function PriorityRow({
 }
 
 export function RhDashboard() {
+  const [dateRange, setDateRange] = useState<DateRangeValue>(() => currentYearRange());
   const { data, isError, isFetching, isLoading, refetch } = useQuery({
-    queryKey: ["rh-dashboard"],
-    queryFn: () => apiFetch<RhDashboardSummary>("/rh/dashboard"),
+    queryKey: ["rh-dashboard", ...dateRangeQueryKey(dateRange)],
+    queryFn: () => apiFetch<RhDashboardSummary>(buildDashboardPath(dateRange)),
   });
   const summary = data ?? emptySummary;
   const stats = summary.stats;
@@ -251,6 +266,8 @@ export function RhDashboard() {
 
   return (
     <AppShell title="Tableau de bord RH" subtitle="Priorités, risques et pilotage congés">
+      <DateRangeFilter value={dateRange} onChange={setDateRange} className="mb-4" />
+
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-6">
         <KpiLink
           to="/rh/global"

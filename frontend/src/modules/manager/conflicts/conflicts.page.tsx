@@ -1,6 +1,13 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/components/AppShell";
+import {
+  DateRangeFilter,
+  appendDateRange,
+  currentYearRange,
+  dateRangeQueryKey,
+  type DateRangeValue,
+} from "@/components/DateRangeFilter";
 import { Card, CardHeader, Button, Badge, StatCard } from "@/components/ui-kit";
 import { AlertTriangle, Users, Calendar, CheckCircle2 } from "lucide-react";
 import {
@@ -87,12 +94,12 @@ type Filter = "all" | "active" | "critical" | "resolved";
 
 const emptyConflicts: Conflict[] = [];
 
-function buildConflictsPath(session: { id: string; email: string }, year: number) {
+function buildConflictsPath(session: { id: string; email: string }, range: DateRangeValue) {
   const params = new URLSearchParams({
     managerId: session.id,
     managerEmail: session.email,
-    year: String(year),
   });
+  appendDateRange(params, range);
 
   return `/manager/conflicts?${params.toString()}`;
 }
@@ -100,7 +107,7 @@ function buildConflictsPath(session: { id: string; email: string }, year: number
 export function ManagerConflits() {
   const { ready, session } = useAuthSession();
   const queryClient = useQueryClient();
-  const [year] = useState(new Date().getFullYear());
+  const [dateRange, setDateRange] = useState<DateRangeValue>(() => currentYearRange());
   const [filter, setFilter] = useState<Filter>("all");
   const [resolveTarget, setResolveTarget] = useState<Conflict | null>(null);
   const [resolution, setResolution] = useState("");
@@ -109,10 +116,10 @@ export function ManagerConflits() {
   const [reportDate, setReportDate] = useState("");
   const [ignoreTarget, setIgnoreTarget] = useState<Conflict | null>(null);
 
-  const queryKey = ["manager-conflicts", session?.id, session?.email, year];
+  const queryKey = ["manager-conflicts", session?.id, session?.email, ...dateRangeQueryKey(dateRange)];
   const conflictsQuery = useQuery({
     queryKey,
-    queryFn: () => apiFetch<ManagerConflictsResponse>(buildConflictsPath(session!, year)),
+    queryFn: () => apiFetch<ManagerConflictsResponse>(buildConflictsPath(session!, dateRange)),
     enabled: ready && !!session?.id && !!session?.email,
   });
 
@@ -190,6 +197,8 @@ export function ManagerConflits() {
       title="Conflits d'absence"
       subtitle="Détection automatique des chevauchements et risques de couverture"
     >
+      <DateRangeFilter value={dateRange} onChange={setDateRange} className="mb-4" />
+
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard label="Conflits actifs" value={totals.active} tone="red" />
         <StatCard label="Critiques" value={totals.critical} tone="red" />

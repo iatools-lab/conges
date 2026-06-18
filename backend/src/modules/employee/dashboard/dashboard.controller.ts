@@ -1,4 +1,4 @@
-import { Controller, Get, Req } from '@nestjs/common';
+import { Controller, Get, Query, Req } from '@nestjs/common';
 import {
   requireAuthSession,
   type AuthenticatedRequest,
@@ -10,7 +10,16 @@ export class EmployeeDashboardController {
   constructor(private readonly dashboardService: EmployeeDashboardService) {}
 
   @Get(':userId')
-  findSummary(@Req() req: AuthenticatedRequest) {
-    return this.dashboardService.findSummary(requireAuthSession(req).sub);
+  findSummary(
+    @Query('dateFrom') dateFrom: string | undefined,
+    @Query('dateTo') dateTo: string | undefined,
+    @Query('year') year: string | undefined,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.dashboardService.findSummary(requireAuthSession(req).sub, {
+      dateFrom,
+      dateTo,
+      year,
+    });
   }
 }

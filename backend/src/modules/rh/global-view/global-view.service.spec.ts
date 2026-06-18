@@ -47,6 +47,7 @@ function createHarness() {
     leaveRequest: {
       findMany: jest.fn(),
       findUnique: jest.fn(),
+      create: jest.fn(),
       update: jest.fn(),
     },
     validation: {
@@ -71,7 +72,11 @@ function createHarness() {
 
   const leaveBalanceSync = {
     syncForRequest: jest.fn(),
+    syncForKeys: jest.fn(),
     syncYear: jest.fn(),
+  } as any;
+  const leaveBalanceInitializer = {
+    initializeUserYear: jest.fn(),
   } as any;
 
   prisma.user.findFirst.mockResolvedValue(rhUser);
@@ -82,18 +87,56 @@ function createHarness() {
   ]);
   prisma.leaveRequest.findMany.mockResolvedValue([]);
   prisma.leaveRequest.findUnique.mockResolvedValue(request);
+  prisma.leaveRequest.create.mockImplementation(({ data }) =>
+    Promise.resolve({
+      id: 'imported-request-1',
+      reference: data.reference,
+      startDate: data.startDate,
+      endDate: data.endDate,
+      days: data.days,
+      ownerId: data.ownerId,
+      leaveTypeId: data.leaveTypeId,
+      owner: {
+        matricule: 'EMP001',
+        nom: 'Employee',
+        prenom: 'Test',
+      },
+      leaveType: {
+        code: 'CP',
+        name: 'Conges payes',
+      },
+    }),
+  );
   prisma.department.findMany.mockResolvedValue([]);
+  prisma.leaveType = {
+    findMany: jest.fn().mockResolvedValue([
+      {
+        id: 'type-cp',
+        code: 'CP',
+        name: 'Conges payes',
+        category: 'CONGE_PAYE',
+      },
+      {
+        id: 'type-spe',
+        code: 'SPE',
+        name: 'Conge special',
+        category: 'CONGE_SPECIAL',
+      },
+    ]),
+  };
 
   return {
     prisma,
     emailService,
     configService,
     leaveBalanceSync,
+    leaveBalanceInitializer,
     service: new RhGlobalViewService(
       prisma,
       emailService,
       configService,
       leaveBalanceSync,
+      leaveBalanceInitializer,
     ),
   };
 }
@@ -229,5 +272,62 @@ describe('RhGlobalViewService', () => {
       expect.objectContaining({ to: 'employee@upowa.org' }),
     ]);
     expect(result.totals.employees).toBe(0);
+  });
+
+  it('imports approved historical leave requests and syncs balances', async () => {
+    const { prisma, leaveBalanceSync, leaveBalanceInitializer, service } =
+      createHarness();
+    prisma.user.findMany
+      .mockResolvedValueOnce([
+        {
+          id: 'employee-1',
+          matricule: 'EMP001',
+          nom: 'Employee',
+          prenom: 'Test',
+        },
+      ])
+      .mockResolvedValueOnce([]);
+
+    const result = await service.importHistory({
+      rhId: rhUser.id,
+      rows: [
+        {
+          reference: 'OLD-2025-001',
+          matricule: 'EMP001',
+          type: 'paye',
+          startDate: '2025-04-01',
+          endDate: '2025-04-05',
+          days: 5,
+        },
+      ],
+    });
+
+    expect(leaveBalanceInitializer.initializeUserYear).toHaveBeenCalledWith(
+      'employee-1',
+      2025,
+      prisma,
+    );
+    expect(prisma.leaveRequest.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          reference: 'OLD-2025-001',
+          ownerId: 'employee-1',
+          leaveTypeId: 'type-cp',
+          status: LeaveRequestStatus.APPROVED,
+        }),
+      }),
+    );
+    expect(prisma.validation.create).not.toHaveBeenCalled();
+    expect(leaveBalanceSync.syncForKeys).toHaveBeenCalledWith(
+      [
+        {
+          userId: 'employee-1',
+          leaveTypeId: 'type-cp',
+          year: 2025,
+        },
+      ],
+      prisma,
+    );
+    expect(result.imported).toBe(1);
   });
 });

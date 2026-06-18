@@ -1,6 +1,12 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/components/AppShell";
+import {
+  DateRangeFilter,
+  allDateRange,
+  isDateInRange,
+  type DateRangeValue,
+} from "@/components/DateRangeFilter";
 import { Badge, Button, Card, CardHeader, StatCard } from "@/components/ui-kit";
 import { apiFetch } from "@/lib/api";
 import {
@@ -435,6 +441,7 @@ export function Enfants() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"" | ChildStatus>("");
+  const [dateRange, setDateRange] = useState<DateRangeValue>(() => allDateRange());
 
   const childrenQuery = useQuery({
     queryKey: ["rh-children"],
@@ -510,9 +517,10 @@ export function Enfants() {
         child.parentMatricule.toLowerCase().includes(query) ||
         child.department.toLowerCase().includes(query);
       const matchesStatus = !statusFilter || child.status === statusFilter;
-      return matchesSearch && matchesStatus;
+      const matchesDate = isDateInRange(child.dateNaissance, dateRange);
+      return matchesSearch && matchesStatus && matchesDate;
     });
-  }, [children, search, statusFilter]);
+  }, [children, search, statusFilter, dateRange]);
 
   const eligibleChildren = children.filter((child) => child.status === "valid");
   const bonusTotal = eligibleChildren.reduce((total, child) => total + child.bonusDays, 0);
@@ -559,6 +567,7 @@ export function Enfants() {
                 <option value="expired">Expirés</option>
                 <option value="not_eligible">Non éligibles</option>
               </select>
+              <DateRangeFilter value={dateRange} onChange={setDateRange} compact />
               <Button variant="outline" onClick={() => void childrenQuery.refetch()}>
                 <RefreshCw className={`size-4 ${childrenQuery.isFetching ? "animate-spin" : ""}`} />
                 Actualiser

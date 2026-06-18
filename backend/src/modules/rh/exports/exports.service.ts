@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { AuditAction, LeaveCategory, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { GenerateRhExportDto } from './dto/rh-export.dto';
+import { fieldDateWhere, resolveDateRange } from '../../../common/date-range';
 
 type ExportTemplateId =
   | 'monthly-balances'
@@ -97,11 +98,13 @@ type LeaveRequestExportRecord = Prisma.LeaveRequestGetPayload<{
 export class RhExportsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findSummary() {
+  async findSummary(filters: { dateFrom?: string; dateTo?: string } = {}) {
     const now = new Date();
     const monthStart = new Date(
       Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
     );
+    const range = resolveDateRange(filters, { defaultMode: 'all' });
+    const createdAt = fieldDateWhere(range);
     const [exportsThisMonth, exportLogs] = await Promise.all([
       this.prisma.auditLog.count({
         where: {
@@ -111,7 +114,11 @@ export class RhExportsService {
         },
       }),
       this.prisma.auditLog.findMany({
-        where: { action: AuditAction.EXPORT, entity: 'RhExport' },
+        where: {
+          action: AuditAction.EXPORT,
+          entity: 'RhExport',
+          ...(createdAt ? { createdAt } : {}),
+        },
         orderBy: { createdAt: 'desc' },
         take: 12,
         select: {
@@ -126,6 +133,8 @@ export class RhExportsService {
     const history = exportLogs.map((log) => this.toHistoryRow(log));
 
     return {
+      dateFrom: range.dateFromIso,
+      dateTo: range.dateToIso,
       templates: EXPORT_TEMPLATES,
       scheduled: EXPORT_TEMPLATES.filter(
         (template) => template.frequency === 'Mensuel',

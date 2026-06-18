@@ -23,4 +23,12 @@ export class FindEmployeePlanningQueryDto {
   @Min(2000)
   @Max(2100)
   year?: number;
+
+  @IsOptional()
+  @IsString()
+  dateFrom?: string;
+
+  @IsOptional()
+  @IsString()
+  dateTo?: string;
 }

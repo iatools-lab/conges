@@ -12,6 +12,7 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { FindManagerHistoryQueryDto } from './dto/manager-history.dto';
+import { fieldDateWhere, resolveDateRange } from '../../../common/date-range';
 
 const validationSelect = {
   id: true,
@@ -63,13 +64,13 @@ export class ManagerHistoryService {
       query.managerEmail,
     );
     const now = new Date();
-    const year = query.year ?? now.getUTCFullYear();
-    const yearStart = new Date(Date.UTC(year, 0, 1));
-    const nextYearStart = new Date(Date.UTC(year + 1, 0, 1));
+    const range = resolveDateRange(query, { defaultMode: 'year', now });
+    const year = range.year;
+    const decidedAt = fieldDateWhere(range);
 
     const validations = await this.prisma.validation.findMany({
       where: {
-        decidedAt: { gte: yearStart, lt: nextYearStart },
+        ...(decidedAt ? { decidedAt } : {}),
         request: { owner: this.buildManagedOwnerWhere(manager) },
       },
       orderBy: [{ decidedAt: 'desc' }, { id: 'desc' }],
@@ -89,6 +90,8 @@ export class ManagerHistoryService {
 
     return {
       year,
+      dateFrom: range.dateFromIso,
+      dateTo: range.dateToIso,
       manager: {
         id: manager.id,
         name: this.fullName(manager),

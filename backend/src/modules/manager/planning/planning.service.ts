@@ -12,6 +12,7 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { FindManagerPlanningQueryDto } from './dto/manager-planning.dto';
+import { overlapDateWhere, resolveDateRange } from '../../../common/date-range';
 
 const planningUserSelect = {
   id: true,
@@ -46,9 +47,8 @@ export class ManagerPlanningService {
       query.managerId,
       query.managerEmail,
     );
-    const year = query.year ?? new Date().getUTCFullYear();
-    const yearStart = new Date(Date.UTC(year, 0, 1));
-    const nextYearStart = new Date(Date.UTC(year + 1, 0, 1));
+    const range = resolveDateRange(query, { defaultMode: 'year' });
+    const year = range.year;
     const ownerWhere = this.buildManagedOwnerWhere(manager);
     const scopedDepartments = this.getManagedDepartments(manager);
 
@@ -69,8 +69,7 @@ export class ManagerPlanningService {
                 LeaveRequestStatus.CANCELLED,
               ],
             },
-            startDate: { lt: nextYearStart },
-            endDate: { gte: yearStart },
+            ...overlapDateWhere(range),
           },
           orderBy: [{ startDate: 'asc' }, { reference: 'asc' }],
           select: planningUserSelect.leaveRequests.select,
@@ -191,6 +190,8 @@ export class ManagerPlanningService {
 
     return {
       year,
+      dateFrom: range.dateFromIso,
+      dateTo: range.dateToIso,
       manager: {
         id: manager.id,
         name: this.fullName(manager),

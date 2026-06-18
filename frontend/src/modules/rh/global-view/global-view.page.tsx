@@ -1,6 +1,17 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AppShell } from "@/components/AppShell";
+import {
+  DateRangeFilter,
+  appendDateRange,
+  currentYearRange,
+  dateRangeMonthIndex,
+  dateRangeQueryKey,
+  dateRangeYear,
+  monthRange,
+  yearRange,
+  type DateRangeValue,
+} from "@/components/DateRangeFilter";
 import { Badge, Button, Card, CardHeader, StatCard } from "@/components/ui-kit";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiFetch } from "@/lib/api";
@@ -81,7 +92,6 @@ type GlobalViewResponse = {
 };
 
 const currentYear = new Date().getFullYear();
-const yearOptions = [currentYear, currentYear - 1, currentYear - 2];
 const monthLabels = [
   "Jan",
   "Fév",
@@ -133,8 +143,8 @@ const STATUS_FILTERS: Array<{ status: BadgeTone; label: string }> = [
   { status: "draft", label: "Brouillon" },
 ];
 
-function buildGlobalViewPath(year: string, department: string) {
-  const params = new URLSearchParams({ year });
+function buildGlobalViewPath(range: DateRangeValue, department: string) {
+  const params = appendDateRange(new URLSearchParams(), range);
   if (department !== "ALL") params.set("department", department);
 
   return `/rh/global-view?${params.toString()}`;
@@ -363,6 +373,7 @@ function StatusFilterRow({
 
 export function VueGlobale() {
   const [department, setDepartment] = useState("ALL");
+  const [dateRange, setDateRange] = useState<DateRangeValue>(() => currentYearRange());
   const [year, setYear] = useState(String(currentYear));
   const [month, setMonth] = useState(new Date().getMonth());
   const [selectedStatuses, setSelectedStatuses] = useState<BadgeTone[]>(
@@ -371,9 +382,17 @@ export function VueGlobale() {
   const [query, setQuery] = useState("");
 
   const { data, isError, isFetching, isLoading, refetch } = useQuery({
-    queryKey: ["rh-global-view", year, department],
-    queryFn: () => apiFetch<GlobalViewResponse>(buildGlobalViewPath(year, department)),
+    queryKey: ["rh-global-view", department, ...dateRangeQueryKey(dateRange)],
+    queryFn: () => apiFetch<GlobalViewResponse>(buildGlobalViewPath(dateRange, department)),
   });
+
+  const applyDateRange = (nextRange: DateRangeValue) => {
+    setDateRange(nextRange);
+    if (nextRange.dateFrom) {
+      setYear(String(dateRangeYear(nextRange, currentYear)));
+      setMonth(dateRangeMonthIndex(nextRange, new Date().getMonth()));
+    }
+  };
 
   const toggleStatus = (status: BadgeTone) => {
     setSelectedStatuses((current) => {
@@ -436,17 +455,7 @@ export function VueGlobale() {
           <div className="inline-flex items-center gap-2 text-sm text-muted-foreground bg-muted/50 px-3 py-1.5 rounded-md">
             <Building2 className="size-4" /> Périmètre RH global
           </div>
-          <select
-            className="rounded-md border px-3 py-2 text-sm bg-background"
-            value={year}
-            onChange={(event) => setYear(event.target.value)}
-          >
-            {yearOptions.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
+          <DateRangeFilter value={dateRange} onChange={applyDateRange} />
           <select
             className="rounded-md border px-3 py-2 text-sm bg-background"
             value={department}
@@ -537,13 +546,11 @@ export function VueGlobale() {
                     variant="outline"
                     className="!p-2"
                     onClick={() => {
-                      setMonth((value) => {
-                        if (value === 0) {
-                          setYear(String(Number(year) - 1));
-                          return 11;
-                        }
-                        return value - 1;
-                      });
+                      const nextMonth = month === 0 ? 11 : month - 1;
+                      const nextYear = month === 0 ? Number(year) - 1 : Number(year);
+                      setMonth(nextMonth);
+                      setYear(String(nextYear));
+                      setDateRange(monthRange(nextYear, nextMonth));
                     }}
                     aria-label="Mois précédent"
                   >
@@ -555,6 +562,7 @@ export function VueGlobale() {
                       const now = new Date();
                       setMonth(now.getMonth());
                       setYear(String(now.getFullYear()));
+                      setDateRange(monthRange(now.getFullYear(), now.getMonth()));
                     }}
                   >
                     Aujourd'hui
@@ -563,13 +571,11 @@ export function VueGlobale() {
                     variant="outline"
                     className="!p-2"
                     onClick={() => {
-                      setMonth((value) => {
-                        if (value === 11) {
-                          setYear(String(Number(year) + 1));
-                          return 0;
-                        }
-                        return value + 1;
-                      });
+                      const nextMonth = month === 11 ? 0 : month + 1;
+                      const nextYear = month === 11 ? Number(year) + 1 : Number(year);
+                      setMonth(nextMonth);
+                      setYear(String(nextYear));
+                      setDateRange(monthRange(nextYear, nextMonth));
                     }}
                     aria-label="Mois suivant"
                   >

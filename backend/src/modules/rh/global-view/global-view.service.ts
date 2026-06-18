@@ -21,8 +21,11 @@ import {
   RhRequestDecision,
 } from './dto/rh-request-decision.dto';
 import { RemarkRhRequestDto } from './dto/rh-request-remark.dto';
+import { ImportRhLeaveHistoryDto } from './dto/rh-leave-history-import.dto';
 import { EmailService } from '../../shared/notifications/email.service';
 import { LeaveBalanceSyncService } from '../../shared/leave-balances/leave-balance-sync.service';
+import { LeaveBalanceInitializerService } from '../../shared/leave-balances/leave-balance-initializer.service';
+import { overlapDateWhere, resolveDateRange } from '../../../common/date-range';
 
 type BadgeTone =
   | 'valid'
@@ -41,6 +44,16 @@ const TRACKED_REQUEST_STATUSES = [
   LeaveRequestStatus.CANCELLED,
 ];
 
+type NormalizedHistoryImportRow = {
+  reference: string;
+  matricule: string;
+  type: string;
+  startDate: Date;
+  endDate: Date;
+  days: number;
+  rowNumber: number;
+};
+
 @Injectable()
 export class RhGlobalViewService {
   private readonly logger = new Logger(RhGlobalViewService.name);
@@ -50,6 +63,7 @@ export class RhGlobalViewService {
     private readonly emailService: EmailService,
     private readonly configService: ConfigService,
     private readonly leaveBalanceSync: LeaveBalanceSyncService,
+    private readonly leaveBalanceInitializer: LeaveBalanceInitializerService,
   ) {}
 
   async decideRequest(id: string, dto: DecideRhRequestDto) {
@@ -313,13 +327,199 @@ export class RhGlobalViewService {
     };
   }
 
-  async findSummary(filters: { year?: string; department?: string }) {
+  async importHistory(dto: ImportRhLeaveHistoryDto) {
     await this.autoRejectOverdueRequests();
 
-    const year = this.parseYear(filters.year);
+    const rhUser = await this.resolveRh(dto.rhId, dto.rhEmail);
+    const rows = this.normalizeHistoryImportRows(dto);
+
+    const result = await this.prisma.$transaction(async (transaction) => {
+      const references = rows.map((row) => row.reference);
+      const matricules = Array.from(new Set(rows.map((row) => row.matricule)));
+      const [existingRequests, employees, leaveTypes] = await Promise.all([
+        transaction.leaveRequest.findMany({
+          where: { reference: { in: references } },
+          select: { reference: true },
+        }),
+        transaction.user.findMany({
+          where: {
+            matricule: { in: matricules },
+            status: { not: UserStatus.INACTIVE },
+          },
+          select: {
+            id: true,
+            matricule: true,
+            nom: true,
+            prenom: true,
+          },
+        }),
+        transaction.leaveType.findMany({
+          where: { active: true },
+          select: { id: true, code: true, name: true, category: true },
+        }),
+      ]);
+      const existingReferences = new Set(
+        existingRequests.map((request) => request.reference),
+      );
+      const employeeByMatricule = new Map(
+        employees.map((employee) => [employee.matricule, employee]),
+      );
+      const leaveTypeByCode = new Map(
+        leaveTypes.map((leaveType) => [
+          this.normalizeImportToken(leaveType.code),
+          leaveType,
+        ]),
+      );
+      const importedRows: Array<{
+        id: string;
+        reference: string;
+        matricule: string;
+        employeeName: string;
+        leaveType: string;
+        startDate: string;
+        endDate: string;
+        days: number;
+      }> = [];
+      const skippedRows: Array<{
+        reference: string;
+        matricule: string;
+        reason: string;
+      }> = [];
+      const balanceKeys: Array<{
+        userId: string;
+        leaveTypeId: string;
+        year: number;
+      }> = [];
+
+      for (const row of rows) {
+        if (existingReferences.has(row.reference)) {
+          skippedRows.push({
+            reference: row.reference,
+            matricule: row.matricule,
+            reason: 'Reference deja existante',
+          });
+          continue;
+        }
+
+        const employee = employeeByMatricule.get(row.matricule);
+        if (!employee) {
+          throw new NotFoundException(
+            `Employe actif introuvable pour le matricule ${row.matricule} (ligne ${row.rowNumber})`,
+          );
+        }
+
+        const leaveTypeCode = this.resolveImportedLeaveTypeCode(row.type);
+        const leaveType = leaveTypeByCode.get(leaveTypeCode);
+        if (!leaveType) {
+          throw new NotFoundException(
+            `Type de conge introuvable pour "${row.type}" (ligne ${row.rowNumber})`,
+          );
+        }
+
+        await this.leaveBalanceInitializer.initializeUserYear(
+          employee.id,
+          row.startDate.getUTCFullYear(),
+          transaction,
+        );
+
+        const imported = await transaction.leaveRequest.create({
+          data: {
+            reference: row.reference,
+            ownerId: employee.id,
+            leaveTypeId: leaveType.id,
+            startDate: row.startDate,
+            endDate: row.endDate,
+            days: row.days,
+            reason: 'Historique importe par RH',
+            status: LeaveRequestStatus.APPROVED,
+            submittedAt: row.startDate,
+            decidedAt: new Date(),
+            validations: {
+              create: {
+                validatorId: rhUser.id,
+                level: 3,
+                decision: ValidationDecision.APPROVED,
+                comment: 'Import historique RH',
+                decidedAt: new Date(),
+              },
+            },
+          },
+          select: {
+            id: true,
+            reference: true,
+            startDate: true,
+            endDate: true,
+            days: true,
+            ownerId: true,
+            leaveTypeId: true,
+            owner: { select: { matricule: true, nom: true, prenom: true } },
+            leaveType: { select: { name: true, code: true } },
+          },
+        });
+
+        await transaction.auditLog.create({
+          data: {
+            userId: rhUser.id,
+            action: AuditAction.CREATE,
+            entity: 'LeaveRequest',
+            entityId: imported.id,
+            metadata: {
+              source: 'rh_leave_history_import',
+              reference: imported.reference,
+              matricule: imported.owner.matricule,
+              leaveType: imported.leaveType.code,
+              days: imported.days,
+            },
+          },
+        });
+
+        balanceKeys.push({
+          userId: imported.ownerId,
+          leaveTypeId: imported.leaveTypeId,
+          year: imported.startDate.getUTCFullYear(),
+        });
+        importedRows.push({
+          id: imported.id,
+          reference: imported.reference,
+          matricule: imported.owner.matricule,
+          employeeName: this.fullName(imported.owner),
+          leaveType: imported.leaveType.name,
+          startDate: this.toInputDate(imported.startDate),
+          endDate: this.toInputDate(imported.endDate),
+          days: this.roundDays(imported.days),
+        });
+        existingReferences.add(row.reference);
+      }
+
+      await this.leaveBalanceSync.syncForKeys(balanceKeys, transaction);
+
+      return { importedRows, skippedRows };
+    });
+
+    return {
+      imported: result.importedRows.length,
+      skipped: result.skippedRows.length,
+      rows: result.importedRows,
+      skippedRows: result.skippedRows,
+      totals: {
+        days: this.roundDays(
+          result.importedRows.reduce((sum, row) => sum + row.days, 0),
+        ),
+      },
+    };
+  }
+
+  async findSummary(filters: {
+    year?: string;
+    department?: string;
+    dateFrom?: string;
+    dateTo?: string;
+  }) {
+    await this.autoRejectOverdueRequests();
+
+    const range = resolveDateRange(filters, { defaultMode: 'year' });
+    const year = range.year;
     const department = this.normalizeDepartment(filters.department);
-    const yearStart = new Date(Date.UTC(year, 0, 1));
-    const nextYearStart = new Date(Date.UTC(year + 1, 0, 1));
 
     await this.leaveBalanceSync.syncYear(year);
 
@@ -327,7 +527,7 @@ export class RhGlobalViewService {
       status: { not: UserStatus.INACTIVE },
     };
     const requestWhere: Prisma.LeaveRequestWhereInput = {
-      startDate: { gte: yearStart, lt: nextYearStart },
+      ...overlapDateWhere(range),
       status: { in: TRACKED_REQUEST_STATUSES },
     };
 
@@ -397,6 +597,8 @@ export class RhGlobalViewService {
 
     return {
       year,
+      dateFrom: range.dateFromIso,
+      dateTo: range.dateToIso,
       departments,
       rows,
       planifications,
@@ -572,6 +774,130 @@ export class RhGlobalViewService {
     return statusMap[status];
   }
 
+  private normalizeHistoryImportRows(dto: ImportRhLeaveHistoryDto) {
+    if (!dto.rows?.length) {
+      throw new BadRequestException('Aucune ligne d historique a importer');
+    }
+
+    const rows = dto.rows.map((row, index) => {
+      const rowNumber = index + 1;
+      const reference = row.reference.trim();
+      const matricule = row.matricule.trim();
+      const type = row.type.trim();
+      const startDate = this.parseImportDate(row.startDate, 'date debut', rowNumber);
+      const endDate = this.parseImportDate(row.endDate, 'date fin', rowNumber);
+      const days = this.roundDays(Number(row.days));
+
+      if (!reference) {
+        throw new BadRequestException(`Reference manquante a la ligne ${rowNumber}`);
+      }
+      if (!matricule) {
+        throw new BadRequestException(`Matricule manquant a la ligne ${rowNumber}`);
+      }
+      if (!type) {
+        throw new BadRequestException(`Type de conge manquant a la ligne ${rowNumber}`);
+      }
+      if (!Number.isFinite(days) || days <= 0) {
+        throw new BadRequestException(`Nombre de jours invalide a la ligne ${rowNumber}`);
+      }
+      if (endDate < startDate) {
+        throw new BadRequestException(
+          `Date de fin avant date de debut a la ligne ${rowNumber}`,
+        );
+      }
+
+      return {
+        reference,
+        matricule,
+        type,
+        startDate,
+        endDate,
+        days,
+        rowNumber,
+      } satisfies NormalizedHistoryImportRow;
+    });
+
+    const seenReferences = new Set<string>();
+    const duplicate = rows.find((row) => {
+      const key = row.reference.toUpperCase();
+      if (seenReferences.has(key)) return true;
+      seenReferences.add(key);
+      return false;
+    });
+    if (duplicate) {
+      throw new BadRequestException(
+        `Reference en double dans le fichier: ${duplicate.reference}`,
+      );
+    }
+
+    return rows;
+  }
+
+  private parseImportDate(value: string, field: string, rowNumber: number) {
+    const raw = value.trim();
+    const frenchDate = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    const isoDate = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    const parts = frenchDate
+      ? {
+          year: Number(frenchDate[3]),
+          month: Number(frenchDate[2]),
+          day: Number(frenchDate[1]),
+        }
+      : isoDate
+        ? {
+            year: Number(isoDate[1]),
+            month: Number(isoDate[2]),
+            day: Number(isoDate[3]),
+          }
+        : null;
+
+    if (!parts) {
+      throw new BadRequestException(`${field} invalide a la ligne ${rowNumber}`);
+    }
+
+    const date = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
+    const valid =
+      date.getUTCFullYear() === parts.year &&
+      date.getUTCMonth() === parts.month - 1 &&
+      date.getUTCDate() === parts.day;
+
+    if (Number.isNaN(date.getTime()) || !valid) {
+      throw new BadRequestException(`${field} invalide a la ligne ${rowNumber}`);
+    }
+
+    return date;
+  }
+
+  private resolveImportedLeaveTypeCode(value: string) {
+    const token = this.normalizeImportToken(value);
+
+    if (
+      ['CP', 'PAYE', 'PAYER', 'CONGEPAYE', 'CONGESPAYES', 'PAID'].includes(
+        token,
+      )
+    ) {
+      return 'CP';
+    }
+    if (
+      ['SPE', 'SPECIAL', 'SPECIAUX', 'CONGESPECIAL', 'CONGESSPECIAUX'].includes(
+        token,
+      )
+    ) {
+      return 'SPE';
+    }
+
+    return token;
+  }
+
+  private normalizeImportToken(value: string) {
+    return value
+      .trim()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, '');
+  }
+
   private parseYear(value: string | undefined) {
     if (!value) return new Date().getUTCFullYear();
 
@@ -662,6 +988,10 @@ export class RhGlobalViewService {
 
   private formatDate(date: Date) {
     return new Intl.DateTimeFormat('fr-FR').format(date);
+  }
+
+  private toInputDate(date: Date) {
+    return date.toISOString().slice(0, 10);
   }
 
   private async autoRejectOverdueRequests() {

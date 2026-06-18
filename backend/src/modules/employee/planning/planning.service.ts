@@ -12,6 +12,7 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { FindEmployeePlanningQueryDto } from './dto/employee-planning.dto';
+import { overlapDateWhere, resolveDateRange } from '../../../common/date-range';
 
 const planningRequestSelect = {
   id: true,
@@ -65,17 +66,15 @@ export class EmployeePlanningService {
 
   async findYear(query: FindEmployeePlanningQueryDto) {
     const user = await this.resolveUser(query.userId, query.userEmail);
-    const year = query.year ?? new Date().getUTCFullYear();
-    const yearStart = new Date(Date.UTC(year, 0, 1));
-    const nextYearStart = new Date(Date.UTC(year + 1, 0, 1));
+    const range = resolveDateRange(query, { defaultMode: 'year' });
+    const year = range.year;
 
     const [requests, leaveTypes] = await Promise.all([
       this.prisma.leaveRequest.findMany({
         where: {
           ownerId: user.id,
           status: { not: LeaveRequestStatus.CANCELLED },
-          startDate: { lt: nextYearStart },
-          endDate: { gte: yearStart },
+          ...overlapDateWhere(range),
         },
         orderBy: [{ startDate: 'asc' }, { reference: 'asc' }],
         select: planningRequestSelect,
@@ -87,6 +86,8 @@ export class EmployeePlanningService {
 
     return {
       year,
+      dateFrom: range.dateFromIso,
+      dateTo: range.dateToIso,
       user: {
         id: user.id,
         email: user.email,
@@ -119,13 +120,14 @@ export class EmployeePlanningService {
 
   async findDepartmentYear(query: FindEmployeePlanningQueryDto) {
     const user = await this.resolveUser(query.userId, query.userEmail);
-    const year = query.year ?? new Date().getUTCFullYear();
-    const yearStart = new Date(Date.UTC(year, 0, 1));
-    const nextYearStart = new Date(Date.UTC(year + 1, 0, 1));
+    const range = resolveDateRange(query, { defaultMode: 'year' });
+    const year = range.year;
 
     if (!user.department) {
       return {
         year,
+        dateFrom: range.dateFromIso,
+        dateTo: range.dateToIso,
         user: {
           id: user.id,
           email: user.email,
@@ -152,8 +154,7 @@ export class EmployeePlanningService {
             LeaveRequestStatus.APPROVED,
           ],
         },
-        startDate: { lt: nextYearStart },
-        endDate: { gte: yearStart },
+        ...overlapDateWhere(range),
       },
       orderBy: [{ startDate: 'asc' }, { reference: 'asc' }],
       select: departmentPlanningRequestSelect,
@@ -161,6 +162,8 @@ export class EmployeePlanningService {
 
     return {
       year,
+      dateFrom: range.dateFromIso,
+      dateTo: range.dateToIso,
       user: {
         id: user.id,
         email: user.email,

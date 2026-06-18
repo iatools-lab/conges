@@ -149,7 +149,7 @@ fi
 postgres_db="$(read_env_value POSTGRES_DB "")"
 postgres_user="$(read_env_value POSTGRES_USER "")"
 postgres_password="$(read_env_value POSTGRES_PASSWORD "")"
-domain_name="$(read_env_value DOMAIN_NAME "app.example.com")"
+domain_name="$(read_env_value DOMAIN_NAME "conges.upowa.org")"
 nginx_bind_address="$(read_env_value NGINX_BIND_ADDRESS "0.0.0.0")"
 nginx_http_port="$(read_env_value NGINX_HTTP_PORT "8080")"
 nginx_https_port="$(read_env_value NGINX_HTTPS_PORT "8443")"

@@ -17,6 +17,7 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { FindManagerDashboardQueryDto } from './dto/manager-dashboard.dto';
 import { LeaveEntitlementsService } from '../../shared/leave-entitlements/leave-entitlements.service';
 import { LeaveBalanceSyncService } from '../../shared/leave-balances/leave-balance-sync.service';
+import { overlapDateWhere, resolveDateRange } from '../../../common/date-range';
 
 type LeaveBarStatus = 'draft' | 'pending' | 'manager' | 'rh' | 'conflict';
 const REGULAR_PAID_CODES = new Set(['CP', 'ANC', 'ENF']);
@@ -75,10 +76,13 @@ export class ManagerDashboardService {
     const nextSevenDaysStart = new Date(todayStart);
     nextSevenDaysStart.setUTCDate(nextSevenDaysStart.getUTCDate() + 7);
     const urgentThreshold = new Date(now.getTime() - 48 * 60 * 60 * 1000);
-    const year = query.year ?? now.getUTCFullYear();
-    const month = query.month ?? now.getUTCMonth() + 1;
-    const monthStart = new Date(Date.UTC(year, month - 1, 1));
-    const nextMonthStart = new Date(Date.UTC(year, month, 1));
+    const range = resolveDateRange(query, { defaultMode: 'month', now });
+    const year = range.year;
+    const month = query.month ?? range.month ?? now.getUTCMonth() + 1;
+    const monthStart =
+      range.dateFrom ?? new Date(Date.UTC(year, month - 1, 1));
+    const nextMonthStart =
+      range.endExclusive ?? new Date(Date.UTC(year, month, 1));
     const yearStart = new Date(Date.UTC(year, 0, 1));
     const nextYearStart = new Date(Date.UTC(year + 1, 0, 1));
     const ownerWhere = this.buildManagedOwnerWhere(manager);
@@ -112,8 +116,7 @@ export class ManagerDashboardService {
                     LeaveRequestStatus.CANCELLED,
                   ],
                 },
-                startDate: { lt: nextMonthStart },
-                endDate: { gte: monthStart },
+                ...overlapDateWhere(range),
               },
               orderBy: [{ startDate: 'asc' }, { reference: 'asc' }],
               select: dashboardUserSelect.leaveRequests.select,
@@ -123,15 +126,17 @@ export class ManagerDashboardService {
         this.prisma.leaveRequest.count({
           where: {
             status: LeaveRequestStatus.PENDING,
-            startDate: { gte: yearStart, lt: nextYearStart },
+            ...overlapDateWhere(range),
             owner: actionOwnerWhere,
           },
         }),
         this.prisma.conflict.count({
           where: {
             status: ConflictStatus.ACTIVE,
-            periodStart: { lt: nextMonthStart },
-            periodEnd: { gte: monthStart },
+            ...(range.endExclusive
+              ? { periodStart: { lt: range.endExclusive } }
+              : {}),
+            ...(range.dateFrom ? { periodEnd: { gte: range.dateFrom } } : {}),
             OR: [
               ...(departmentIds.length
                 ? [{ departmentId: { in: departmentIds } }]
@@ -148,7 +153,7 @@ export class ManagerDashboardService {
                 LeaveRequestStatus.CANCELLED,
               ],
             },
-            startDate: { gte: yearStart, lt: nextYearStart },
+            ...overlapDateWhere(range),
             owner: ownerWhere,
           },
           distinct: ['ownerId'],
@@ -158,6 +163,7 @@ export class ManagerDashboardService {
           where: {
             status: LeaveRequestStatus.PENDING,
             submittedAt: { not: null, lte: urgentThreshold },
+            ...overlapDateWhere(range),
             owner: actionOwnerWhere,
           },
         }),
@@ -169,8 +175,11 @@ export class ManagerDashboardService {
                 LeaveRequestStatus.CANCELLED,
               ],
             },
-            startDate: { lt: nextSevenDaysStart },
-            endDate: { gte: todayStart },
+            AND: [
+              { startDate: { lt: nextSevenDaysStart } },
+              { endDate: { gte: todayStart } },
+              overlapDateWhere(range),
+            ],
             owner: ownerWhere,
           },
           distinct: ['ownerId'],
@@ -180,6 +189,7 @@ export class ManagerDashboardService {
           where: {
             status: LeaveRequestStatus.PENDING,
             submittedAt: { not: null },
+            ...overlapDateWhere(range),
             owner: actionOwnerWhere,
           },
           orderBy: [{ submittedAt: 'asc' }, { createdAt: 'asc' }],
@@ -307,6 +317,8 @@ export class ManagerDashboardService {
     return {
       year,
       month,
+      dateFrom: range.dateFromIso,
+      dateTo: range.dateToIso,
       manager: {
         id: manager.id,
         name: this.fullName(manager),

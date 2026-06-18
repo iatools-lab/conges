@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/AppShell";
+import {
+  DateRangeFilter,
+  allDateRange,
+  appendDateRange,
+  type DateRangeValue,
+} from "@/components/DateRangeFilter";
 import { Card, CardHeader, Button, Badge, StatCard } from "@/components/ui-kit";
 import { Search, Download, Filter } from "lucide-react";
 import { RowActions, autoFields } from "@/components/RowActions";
@@ -66,9 +72,10 @@ export function RhAudit() {
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [action, setAction] = useState("");
+  const [dateRange, setDateRange] = useState<DateRangeValue>(() => allDateRange());
 
   useEffect(() => {
-    const query = new URLSearchParams();
+    const query = appendDateRange(new URLSearchParams(), dateRange);
     query.set("limit", "200");
     if (search.trim()) query.set("search", search.trim());
     if (action) query.set("action", action);
@@ -78,7 +85,7 @@ export function RhAudit() {
       .then((res) => setLogs(res.rows))
       .catch(() => setLogs([]))
       .finally(() => setLoading(false));
-  }, [search, action]);
+  }, [search, action, dateRange]);
 
   const last24hCount = useMemo(() => {
     const threshold = Date.now() - 24 * 60 * 60 * 1000;
@@ -92,6 +99,8 @@ export function RhAudit() {
 
   return (
     <AppShell title="Audit" subtitle="Traçabilité complète des actions sur le système RH">
+      <DateRangeFilter value={dateRange} onChange={setDateRange} className="mb-4" />
+
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard label="Événements (24h)" value={String(last24hCount)} tone="blue" />
         <StatCard label="Utilisateurs actifs" value={String(new Set(logs.map((row) => row.userId).filter(Boolean)).size)} tone="green" />

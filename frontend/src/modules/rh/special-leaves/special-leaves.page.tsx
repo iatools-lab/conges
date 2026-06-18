@@ -1,6 +1,13 @@
 import { useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/components/AppShell";
+import {
+  DateRangeFilter,
+  appendDateRange,
+  currentYearRange,
+  dateRangeQueryKey,
+  type DateRangeValue,
+} from "@/components/DateRangeFilter";
 import { Badge, Button, Card, StatCard } from "@/components/ui-kit";
 import { apiFetch } from "@/lib/api";
 import {
@@ -129,6 +136,12 @@ const emptyDraft: SpecialLeavePayload = {
 };
 
 const inputClass = "w-full rounded-md border bg-background px-3 py-2 text-sm";
+
+function specialLeavesPath(range: DateRangeValue) {
+  const params = appendDateRange(new URLSearchParams(), range);
+  const query = params.toString();
+  return `/rh/special-leaves${query ? `?${query}` : ""}`;
+}
 
 function formatEmployeeLabel(employee: RhEmployee) {
   return `${employee.matricule} - ${employee.prenom} ${employee.nom}`;
@@ -533,14 +546,14 @@ function SpecialLeaveCard({
 
 export function Speciaux() {
   const queryClient = useQueryClient();
-  const [year, setYear] = useState(String(new Date().getFullYear()));
+  const [dateRange, setDateRange] = useState<DateRangeValue>(() => currentYearRange());
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"" | SpecialLeaveStatusCode>("");
   const [cancelTarget, setCancelTarget] = useState<SpecialLeaveRow | null>(null);
 
   const specialLeavesQuery = useQuery({
-    queryKey: ["rh-special-leaves", year],
-    queryFn: () => apiFetch<SpecialLeavesResponse>(`/rh/special-leaves?year=${year}`),
+    queryKey: ["rh-special-leaves", ...dateRangeQueryKey(dateRange)],
+    queryFn: () => apiFetch<SpecialLeavesResponse>(specialLeavesPath(dateRange)),
   });
 
   const employeesQuery = useQuery({
@@ -733,14 +746,7 @@ export function Speciaux() {
                 </option>
               ))}
             </select>
-            <input
-              className="rounded-md border bg-background px-3 py-2 text-sm"
-              type="number"
-              min="2000"
-              max="2100"
-              value={year}
-              onChange={(event) => setYear(event.target.value)}
-            />
+            <DateRangeFilter value={dateRange} onChange={setDateRange} compact />
             <Button variant="outline" onClick={refresh} disabled={specialLeavesQuery.isFetching}>
               <RefreshCw className="size-4" /> Actualiser
             </Button>

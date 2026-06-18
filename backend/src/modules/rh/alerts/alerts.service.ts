@@ -15,6 +15,12 @@ import {
   UpdateRhAlertStatusDto,
 } from './dto/rh-alerts.dto';
 import { LeaveBalanceSyncService } from '../../shared/leave-balances/leave-balance-sync.service';
+import {
+  fieldDateWhere,
+  overlapDateWhere,
+  resolveDateRange,
+  type ResolvedDateRange,
+} from '../../../common/date-range';
 
 type RhAlertRule = {
   id: string;
@@ -92,19 +98,29 @@ export class RhAlertsService {
     private readonly leaveBalanceSync: LeaveBalanceSyncService,
   ) {}
 
-  async findAll(filters: { severity?: string; status?: string }) {
-    await this.leaveBalanceSync.syncYear(new Date().getUTCFullYear());
+  async findAll(filters: {
+    severity?: string;
+    status?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    year?: string;
+  }) {
+    const range = resolveDateRange(filters, { defaultMode: 'year' });
+    await this.leaveBalanceSync.syncYear(range.year);
 
     const [rules, alertState] = await Promise.all([
       this.getRules(),
       this.getAlertState(),
     ]);
     const alerts = this.applyFilters(
-      await this.buildAlerts(rules, alertState),
+      await this.buildAlerts(rules, alertState, range),
       filters,
     );
 
     return {
+      year: range.year,
+      dateFrom: range.dateFromIso,
+      dateTo: range.dateToIso,
       stats: {
         active: alerts.filter((alert) => alert.status === 'active').length,
         high: alerts.filter(
@@ -145,7 +161,11 @@ export class RhAlertsService {
     return rules[index];
   }
 
-  private async buildAlerts(rules: RhAlertRule[], alertState: AlertState) {
+  private async buildAlerts(
+    rules: RhAlertRule[],
+    alertState: AlertState,
+    range: ResolvedDateRange,
+  ) {
     const enabledRules = new Map(
       rules.filter((rule) => rule.enabled).map((rule) => [rule.id, rule]),
     );
@@ -155,26 +175,40 @@ export class RhAlertsService {
       enabledRules.has('balance-cap') ||
       enabledRules.has('balance-missing')
     ) {
-      alerts.push(...(await this.buildBalanceAlerts(enabledRules, alertState)));
+      alerts.push(
+        ...(await this.buildBalanceAlerts(enabledRules, alertState, range)),
+      );
     }
     if (enabledRules.has('missing-planning')) {
       alerts.push(
-        ...(await this.buildMissingPlanningAlerts(enabledRules, alertState)),
+        ...(await this.buildMissingPlanningAlerts(
+          enabledRules,
+          alertState,
+          range,
+        )),
       );
     }
     if (enabledRules.has('pending-validation')) {
       alerts.push(
-        ...(await this.buildPendingValidationAlerts(enabledRules, alertState)),
+        ...(await this.buildPendingValidationAlerts(
+          enabledRules,
+          alertState,
+          range,
+        )),
       );
     }
     if (enabledRules.has('absence-conflict')) {
       alerts.push(
-        ...(await this.buildConflictAlerts(enabledRules, alertState)),
+        ...(await this.buildConflictAlerts(enabledRules, alertState, range)),
       );
     }
     if (enabledRules.has('pending-event')) {
       alerts.push(
-        ...(await this.buildPendingEventAlerts(enabledRules, alertState)),
+        ...(await this.buildPendingEventAlerts(
+          enabledRules,
+          alertState,
+          range,
+        )),
       );
     }
 
@@ -190,8 +224,9 @@ export class RhAlertsService {
   private async buildBalanceAlerts(
     rules: Map<string, RhAlertRule>,
     alertState: AlertState,
+    range: ResolvedDateRange,
   ) {
-    const year = new Date().getUTCFullYear();
+    const year = range.year;
     const users = await this.prisma.user.findMany({
       where: { status: { not: UserStatus.INACTIVE } },
       orderBy: [{ nom: 'asc' }, { prenom: 'asc' }],
@@ -269,8 +304,9 @@ export class RhAlertsService {
   private async buildMissingPlanningAlerts(
     rules: Map<string, RhAlertRule>,
     alertState: AlertState,
+    range: ResolvedDateRange,
   ) {
-    const year = new Date().getUTCFullYear();
+    const year = range.year;
     const rule = rules.get('missing-planning')!;
     const users = await this.prisma.user.findMany({
       where: {
@@ -301,6 +337,7 @@ export class RhAlertsService {
   private async buildPendingValidationAlerts(
     rules: Map<string, RhAlertRule>,
     alertState: AlertState,
+    range: ResolvedDateRange,
   ) {
     const rule = rules.get('pending-validation')!;
     const requests = await this.prisma.leaveRequest.findMany({
@@ -308,6 +345,7 @@ export class RhAlertsService {
         status: {
           in: [LeaveRequestStatus.PENDING, LeaveRequestStatus.IN_REVIEW],
         },
+        ...overlapDateWhere(range),
       },
       orderBy: { createdAt: 'asc' },
       select: {
@@ -338,10 +376,17 @@ export class RhAlertsService {
   private async buildConflictAlerts(
     rules: Map<string, RhAlertRule>,
     alertState: AlertState,
+    range: ResolvedDateRange,
   ) {
     const rule = rules.get('absence-conflict')!;
     const conflicts = await this.prisma.conflict.findMany({
-      where: { status: ConflictStatus.ACTIVE },
+      where: {
+        status: ConflictStatus.ACTIVE,
+        ...(range.endExclusive
+          ? { periodStart: { lt: range.endExclusive } }
+          : {}),
+        ...(range.dateFrom ? { periodEnd: { gte: range.dateFrom } } : {}),
+      },
       orderBy: { createdAt: 'asc' },
       select: {
         id: true,
@@ -372,10 +417,12 @@ export class RhAlertsService {
   private async buildPendingEventAlerts(
     rules: Map<string, RhAlertRule>,
     alertState: AlertState,
+    range: ResolvedDateRange,
   ) {
     const rule = rules.get('pending-event')!;
+    const eventDate = fieldDateWhere(range);
     const events = await this.prisma.event.findMany({
-      where: { processed: false },
+      where: { processed: false, ...(eventDate ? { eventDate } : {}) },
       orderBy: { createdAt: 'asc' },
       select: {
         id: true,

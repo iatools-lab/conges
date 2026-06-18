@@ -26,6 +26,14 @@ export class FindEmployeeLeaveRequestsQueryDto {
   @Min(2000)
   @Max(2100)
   year?: number;
+
+  @IsOptional()
+  @IsString()
+  dateFrom?: string;
+
+  @IsOptional()
+  @IsString()
+  dateTo?: string;
 }
 
 export class CreateEmployeeLeaveRequestDto {

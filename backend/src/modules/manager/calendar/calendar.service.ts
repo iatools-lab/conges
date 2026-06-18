@@ -14,6 +14,7 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { FindManagerCalendarQueryDto } from './dto/manager-calendar.dto';
+import { overlapDateWhere, resolveDateRange } from '../../../common/date-range';
 
 const calendarRequestSelect = {
   id: true,
@@ -50,10 +51,13 @@ export class ManagerCalendarService {
       query.managerEmail,
     );
     const now = new Date();
-    const year = query.year ?? now.getUTCFullYear();
-    const month = query.month ?? now.getUTCMonth() + 1;
-    const monthStart = new Date(Date.UTC(year, month - 1, 1));
-    const nextMonthStart = new Date(Date.UTC(year, month, 1));
+    const range = resolveDateRange(query, { defaultMode: 'month', now });
+    const year = range.year;
+    const month = query.month ?? range.month ?? now.getUTCMonth() + 1;
+    const monthStart =
+      range.dateFrom ?? new Date(Date.UTC(year, month - 1, 1));
+    const nextMonthStart =
+      range.endExclusive ?? new Date(Date.UTC(year, month, 1));
     const ownerWhere = this.buildManagedOwnerWhere(manager);
     const scopedDepartments = this.getManagedDepartments(manager);
 
@@ -78,8 +82,7 @@ export class ManagerCalendarService {
           status: {
             notIn: [LeaveRequestStatus.REJECTED, LeaveRequestStatus.CANCELLED],
           },
-          startDate: { lt: nextMonthStart },
-          endDate: { gte: monthStart },
+          ...overlapDateWhere(range),
           owner: ownerWhere,
         },
         orderBy: [
@@ -98,6 +101,8 @@ export class ManagerCalendarService {
     return {
       year,
       month,
+      dateFrom: range.dateFromIso,
+      dateTo: range.dateToIso,
       manager: {
         id: manager.id,
         name: this.fullName(manager),

@@ -2,6 +2,12 @@ import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { readSheet } from "read-excel-file/browser";
 import { AppShell } from "@/components/AppShell";
+import {
+  DateRangeFilter,
+  allDateRange,
+  isDateInRange,
+  type DateRangeValue,
+} from "@/components/DateRangeFilter";
 import { Card, CardHeader, Button, Badge, StatCard } from "@/components/ui-kit";
 import { Search, Download, UserPlus, FileUp, Trash2 } from "lucide-react";
 import { RowActions, autoFields } from "@/components/RowActions";
@@ -745,6 +751,7 @@ export function RhEmployes() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [deptFilter, setDeptFilter] = useState("");
+  const [dateRange, setDateRange] = useState<DateRangeValue>(() => allDateRange());
   const [page, setPage] = useState(1);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
@@ -821,7 +828,8 @@ export function RhEmployes() {
       employee.email.toLowerCase().includes(query) ||
       formatEmployeeRoles(getEmployeeRoles(employee)).toLowerCase().includes(query);
     const matchDepartment = !deptFilter || employee.dept === deptFilter;
-    return matchQuery && matchDepartment;
+    const matchDate = isDateInRange(employee.embauche, dateRange);
+    return matchQuery && matchDepartment && matchDate;
   });
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
@@ -832,7 +840,7 @@ export function RhEmployes() {
   const filteredIds = filtered.map((employee) => employee.id);
   const allFilteredSelected =
     filteredIds.length > 0 && filteredIds.every((id) => selectedIds.includes(id));
-  const hasActiveFilters = Boolean(search || deptFilter);
+  const hasActiveFilters = Boolean(search || deptFilter || dateRange.dateFrom || dateRange.dateTo);
   const departmentOptions = Array.from(
     new Set([...DEPARTMENTS, ...employees.map((employee) => employee.dept).filter(Boolean)]),
   );
@@ -941,6 +949,14 @@ export function RhEmployes() {
                   <option key={department}>{department}</option>
                 ))}
               </select>
+              <DateRangeFilter
+                value={dateRange}
+                onChange={(nextRange) => {
+                  setDateRange(nextRange);
+                  setPage(1);
+                }}
+                compact
+              />
               <Button variant="outline" onClick={exportFilteredEmployees}>
                 <Download className="size-4" /> Export
               </Button>

@@ -28,6 +28,14 @@ export class FindEmployeeEventsQueryDto {
   @Min(1)
   @Max(50)
   limit?: number;
+
+  @IsOptional()
+  @IsString()
+  dateFrom?: string;
+
+  @IsOptional()
+  @IsString()
+  dateTo?: string;
 }
 
 export class CreateEmployeeEventDto {

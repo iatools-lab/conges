@@ -19,8 +19,12 @@ export class RhSpecialLeavesController {
   constructor(private readonly specialLeavesService: RhSpecialLeavesService) {}
 
   @Get()
-  findAll(@Query('year') year?: string) {
-    return this.specialLeavesService.findAll(year);
+  findAll(
+    @Query('year') year?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+  ) {
+    return this.specialLeavesService.findAll({ year, dateFrom, dateTo });
   }
 
   @Post()

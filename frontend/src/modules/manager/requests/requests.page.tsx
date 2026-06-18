@@ -2,6 +2,13 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { AppShell } from "@/components/AppShell";
+import {
+  DateRangeFilter,
+  appendDateRange,
+  currentYearRange,
+  dateRangeQueryKey,
+  type DateRangeValue,
+} from "@/components/DateRangeFilter";
 import { Badge, Button, Card, CardHeader, StatCard } from "@/components/ui-kit";
 import {
   Dialog,
@@ -145,25 +152,22 @@ const decisionLabels: Record<Decision, string> = {
   reject: "refusée",
 };
 
-const currentYear = new Date().getFullYear();
-const yearOptions = [currentYear, currentYear - 1, currentYear - 2];
-
-function buildRequestsPath(session: { id: string; email: string }, year: number) {
+function buildRequestsPath(session: { id: string; email: string }, range: DateRangeValue) {
   const params = new URLSearchParams({
     managerId: session.id,
     managerEmail: session.email,
-    year: String(year),
   });
+  appendDateRange(params, range);
 
   return `/manager/requests?${params.toString()}`;
 }
 
-function buildPlanningPath(session: { id: string; email: string }, year: number) {
+function buildPlanningPath(session: { id: string; email: string }, range: DateRangeValue) {
   const params = new URLSearchParams({
     managerId: session.id,
     managerEmail: session.email,
-    year: String(year),
   });
+  appendDateRange(params, range);
 
   return `/manager/planning?${params.toString()}`;
 }
@@ -248,7 +252,7 @@ export function ManagerDemandes() {
   const queryClient = useQueryClient();
   const { ready, session } = useAuthSession();
   const initialFilters = useMemo(readInitialFilters, []);
-  const [year, setYear] = useState(new Date().getFullYear());
+  const [dateRange, setDateRange] = useState<DateRangeValue>(() => currentYearRange());
   const [tab, setTab] = useState<"pending" | "planning" | "history">("pending");
   const [department, setDepartment] = useState("ALL");
   const [search, setSearch] = useState(initialFilters.search);
@@ -263,14 +267,14 @@ export function ManagerDemandes() {
   const [decisionComment, setDecisionComment] = useState("");
 
   const requestsQuery = useQuery({
-    queryKey: ["manager-requests", session?.id, session?.email, year],
-    queryFn: () => apiFetch<ManagerRequestsResponse>(buildRequestsPath(session!, year)),
+    queryKey: ["manager-requests", session?.id, session?.email, ...dateRangeQueryKey(dateRange)],
+    queryFn: () => apiFetch<ManagerRequestsResponse>(buildRequestsPath(session!, dateRange)),
     enabled: ready && !!session?.id && !!session?.email,
   });
 
   const planningQuery = useQuery({
-    queryKey: ["manager-planning", session?.id, session?.email, year],
-    queryFn: () => apiFetch<ManagerPlanningResponse>(buildPlanningPath(session!, year)),
+    queryKey: ["manager-planning", session?.id, session?.email, ...dateRangeQueryKey(dateRange)],
+    queryFn: () => apiFetch<ManagerPlanningResponse>(buildPlanningPath(session!, dateRange)),
     enabled: ready && !!session?.id && !!session?.email && tab === "planning",
   });
 
@@ -416,18 +420,11 @@ export function ManagerDemandes() {
       title="Demandes & Validations"
       subtitle={`Pilotage des validations et planifications du périmètre ${departmentLabel}`}
     >
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-5">
-        <select
-          className="rounded-md border px-3 py-2 text-sm bg-background"
-          value={year}
-          onChange={(event) => setYear(Number(event.target.value))}
-        >
-          {yearOptions.map((option) => (
-            <option key={option} value={option}>
-              {option}
-            </option>
-          ))}
-        </select>
+      <div className="mb-3">
+        <DateRangeFilter value={dateRange} onChange={setDateRange} />
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-4">
         <select
           className="rounded-md border px-3 py-2 text-sm bg-background"
           value={department}

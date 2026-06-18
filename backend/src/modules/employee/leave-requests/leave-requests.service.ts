@@ -22,6 +22,7 @@ import {
 } from './dto/employee-leave-request.dto';
 import { EmailService } from '../../shared/notifications/email.service';
 import { LeaveBalanceSyncService } from '../../shared/leave-balances/leave-balance-sync.service';
+import { overlapDateWhere, resolveDateRange } from '../../../common/date-range';
 
 const employeeLeaveRequestSelect = {
   id: true,
@@ -82,16 +83,14 @@ export class EmployeeLeaveRequestsService {
 
   async findAll(query: FindEmployeeLeaveRequestsQueryDto) {
     const user = await this.resolveUser(query.userId, query.userEmail);
-    const year = query.year ?? new Date().getUTCFullYear();
-    const yearStart = new Date(Date.UTC(year, 0, 1));
-    const nextYearStart = new Date(Date.UTC(year + 1, 0, 1));
+    const range = resolveDateRange(query, { defaultMode: 'year' });
+    const year = range.year;
 
     const [requests, leaveTypes] = await Promise.all([
       this.prisma.leaveRequest.findMany({
         where: {
           ownerId: user.id,
-          startDate: { lt: nextYearStart },
-          endDate: { gte: yearStart },
+          ...overlapDateWhere(range),
         },
         orderBy: [{ createdAt: 'desc' }, { reference: 'desc' }],
         select: employeeLeaveRequestSelect,
@@ -101,6 +100,8 @@ export class EmployeeLeaveRequestsService {
 
     return {
       year,
+      dateFrom: range.dateFromIso,
+      dateTo: range.dateToIso,
       user: {
         id: user.id,
         email: user.email,

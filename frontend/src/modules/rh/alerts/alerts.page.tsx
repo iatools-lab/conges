@@ -1,6 +1,13 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/components/AppShell";
+import {
+  DateRangeFilter,
+  appendDateRange,
+  currentYearRange,
+  dateRangeQueryKey,
+  type DateRangeValue,
+} from "@/components/DateRangeFilter";
 import { Badge, Button, Card, CardHeader, StatCard } from "@/components/ui-kit";
 import { apiFetch } from "@/lib/api";
 import { AlertCircle, AlertTriangle, CheckCircle2, RefreshCw, ShieldAlert } from "lucide-react";
@@ -72,8 +79,8 @@ const statusTone: Record<AlertStatus, "pending" | "valid" | "neutral"> = {
   ignored: "neutral",
 };
 
-function buildAlertsPath(severity: string, status: string) {
-  const params = new URLSearchParams();
+function buildAlertsPath(severity: string, status: string, range: DateRangeValue) {
+  const params = appendDateRange(new URLSearchParams(), range);
   if (severity !== "ALL") params.set("severity", severity);
   if (status !== "ALL") params.set("status", status);
   const query = params.toString();
@@ -85,10 +92,11 @@ export function RhAlertes() {
   const queryClient = useQueryClient();
   const [severity, setSeverity] = useState<AlertSeverity | "ALL">("ALL");
   const [status, setStatus] = useState<AlertStatus | "ALL">("active");
+  const [dateRange, setDateRange] = useState<DateRangeValue>(() => currentYearRange());
 
   const { data, isError, isFetching, isLoading, refetch } = useQuery({
-    queryKey: ["rh-alerts", severity, status],
-    queryFn: () => apiFetch<RhAlertsResponse>(buildAlertsPath(severity, status)),
+    queryKey: ["rh-alerts", severity, status, ...dateRangeQueryKey(dateRange)],
+    queryFn: () => apiFetch<RhAlertsResponse>(buildAlertsPath(severity, status, dateRange)),
   });
 
   const updateAlertStatus = useMutation({
@@ -123,6 +131,8 @@ export function RhAlertes() {
 
   return (
     <AppShell title="Alertes conformité" subtitle="Suivi des risques légaux et obligations RH">
+      <DateRangeFilter value={dateRange} onChange={setDateRange} className="mb-4" />
+
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard label="Alertes actives" value={isLoading ? "..." : stats.active} tone="orange" />
         <StatCard label="Critiques" value={isLoading ? "..." : stats.high} tone="red" />

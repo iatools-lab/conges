@@ -1,6 +1,14 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AppShell } from "@/components/AppShell";
+import {
+  DateRangeFilter,
+  appendDateRange,
+  currentYearRange,
+  dateRangeQueryKey,
+  dateRangeYear,
+  type DateRangeValue,
+} from "@/components/DateRangeFilter";
 import { Card, CardHeader, Button, Badge, StatCard } from "@/components/ui-kit";
 import { apiFetch } from "@/lib/api";
 import { useAuthSession } from "@/modules/auth/session";
@@ -57,12 +65,12 @@ const emptyHistory: ManagerHistoryResponse = {
   totals: { month: 0, valid: 0, rejected: 0, pending: 0, averageDelay: 0 },
 };
 
-function buildHistoryPath(session: { id: string; email: string }, year: number) {
+function buildHistoryPath(session: { id: string; email: string }, range: DateRangeValue) {
   const params = new URLSearchParams({
     managerId: session.id,
     managerEmail: session.email,
-    year: String(year),
   });
+  appendDateRange(params, range);
 
   return `/manager/history?${params.toString()}`;
 }
@@ -124,14 +132,15 @@ function exportHistoryCsv(rows: HistoryRow[], year: number) {
 
 export function ManagerHistorique() {
   const { ready, session } = useAuthSession();
-  const [year] = useState(new Date().getFullYear());
+  const [dateRange, setDateRange] = useState<DateRangeValue>(() => currentYearRange());
+  const exportYear = dateRangeYear(dateRange);
   const [query, setQuery] = useState("");
   const [decision, setDecision] = useState<"ALL" | Decision>("ALL");
   const [department, setDepartment] = useState("ALL");
 
   const historyQuery = useQuery({
-    queryKey: ["manager-history", session?.id, session?.email, year],
-    queryFn: () => apiFetch<ManagerHistoryResponse>(buildHistoryPath(session!, year)),
+    queryKey: ["manager-history", session?.id, session?.email, ...dateRangeQueryKey(dateRange)],
+    queryFn: () => apiFetch<ManagerHistoryResponse>(buildHistoryPath(session!, dateRange)),
     enabled: ready && !!session?.id && !!session?.email,
   });
 
@@ -167,6 +176,8 @@ export function ManagerHistorique() {
       title="Historique des validations"
       subtitle="Toutes les décisions prises sur les demandes de l'équipe"
     >
+      <DateRangeFilter value={dateRange} onChange={setDateRange} className="mb-4" />
+
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard label="Décisions ce mois" value={data.totals.month} tone="blue" />
         <StatCard label="Validées" value={data.totals.valid} tone="green" />
@@ -210,7 +221,7 @@ export function ManagerHistorique() {
                 <option value="rejected">Refusées</option>
                 <option value="pending">À revoir</option>
               </select>
-              <Button variant="outline" onClick={() => exportHistoryCsv(filtered, year)}>
+              <Button variant="outline" onClick={() => exportHistoryCsv(filtered, exportYear)}>
                 <Download className="size-4" /> Export CSV
               </Button>
             </div>

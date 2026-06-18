@@ -2,6 +2,16 @@ import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AppShell } from "@/components/AppShell";
+import {
+  DateRangeFilter,
+  appendDateRange,
+  currentMonthRange,
+  dateRangeMonthIndex,
+  dateRangeQueryKey,
+  dateRangeYear,
+  monthRange,
+  type DateRangeValue,
+} from "@/components/DateRangeFilter";
 import { Card, CardHeader, Button, Badge } from "@/components/ui-kit";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { apiFetch } from "@/lib/api";
@@ -80,13 +90,14 @@ const emptyCalendar: ManagerCalendarResponse = {
   leaves: [],
 };
 
-function buildCalendarPath(session: { id: string; email: string }, year: number, month: number) {
+function buildCalendarPath(session: { id: string; email: string }, range: DateRangeValue, year: number, month: number) {
   const params = new URLSearchParams({
     managerId: session.id,
     managerEmail: session.email,
     year: String(year),
     month: String(month + 1),
   });
+  appendDateRange(params, range);
 
   return `/manager/calendar?${params.toString()}`;
 }
@@ -160,12 +171,13 @@ export function ManagerCalendrier() {
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
+  const [dateRange, setDateRange] = useState<DateRangeValue>(() => currentMonthRange(today));
   const [dept, setDept] = useState("ALL");
   const [type, setType] = useState("ALL");
 
   const calendarQuery = useQuery({
-    queryKey: ["manager-calendar", session?.id, session?.email, year, month],
-    queryFn: () => apiFetch<ManagerCalendarResponse>(buildCalendarPath(session!, year, month)),
+    queryKey: ["manager-calendar", session?.id, session?.email, year, month, ...dateRangeQueryKey(dateRange)],
+    queryFn: () => apiFetch<ManagerCalendarResponse>(buildCalendarPath(session!, dateRange, year, month)),
     enabled: ready && !!session?.id && !!session?.email,
   });
 
@@ -217,21 +229,32 @@ export function ManagerCalendrier() {
     [leaves],
   );
 
+  const applyDateRange = (nextRange: DateRangeValue) => {
+    setDateRange(nextRange);
+    if (nextRange.dateFrom) {
+      setYear(dateRangeYear(nextRange, today.getFullYear()));
+      setMonth(dateRangeMonthIndex(nextRange, today.getMonth()));
+    }
+  };
+
   const goPrev = () => {
-    if (month === 0) {
-      setMonth(11);
-      setYear((value) => value - 1);
-    } else setMonth((value) => value - 1);
+    const nextMonth = month === 0 ? 11 : month - 1;
+    const nextYear = month === 0 ? year - 1 : year;
+    setMonth(nextMonth);
+    setYear(nextYear);
+    setDateRange(monthRange(nextYear, nextMonth));
   };
   const goNext = () => {
-    if (month === 11) {
-      setMonth(0);
-      setYear((value) => value + 1);
-    } else setMonth((value) => value + 1);
+    const nextMonth = month === 11 ? 0 : month + 1;
+    const nextYear = month === 11 ? year + 1 : year;
+    setMonth(nextMonth);
+    setYear(nextYear);
+    setDateRange(monthRange(nextYear, nextMonth));
   };
   const goToday = () => {
     setYear(today.getFullYear());
     setMonth(today.getMonth());
+    setDateRange(monthRange(today.getFullYear(), today.getMonth()));
   };
 
   return (
@@ -264,10 +287,15 @@ export function ManagerCalendrier() {
 
         <div className="flex flex-wrap items-center gap-3 border-b p-4 text-sm">
           <Filter className="size-4 text-muted-foreground" />
+          <DateRangeFilter value={dateRange} onChange={applyDateRange} compact />
           <select
             className="rounded-md border bg-background px-2 py-1.5"
             value={month}
-            onChange={(event) => setMonth(Number(event.target.value))}
+            onChange={(event) => {
+              const nextMonth = Number(event.target.value);
+              setMonth(nextMonth);
+              setDateRange(monthRange(year, nextMonth));
+            }}
           >
             {MONTH_NAMES.map((monthName, index) => (
               <option key={monthName} value={index}>
@@ -278,7 +306,11 @@ export function ManagerCalendrier() {
           <select
             className="rounded-md border bg-background px-2 py-1.5"
             value={year}
-            onChange={(event) => setYear(Number(event.target.value))}
+            onChange={(event) => {
+              const nextYear = Number(event.target.value);
+              setYear(nextYear);
+              setDateRange(monthRange(nextYear, month));
+            }}
           >
             {[2025, 2026, 2027].map((yearOption) => (
               <option key={yearOption} value={yearOption}>

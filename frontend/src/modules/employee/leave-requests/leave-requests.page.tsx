@@ -1,4 +1,15 @@
 import { AppShell } from "@/components/AppShell";
+import {
+  DateRangeFilter,
+  appendDateRange,
+  currentYearRange,
+  dateRangeMonthIndex,
+  dateRangeQueryKey,
+  dateRangeYear,
+  monthRange,
+  yearRange,
+  type DateRangeValue,
+} from "@/components/DateRangeFilter";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge, Button, Card, CardHeader } from "@/components/ui-kit";
@@ -73,12 +84,12 @@ const STATUS_FILTERS: Array<{ status: CalendarStatus; label: string }> = [
   { status: "draft", label: "Brouillon" },
 ];
 
-function buildDepartmentPlanningPath(session: { id: string; email: string }, year: number) {
+function buildDepartmentPlanningPath(session: { id: string; email: string }, range: DateRangeValue) {
   const params = new URLSearchParams({
     userId: session.id,
     userEmail: session.email,
-    year: String(year),
   });
+  appendDateRange(params, range);
 
   return `/employee/planning/department?${params.toString()}`;
 }
@@ -248,6 +259,7 @@ function StatusFilterRow({
 export function Demandes() {
   const { session } = useAuthSession();
   const today = new Date();
+  const [dateRange, setDateRange] = useState<DateRangeValue>(() => currentYearRange(today));
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
   const [selectedStatuses, setSelectedStatuses] = useState<CalendarStatus[]>(
@@ -255,8 +267,8 @@ export function Demandes() {
   );
 
   const calendarQuery = useQuery({
-    queryKey: ["employee-department-calendar", session?.id, session?.email, year],
-    queryFn: () => apiFetch<DepartmentPlanningResponse>(buildDepartmentPlanningPath(session!, year)),
+    queryKey: ["employee-department-calendar", session?.id, session?.email, ...dateRangeQueryKey(dateRange)],
+    queryFn: () => apiFetch<DepartmentPlanningResponse>(buildDepartmentPlanningPath(session!, dateRange)),
     enabled: Boolean(session?.id && session?.email),
   });
 
@@ -284,24 +296,28 @@ export function Demandes() {
     calendarQuery.data?.department?.name ?? session?.department?.name ?? "votre équipe";
   const peopleCount = new Set(plans.map((plan) => plan.employee.id)).size;
 
+  const applyDateRange = (nextRange: DateRangeValue) => {
+    setDateRange(nextRange);
+    if (nextRange.dateFrom) {
+      setYear(dateRangeYear(nextRange, today.getFullYear()));
+      setMonth(dateRangeMonthIndex(nextRange, today.getMonth()));
+    }
+  };
+
   const goPrevMonth = () => {
-    setMonth((value) => {
-      if (value === 0) {
-        setYear((currentYear) => currentYear - 1);
-        return 11;
-      }
-      return value - 1;
-    });
+    const nextMonth = month === 0 ? 11 : month - 1;
+    const nextYear = month === 0 ? year - 1 : year;
+    setYear(nextYear);
+    setMonth(nextMonth);
+    setDateRange(monthRange(nextYear, nextMonth));
   };
 
   const goNextMonth = () => {
-    setMonth((value) => {
-      if (value === 11) {
-        setYear((currentYear) => currentYear + 1);
-        return 0;
-      }
-      return value + 1;
-    });
+    const nextMonth = month === 11 ? 0 : month + 1;
+    const nextYear = month === 11 ? year + 1 : year;
+    setYear(nextYear);
+    setMonth(nextMonth);
+    setDateRange(monthRange(nextYear, nextMonth));
   };
 
   return (
@@ -314,6 +330,8 @@ export function Demandes() {
           </AlertDescription>
         </Alert>
       )}
+
+      <DateRangeFilter value={dateRange} onChange={applyDateRange} className="mb-4" />
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Card className="p-4">
@@ -364,6 +382,7 @@ export function Demandes() {
                     onClick={() => {
                       setMonth(today.getMonth());
                       setYear(today.getFullYear());
+                      setDateRange(monthRange(today.getFullYear(), today.getMonth()));
                     }}
                   >
                     Aujourd'hui
@@ -440,10 +459,28 @@ export function Demandes() {
                 <CalendarDays className="size-5" /> Vue annuelle {year}
               </div>
               <div className="flex items-center gap-2">
-                <Button variant="outline" className="!p-2" onClick={() => setYear((value) => value - 1)} aria-label="Année précédente">
+                <Button
+                  variant="outline"
+                  className="!p-2"
+                  onClick={() => {
+                    const nextYear = year - 1;
+                    setYear(nextYear);
+                    setDateRange(yearRange(nextYear));
+                  }}
+                  aria-label="Année précédente"
+                >
                   <ChevronLeft className="size-4" />
                 </Button>
-                <Button variant="outline" className="!p-2" onClick={() => setYear((value) => value + 1)} aria-label="Année suivante">
+                <Button
+                  variant="outline"
+                  className="!p-2"
+                  onClick={() => {
+                    const nextYear = year + 1;
+                    setYear(nextYear);
+                    setDateRange(yearRange(nextYear));
+                  }}
+                  aria-label="Année suivante"
+                >
                   <ChevronRight className="size-4" />
                 </Button>
               </div>

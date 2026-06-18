@@ -1,8 +1,16 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState, type ChangeEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
+import { readSheet } from "read-excel-file/browser";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
+import {
+  DateRangeFilter,
+  appendDateRange,
+  currentYearRange,
+  dateRangeQueryKey,
+  type DateRangeValue,
+} from "@/components/DateRangeFilter";
 import { Badge, Button, Card, CardHeader, StatCard } from "@/components/ui-kit";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -15,7 +23,7 @@ import {
 } from "@/components/ui/dialog";
 import { apiFetch } from "@/lib/api";
 import { useAuthSession } from "@/modules/auth/session";
-import { AlertCircle, Download, RefreshCw, Search } from "lucide-react";
+import { AlertCircle, Download, FileUp, RefreshCw, Search, Trash2, UploadCloud } from "lucide-react";
 
 type BadgeTone =
   | "valid"
@@ -54,13 +62,30 @@ type GlobalViewResponse = {
   planifications: PlanificationRow[];
 };
 
-const currentYear = new Date().getFullYear();
-const yearOptions = [currentYear, currentYear - 1, currentYear - 2];
+type ExcelCell = string | number | boolean | Date | null | undefined;
+type ExcelReadResult = ExcelCell[][] | { rows?: ExcelCell[][] };
+
+type HistoryImportRow = {
+  reference: string;
+  matricule: string;
+  type: string;
+  startDate: string;
+  endDate: string;
+  days: number;
+};
+
+type HistoryImportResponse = {
+  imported: number;
+  skipped: number;
+  rows: Array<HistoryImportRow & { id: string; employeeName: string; leaveType: string }>;
+  skippedRows: Array<{ reference: string; matricule: string; reason: string }>;
+  totals: { days: number };
+};
 
 type ProcessedFilter = "ALL" | "APPROVED" | "REJECTED" | "CANCELLED";
 
-function buildGlobalViewPath(year: string, department: string) {
-  const params = new URLSearchParams({ year });
+function buildGlobalViewPath(range: DateRangeValue, department: string) {
+  const params = appendDateRange(new URLSearchParams(), range);
   if (department !== "ALL") params.set("department", department);
 
   return `/rh/global-view?${params.toString()}`;
@@ -68,6 +93,180 @@ function buildGlobalViewPath(year: string, department: string) {
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 }).format(value);
+}
+
+function normalizeHeader(value: ExcelCell) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function cellToText(value: ExcelCell) {
+  return String(value ?? "").trim();
+}
+
+function cellToNumber(value: ExcelCell, rowNumber: number) {
+  const raw = typeof value === "number" ? value : Number(String(value ?? "").replace(",", "."));
+  if (!Number.isFinite(raw) || raw <= 0) {
+    throw new Error(`Nombre de jours invalide a la ligne ${rowNumber}`);
+  }
+
+  return Math.round(raw * 10) / 10;
+}
+
+function cellToDate(value: ExcelCell, rowNumber: number, label: string) {
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  const raw = String(value ?? "").trim();
+  const frenchDate = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  const isoDate = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  const parts = frenchDate
+    ? {
+        year: Number(frenchDate[3]),
+        month: Number(frenchDate[2]),
+        day: Number(frenchDate[1]),
+      }
+    : isoDate
+      ? {
+          year: Number(isoDate[1]),
+          month: Number(isoDate[2]),
+          day: Number(isoDate[3]),
+        }
+      : null;
+
+  if (!parts) {
+    throw new Error(`${label} invalide a la ligne ${rowNumber}`);
+  }
+
+  const date = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
+  const valid =
+    date.getUTCFullYear() === parts.year &&
+    date.getUTCMonth() === parts.month - 1 &&
+    date.getUTCDate() === parts.day;
+
+  if (Number.isNaN(date.getTime()) || !valid) {
+    throw new Error(`${label} invalide a la ligne ${rowNumber}`);
+  }
+
+  return [
+    String(parts.year).padStart(4, "0"),
+    String(parts.month).padStart(2, "0"),
+    String(parts.day).padStart(2, "0"),
+  ].join("-");
+}
+
+function getSheetRows(result: ExcelReadResult) {
+  return Array.isArray(result) ? result : (result.rows ?? []);
+}
+
+function parseCsvText(text: string): ExcelCell[][] {
+  const normalized = text.replace(/^\uFEFF/, "");
+  const delimiter = normalized.includes(";") ? ";" : ",";
+
+  return normalized
+    .split(/\r?\n/)
+    .filter((line) => line.trim())
+    .map((line) =>
+      line
+        .split(delimiter)
+        .map((cell) => cell.trim().replace(/^"|"$/g, "").replace(/""/g, '"')),
+    );
+}
+
+function parseHistoryImportRows(result: ExcelReadResult): HistoryImportRow[] {
+  const sheetRows = getSheetRows(result).filter((row) =>
+    row.some((cell) => cell !== null && cell !== undefined && String(cell).trim() !== ""),
+  );
+  if (sheetRows.length < 2) {
+    throw new Error("Le fichier doit contenir une ligne d'en-tete et au moins une demande");
+  }
+
+  const [headerRow, ...bodyRows] = sheetRows;
+  const columns = headerRow.map((header) => {
+    const normalized = normalizeHeader(header);
+    if (["reference", "ref", "anciennereference"].includes(normalized)) return "reference";
+    if (["matricule", "mat", "codeemploye", "codecollaborateur"].includes(normalized)) {
+      return "matricule";
+    }
+    if (["type", "typedeconge", "conge"].includes(normalized)) return "type";
+    if (["datedebut", "debut", "startdate"].includes(normalized)) return "startDate";
+    if (["datefin", "fin", "enddate"].includes(normalized)) return "endDate";
+    if (
+      [
+        "nombredejours",
+        "nbjours",
+        "jours",
+        "jour",
+        "days",
+        "duree",
+        "dureejours",
+      ].includes(normalized)
+    ) {
+      return "days";
+    }
+    return "";
+  });
+
+  const required = ["reference", "matricule", "type", "startDate", "endDate", "days"];
+  const missing = required.filter((column) => !columns.includes(column));
+  if (missing.length) {
+    throw new Error("Colonnes requises: reference, matricule, type, date debut, date fin, nombre de jours");
+  }
+
+  const rows = bodyRows.map((row, rowIndex) => {
+    const rowNumber = rowIndex + 2;
+    const values: Partial<HistoryImportRow> = {};
+
+    columns.forEach((column, columnIndex) => {
+      if (!column) return;
+      if (column === "reference") values.reference = cellToText(row[columnIndex]);
+      if (column === "matricule") values.matricule = cellToText(row[columnIndex]);
+      if (column === "type") values.type = cellToText(row[columnIndex]);
+      if (column === "startDate") {
+        values.startDate = cellToDate(row[columnIndex], rowNumber, "Date debut");
+      }
+      if (column === "endDate") {
+        values.endDate = cellToDate(row[columnIndex], rowNumber, "Date fin");
+      }
+      if (column === "days") values.days = cellToNumber(row[columnIndex], rowNumber);
+    });
+
+    if (!values.reference) throw new Error(`Reference manquante a la ligne ${rowNumber}`);
+    if (!values.matricule) throw new Error(`Matricule manquant a la ligne ${rowNumber}`);
+    if (!values.type) throw new Error(`Type de conge manquant a la ligne ${rowNumber}`);
+    if (!values.startDate || !values.endDate || values.days === undefined) {
+      throw new Error(`Ligne incomplete a la ligne ${rowNumber}`);
+    }
+
+    return values as HistoryImportRow;
+  });
+
+  const seenReferences = new Set<string>();
+  const duplicate = rows.find((row) => {
+    const key = row.reference.trim().toUpperCase();
+    if (seenReferences.has(key)) return true;
+    seenReferences.add(key);
+    return false;
+  });
+  if (duplicate) throw new Error(`Reference en double dans le fichier: ${duplicate.reference}`);
+
+  return rows;
+}
+
+function downloadHistoryTemplate() {
+  const csv = [
+    "reference;matricule;type;date debut;date fin;nombre de jours",
+    "OLD-2025-001;EMP001;paye;2025-04-01;2025-04-05;5",
+    "OLD-2025-002;EMP002;special;2025-05-12;2025-05-13;2",
+  ].join("\n");
+  const blob = new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "modele-import-historique-conges.csv";
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 function escapeCsvValue(value: string) {
@@ -110,19 +309,22 @@ function exportRowCsv(row: PlanificationRow) {
 export function RhDemandesConges() {
   const queryClient = useQueryClient();
   const { session } = useAuthSession();
-  const [year, setYear] = useState(String(currentYear));
+  const historyFileInputRef = useRef<HTMLInputElement>(null);
+  const [dateRange, setDateRange] = useState<DateRangeValue>(() => currentYearRange());
   const [department, setDepartment] = useState("ALL");
   const [typeFilter, setTypeFilter] = useState("ALL");
   const [processedFilter, setProcessedFilter] = useState<ProcessedFilter>("ALL");
   const [query, setQuery] = useState("");
   const [remarkDialog, setRemarkDialog] = useState<PlanificationRow | null>(null);
   const [remark, setRemark] = useState("");
+  const [historyPreviewRows, setHistoryPreviewRows] = useState<HistoryImportRow[]>([]);
+  const [lastHistoryImport, setLastHistoryImport] = useState<HistoryImportResponse | null>(null);
 
-  const queryKey = ["rh-leave-requests", year, department];
+  const queryKey = ["rh-leave-requests", department, ...dateRangeQueryKey(dateRange)];
 
   const { data, isError, isFetching, isLoading, refetch } = useQuery({
     queryKey,
-    queryFn: () => apiFetch<GlobalViewResponse>(buildGlobalViewPath(year, department)),
+    queryFn: () => apiFetch<GlobalViewResponse>(buildGlobalViewPath(dateRange, department)),
   });
 
   const rhDecisionMutation = useMutation({
@@ -174,6 +376,41 @@ export function RhDemandesConges() {
     },
   });
 
+  const importHistoryMutation = useMutation({
+    mutationFn: (rows: HistoryImportRow[]) => {
+      if (!session) throw new Error("Session RH introuvable");
+      return apiFetch<HistoryImportResponse>("/rh/global-view/requests/import-history", {
+        method: "POST",
+        body: JSON.stringify({
+          rhId: session.id,
+          rhEmail: session.email,
+          rows,
+        }),
+      });
+    },
+    onSuccess: (response) => {
+      setLastHistoryImport(response);
+      setHistoryPreviewRows([]);
+      toast.success(`${response.imported} conge(s) historique(s) importe(s)`, {
+        description: response.skipped
+          ? `${response.skipped} reference(s) deja existante(s) ignoree(s).`
+          : undefined,
+      });
+      void queryClient.invalidateQueries({ queryKey });
+      void queryClient.invalidateQueries({ queryKey: ["rh-dashboard"] });
+      void queryClient.invalidateQueries({ queryKey: ["rh-global-view"] });
+      void queryClient.invalidateQueries({ queryKey: ["rh-settings"] });
+      void queryClient.invalidateQueries({ queryKey: ["employee-history"] });
+      void queryClient.invalidateQueries({ queryKey: ["employee-balances"] });
+      void queryClient.invalidateQueries({ queryKey: ["employee-dashboard"] });
+    },
+    onError: (error) => {
+      toast.error("Import historique impossible", {
+        description: error instanceof Error ? error.message : "Erreur inconnue",
+      });
+    },
+  });
+
   const planifications = data?.planifications ?? [];
   const typeOptions = useMemo(
     () => Array.from(new Set(planifications.map((row) => row.type))).sort((a, b) => a.localeCompare(b)),
@@ -199,24 +436,44 @@ export function RhDemandesConges() {
     if (processedFilter === "ALL") return true;
     return row.statusCode === processedFilter;
   });
+  const historyPreviewTotalDays = historyPreviewRows.reduce((sum, row) => sum + row.days, 0);
+  const canImportHistory = historyPreviewRows.length > 0 && !importHistoryMutation.isPending;
+
+  const handleHistoryFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    try {
+      const sheet = file.name.toLowerCase().endsWith(".csv")
+        ? parseCsvText(await file.text())
+        : ((await readSheet(file)) as ExcelReadResult);
+      const rows = parseHistoryImportRows(sheet);
+      setHistoryPreviewRows(rows);
+      setLastHistoryImport(null);
+      toast.success(`${rows.length} ligne(s) prete(s) a importer`);
+    } catch (error) {
+      toast.error("Lecture impossible", {
+        description: error instanceof Error ? error.message : "Erreur inconnue",
+      });
+    }
+  };
+
+  const clearHistoryImport = () => {
+    setHistoryPreviewRows([]);
+    setLastHistoryImport(null);
+  };
 
   return (
     <AppShell
       title="Demande et Planification"
       subtitle="Suivi RH des demandes en attente N+1, validations RH et historique traité"
     >
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-5">
-        <select
-          className="rounded-md border px-3 py-2 text-sm bg-background"
-          value={year}
-          onChange={(event) => setYear(event.target.value)}
-        >
-          {yearOptions.map((option) => (
-            <option key={option} value={option}>
-              {option}
-            </option>
-          ))}
-        </select>
+      <div className="mb-3">
+        <DateRangeFilter value={dateRange} onChange={setDateRange} />
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-4">
         <select
           className="rounded-md border px-3 py-2 text-sm bg-background"
           value={department}
@@ -477,7 +734,96 @@ export function RhDemandesConges() {
 
         <TabsContent value="history" className="mt-4">
           <Card>
-            <CardHeader title="Historique des demandes traitées (N+1 + RH)" />
+            <CardHeader
+              title="Historique des demandes traitées (N+1 + RH)"
+              action={
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Button variant="outline" size="sm" onClick={downloadHistoryTemplate}>
+                    <Download className="size-4" /> Modèle
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => historyFileInputRef.current?.click()}
+                  >
+                    <FileUp className="size-4" /> Charger
+                  </Button>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    disabled={!canImportHistory}
+                    onClick={() => importHistoryMutation.mutate(historyPreviewRows)}
+                  >
+                    <UploadCloud className="size-4" />
+                    {importHistoryMutation.isPending ? "Import..." : "Importer"}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={!historyPreviewRows.length && !lastHistoryImport}
+                    onClick={clearHistoryImport}
+                  >
+                    <Trash2 className="size-4" /> Vider
+                  </Button>
+                  <input
+                    ref={historyFileInputRef}
+                    type="file"
+                    className="hidden"
+                    accept=".xlsx,.xls,.csv"
+                    onChange={handleHistoryFileChange}
+                  />
+                </div>
+              }
+            />
+            {historyPreviewRows.length > 0 && (
+              <div className="border-b bg-muted/20 p-5">
+                <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+                  <Badge tone="pending">{historyPreviewRows.length} ligne(s) prête(s)</Badge>
+                  <Badge tone="info">{formatNumber(historyPreviewTotalDays)} jour(s)</Badge>
+                </div>
+                <div className="overflow-x-auto rounded-md border bg-background">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/40 text-xs text-muted-foreground">
+                      <tr className="text-left">
+                        <th className="px-4 py-3">Référence</th>
+                        <th className="px-4 py-3">Matricule</th>
+                        <th className="px-4 py-3">Type</th>
+                        <th className="px-4 py-3">Période</th>
+                        <th className="px-4 py-3 text-right">Jours</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {historyPreviewRows.slice(0, 8).map((row) => (
+                        <tr key={row.reference}>
+                          <td className="px-4 py-3 font-medium">{row.reference}</td>
+                          <td className="px-4 py-3">{row.matricule}</td>
+                          <td className="px-4 py-3">{row.type}</td>
+                          <td className="px-4 py-3">
+                            {row.startDate} - {row.endDate}
+                          </td>
+                          <td className="px-4 py-3 text-right">{formatNumber(row.days)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {historyPreviewRows.length > 8 && (
+                    <div className="border-t px-4 py-2 text-xs text-muted-foreground">
+                      {historyPreviewRows.length - 8} autre(s) ligne(s) seront aussi importée(s).
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+            {lastHistoryImport && !historyPreviewRows.length && (
+              <div className="border-b bg-muted/20 px-5 py-3 text-sm text-muted-foreground">
+                Dernier import: {lastHistoryImport.imported} ligne(s),{" "}
+                {formatNumber(lastHistoryImport.totals.days)} jour(s)
+                {lastHistoryImport.skipped
+                  ? `, ${lastHistoryImport.skipped} référence(s) ignorée(s)`
+                  : ""}
+                .
+              </div>
+            )}
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-muted/40 text-xs text-muted-foreground">

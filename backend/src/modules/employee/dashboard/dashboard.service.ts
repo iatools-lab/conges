@@ -9,6 +9,7 @@ import {
 import { PrismaService } from '../../../prisma/prisma.service';
 import { LeaveEntitlementsService } from '../../shared/leave-entitlements/leave-entitlements.service';
 import { LeaveBalanceSyncService } from '../../shared/leave-balances/leave-balance-sync.service';
+import { overlapDateWhere, resolveDateRange } from '../../../common/date-range';
 
 type BadgeTone =
   | 'valid'
@@ -50,13 +51,15 @@ export class EmployeeDashboardService {
     private readonly leaveBalanceSync: LeaveBalanceSyncService,
   ) {}
 
-  async findSummary(userId: string) {
-    const year = new Date().getUTCFullYear();
-    const yearStart = new Date(Date.UTC(year, 0, 1));
-    const nextYearStart = new Date(Date.UTC(year + 1, 0, 1));
+  async findSummary(
+    userId: string,
+    query: { dateFrom?: string; dateTo?: string; year?: string } = {},
+  ) {
+    const range = resolveDateRange(query, { defaultMode: 'year' });
+    const year = range.year;
     const today = new Date();
 
-    const [user, specialLeaves, nextAbsence, pendingRequests] =
+    const [user, specialLeaves, paidTaken, paidScheduled, nextAbsence, pendingRequests] =
       await Promise.all([
         this.prisma.user.findUnique({
           where: { id: userId },
@@ -66,8 +69,36 @@ export class EmployeeDashboardService {
           where: {
             ownerId: userId,
             status: LeaveRequestStatus.APPROVED,
-            startDate: { gte: yearStart, lt: nextYearStart },
+            ...overlapDateWhere(range),
             leaveType: { category: LeaveCategory.CONGE_SPECIAL },
+          },
+          _sum: { days: true },
+        }),
+        this.prisma.leaveRequest.aggregate({
+          where: {
+            ownerId: userId,
+            status: LeaveRequestStatus.APPROVED,
+            ...overlapDateWhere(range),
+            leaveType: { code: { in: Array.from(PAID_POOL_CODES) } },
+          },
+          _sum: { days: true },
+        }),
+        this.prisma.leaveRequest.aggregate({
+          where: {
+            ownerId: userId,
+            ...overlapDateWhere(range),
+            leaveType: { code: { in: Array.from(PAID_POOL_CODES) } },
+            OR: [
+              {
+                status: {
+                  in: [LeaveRequestStatus.PENDING, LeaveRequestStatus.IN_REVIEW],
+                },
+              },
+              {
+                status: LeaveRequestStatus.DRAFT,
+                submittedAt: null,
+              },
+            ],
           },
           _sum: { days: true },
         }),
@@ -75,7 +106,7 @@ export class EmployeeDashboardService {
           where: {
             ownerId: userId,
             status: LeaveRequestStatus.APPROVED,
-            startDate: { gte: today },
+            AND: [{ startDate: { gte: today } }, overlapDateWhere(range)],
           },
           orderBy: [{ startDate: 'asc' }, { reference: 'asc' }],
           select: {
@@ -126,11 +157,8 @@ export class EmployeeDashboardService {
       (sum, balance) => sum + balance.acquired + balance.carryover,
       0,
     );
-    const taken = paidBalances.reduce((sum, balance) => sum + balance.taken, 0);
-    const scheduled = paidBalances.reduce(
-      (sum, balance) => sum + balance.scheduled,
-      0,
-    );
+    const taken = this.toNumber(paidTaken._sum.days);
+    const scheduled = this.toNumber(paidScheduled._sum.days);
     const annualDays = balances
       .filter(
         (balance) =>
@@ -181,6 +209,8 @@ export class EmployeeDashboardService {
 
     return {
       year,
+      dateFrom: range.dateFromIso,
+      dateTo: range.dateToIso,
       employee: {
         id: user.id,
         name: this.fullName(user),

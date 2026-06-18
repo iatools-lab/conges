@@ -15,6 +15,7 @@ import {
 } from './dto/rh-employee.dto';
 import { findDirectorGeneralId } from '../../shared/hierarchy/default-manager';
 import { MAX_PASSIVE_LEAVE_DAYS } from '../../shared/leave-entitlements/leave-entitlements.service';
+import { LeaveBalanceInitializerService } from '../../shared/leave-balances/leave-balance-initializer.service';
 
 const employeeSelect = {
   id: true,
@@ -87,7 +88,10 @@ type PrismaClientLike = PrismaService | Prisma.TransactionClient;
 
 @Injectable()
 export class RhEmployeesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly leaveBalanceInitializer: LeaveBalanceInitializerService,
+  ) {}
 
   async findAll() {
     const employees = await this.prisma.user.findMany({
@@ -241,6 +245,12 @@ export class RhEmployeesService {
       select: { id: true },
     });
 
+    await this.leaveBalanceInitializer.initializeUserYear(
+      employee.id,
+      new Date().getUTCFullYear(),
+      client,
+    );
+
     const createdEmployee = await this.findEmployeeRecordById(client, employee.id);
     return this.toResponse(createdEmployee);
   }
@@ -301,6 +311,12 @@ export class RhEmployeesService {
       data,
       select: { id: true },
     });
+
+    await this.leaveBalanceInitializer.initializeUserYear(
+      id,
+      new Date().getUTCFullYear(),
+      client,
+    );
 
     const updatedEmployee = await this.findEmployeeRecordById(client, id);
     return this.toResponse(updatedEmployee);

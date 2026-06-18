@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-domain_name="${DOMAIN_NAME:-app.example.com}"
+domain_name="${DOMAIN_NAME:-conges.upowa.org}"
 server_ip="${SERVER_IP:-203.0.113.10}"
 
 certificate_path="/etc/letsencrypt/live/${domain_name}/fullchain.pem"

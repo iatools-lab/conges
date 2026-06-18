@@ -1,6 +1,16 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AppShell } from "@/components/AppShell";
+import {
+  DateRangeFilter,
+  appendDateRange,
+  currentYearRange,
+  dateRangeMonthIndex,
+  dateRangeQueryKey,
+  dateRangeYear,
+  monthRange,
+  type DateRangeValue,
+} from "@/components/DateRangeFilter";
 import { Badge, Button, Card, CardHeader, StatCard } from "@/components/ui-kit";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiFetch } from "@/lib/api";
@@ -83,7 +93,6 @@ type ManagerPlanningResponse = {
 };
 
 const currentYear = new Date().getFullYear();
-const yearOptions = [currentYear, currentYear - 1, currentYear - 2];
 const monthLabels = [
   "Jan",
   "Fev",
@@ -135,8 +144,9 @@ const STATUS_FILTERS: Array<{ status: BadgeTone; label: string }> = [
   { status: "draft", label: "Brouillon" },
 ];
 
-function buildPlanningPath(managerId: string, managerEmail: string, year: string, department: string) {
-  const params = new URLSearchParams({ year, managerId, managerEmail });
+function buildPlanningPath(managerId: string, managerEmail: string, range: DateRangeValue, department: string) {
+  const params = new URLSearchParams({ managerId, managerEmail });
+  appendDateRange(params, range);
   if (department !== "ALL") params.set("department", department);
 
   return `/manager/planning?${params.toString()}`;
@@ -366,6 +376,7 @@ function StatusFilterRow({
 export function ManagerPlanning() {
   const { session } = useAuthSession();
   const [department, setDepartment] = useState("ALL");
+  const [dateRange, setDateRange] = useState<DateRangeValue>(() => currentYearRange());
   const [year, setYear] = useState(String(currentYear));
   const [month, setMonth] = useState(new Date().getMonth());
   const [selectedStatuses, setSelectedStatuses] = useState<BadgeTone[]>(
@@ -375,11 +386,19 @@ export function ManagerPlanning() {
 
   const enabled = Boolean(session?.id && session?.email);
   const { data, isError, isFetching, isLoading, refetch } = useQuery({
-    queryKey: ["manager-planning", session?.id, session?.email, year, department],
+    queryKey: ["manager-planning", session?.id, session?.email, department, ...dateRangeQueryKey(dateRange)],
     enabled,
     queryFn: () =>
-      apiFetch<ManagerPlanningResponse>(buildPlanningPath(session!.id, session!.email, year, department)),
+      apiFetch<ManagerPlanningResponse>(buildPlanningPath(session!.id, session!.email, dateRange, department)),
   });
+
+  const applyDateRange = (nextRange: DateRangeValue) => {
+    setDateRange(nextRange);
+    if (nextRange.dateFrom) {
+      setYear(String(dateRangeYear(nextRange, currentYear)));
+      setMonth(dateRangeMonthIndex(nextRange, new Date().getMonth()));
+    }
+  };
 
   const toggleStatus = (status: BadgeTone) => {
     setSelectedStatuses((current) => {
@@ -443,17 +462,7 @@ export function ManagerPlanning() {
             <Building2 className="size-4" />
             Perimetre manager {data?.manager?.fullName ? `- ${data.manager.fullName}` : ""}
           </div>
-          <select
-            className="rounded-md border px-3 py-2 text-sm bg-background"
-            value={year}
-            onChange={(event) => setYear(event.target.value)}
-          >
-            {yearOptions.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
+          <DateRangeFilter value={dateRange} onChange={applyDateRange} />
           <select
             className="rounded-md border px-3 py-2 text-sm bg-background"
             value={department}
@@ -544,13 +553,11 @@ export function ManagerPlanning() {
                     variant="outline"
                     className="!p-2"
                     onClick={() => {
-                      setMonth((value) => {
-                        if (value === 0) {
-                          setYear(String(Number(year) - 1));
-                          return 11;
-                        }
-                        return value - 1;
-                      });
+                      const nextMonth = month === 0 ? 11 : month - 1;
+                      const nextYear = month === 0 ? Number(year) - 1 : Number(year);
+                      setMonth(nextMonth);
+                      setYear(String(nextYear));
+                      setDateRange(monthRange(nextYear, nextMonth));
                     }}
                     aria-label="Mois precedent"
                   >
@@ -562,6 +569,7 @@ export function ManagerPlanning() {
                       const now = new Date();
                       setMonth(now.getMonth());
                       setYear(String(now.getFullYear()));
+                      setDateRange(monthRange(now.getFullYear(), now.getMonth()));
                     }}
                   >
                     Aujourd'hui
@@ -570,13 +578,11 @@ export function ManagerPlanning() {
                     variant="outline"
                     className="!p-2"
                     onClick={() => {
-                      setMonth((value) => {
-                        if (value === 11) {
-                          setYear(String(Number(year) + 1));
-                          return 0;
-                        }
-                        return value + 1;
-                      });
+                      const nextMonth = month === 11 ? 0 : month + 1;
+                      const nextYear = month === 11 ? Number(year) + 1 : Number(year);
+                      setMonth(nextMonth);
+                      setYear(String(nextYear));
+                      setDateRange(monthRange(nextYear, nextMonth));
                     }}
                     aria-label="Mois suivant"
                   >

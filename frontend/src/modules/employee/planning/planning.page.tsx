@@ -1,5 +1,13 @@
 import { AppShell } from "@/components/AppShell";
 import {
+  DateRangeFilter,
+  appendDateRange,
+  currentYearRange,
+  dateRangeQueryKey,
+  dateRangeYear,
+  type DateRangeValue,
+} from "@/components/DateRangeFilter";
+import {
   LeaveTypeOption,
   NewRequestForm,
   type NewRequestPayload,
@@ -131,22 +139,22 @@ const MONTHS_FR = [
   "Décembre",
 ];
 
-function buildPlanningPath(session: { id: string; email: string }, year: number) {
+function buildPlanningPath(session: { id: string; email: string }, range: DateRangeValue) {
   const params = new URLSearchParams({
     userId: session.id,
     userEmail: session.email,
-    year: String(year),
   });
+  appendDateRange(params, range);
 
   return `/employee/planning?${params.toString()}`;
 }
 
-function buildRequestsPath(session: { id: string; email: string }, year: number) {
+function buildRequestsPath(session: { id: string; email: string }, range: DateRangeValue) {
   const params = new URLSearchParams({
     userId: session.id,
     userEmail: session.email,
-    year: String(year),
   });
+  appendDateRange(params, range);
 
   return `/employee/leave-requests?${params.toString()}`;
 }
@@ -262,8 +270,8 @@ export function Planifier() {
   const { session } = useAuthSession();
   const queryClient = useQueryClient();
   const today = new Date();
-  const [year, setYear] = useState(today.getFullYear());
-  const [month, setMonth] = useState(today.getMonth());
+  const [dateRange, setDateRange] = useState<DateRangeValue>(() => currentYearRange(today));
+  const year = dateRangeYear(dateRange, today.getFullYear());
   const [detail, setDetail] = useState<Plan | null>(null);
   const [q, setQ] = useState("");
   const [requestSearch, setRequestSearch] = useState("");
@@ -277,18 +285,23 @@ export function Planifier() {
   const [editReason, setEditReason] = useState("");
   const [fType, setFType] = useState("all");
   const [fYear, setFYear] = useState("all");
-  const queryKey = ["employee-planning", session?.id, session?.email, year];
-  const requestQueryKey = ["employee-leave-requests", session?.id, session?.email, year];
+  const queryKey = ["employee-planning", session?.id, session?.email, ...dateRangeQueryKey(dateRange)];
+  const requestQueryKey = [
+    "employee-leave-requests",
+    session?.id,
+    session?.email,
+    ...dateRangeQueryKey(dateRange),
+  ];
 
   const planningQuery = useQuery({
     queryKey,
-    queryFn: () => apiFetch<EmployeePlanningResponse>(buildPlanningPath(session!, year)),
+    queryFn: () => apiFetch<EmployeePlanningResponse>(buildPlanningPath(session!, dateRange)),
     enabled: !!session,
   });
 
   const requestsQuery = useQuery({
     queryKey: requestQueryKey,
-    queryFn: () => apiFetch<EmployeeLeaveRequestsResponse>(buildRequestsPath(session!, year)),
+    queryFn: () => apiFetch<EmployeeLeaveRequestsResponse>(buildRequestsPath(session!, dateRange)),
     enabled: !!session,
   });
 
@@ -505,6 +518,8 @@ export function Planifier() {
           </span>
         </div>
       </div>
+
+      <DateRangeFilter value={dateRange} onChange={setDateRange} className="mb-4" />
 
       {planningQuery.isError && (
         <Alert variant="destructive" className="mb-4">

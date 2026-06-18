@@ -8,6 +8,7 @@ import {
 import { EventType, LeaveCategory, Prisma, UserStatus } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { LeaveEntitlementsService } from '../../shared/leave-entitlements/leave-entitlements.service';
+import { LeaveBalanceInitializerService } from '../../shared/leave-balances/leave-balance-initializer.service';
 import {
   CreateRhLeaveTypeDto,
   InitializeRhBalancesDto,
@@ -130,10 +131,12 @@ export class RhSettingsService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
     private readonly leaveEntitlements: LeaveEntitlementsService,
+    private readonly leaveBalanceInitializer: LeaveBalanceInitializerService,
   ) {}
 
   async onModuleInit() {
     await this.ensureDefaultLeaveTypes();
+    await this.initializeBalances({ year: new Date().getUTCFullYear() });
   }
 
   async findSettings(yearValue?: string) {
@@ -260,106 +263,18 @@ export class RhSettingsService implements OnModuleInit {
   }
 
   async initializeBalances(dto: InitializeRhBalancesDto) {
-    const year = dto.year;
-    const [employees, leaveTypes] = await Promise.all([
-      this.prisma.user.findMany({
-        where: { status: { not: UserStatus.INACTIVE } },
-        select: {
-          id: true,
-          sexe: true,
-          dateEmbauche: true,
-          passifInitial: true,
-          children: { select: { dateNaissance: true } },
-          events: {
-            where: { type: EventType.BIRTH, processed: true },
-            select: { type: true, eventDate: true, processed: true },
-          },
-        },
-      }),
-      this.prisma.leaveType.findMany({
-        where: {
-          active: true,
-          ...(dto.leaveTypeIds?.length ? { id: { in: dto.leaveTypeIds } } : {}),
-        },
-        select: {
-          id: true,
-          code: true,
-          name: true,
-          category: true,
-          defaultDays: true,
-        },
-      }),
-    ]);
+    const result = await this.leaveBalanceInitializer.initializeYear({
+      year: dto.year,
+      leaveTypeIds: dto.leaveTypeIds,
+    });
 
-    if (!leaveTypes.length) {
-      throw new BadRequestException('Aucun type de congé actif à initialiser');
+    if (!result.leaveTypes) {
+      throw new BadRequestException('Aucun type de congÃ© actif Ã  initialiser');
     }
 
-    const data = employees.flatMap((employee) =>
-      leaveTypes.map((leaveType) => ({
-        userId: employee.id,
-        leaveTypeId: leaveType.id,
-        year,
-        acquired: this.leaveEntitlements.getAcquiredDays({
-          leaveType,
-          user: employee,
-          year,
-        }),
-      })),
-    );
-    const existingBalances = data.length
-      ? await this.prisma.leaveBalance.findMany({
-          where: {
-            year,
-            OR: data.map((balance) => ({
-              userId: balance.userId,
-              leaveTypeId: balance.leaveTypeId,
-            })),
-          },
-          select: { userId: true, leaveTypeId: true },
-        })
-      : [];
-    const existingKeys = new Set(
-      existingBalances.map((balance) =>
-        this.balanceKey(balance.userId, balance.leaveTypeId),
-      ),
-    );
-
-    await this.prisma.$transaction(
-      data.map((balance) =>
-        this.prisma.leaveBalance.upsert({
-          where: {
-            userId_leaveTypeId_year: {
-              userId: balance.userId,
-              leaveTypeId: balance.leaveTypeId,
-              year,
-            },
-          },
-          create: {
-            ...balance,
-            carryover: 0,
-            taken: 0,
-            scheduled: 0,
-          },
-          update: { acquired: balance.acquired },
-        }),
-      ),
-    );
-    const summary = await this.getBalanceSummary(year);
-    const created = data.filter(
-      (balance) =>
-        !existingKeys.has(this.balanceKey(balance.userId, balance.leaveTypeId)),
-    ).length;
-
     return {
-      year,
-      employees: employees.length,
-      leaveTypes: leaveTypes.length,
-      expected: data.length,
-      created,
-      updated: data.length - created,
-      skipped: 0,
-      balanceSummary: summary,
+      ...result,
+      balanceSummary: await this.getBalanceSummary(dto.year),
     };
   }
 
@@ -500,10 +415,6 @@ export class RhSettingsService implements OnModuleInit {
     if (!normalized) throw new BadRequestException('Code de congé invalide');
 
     return normalized;
-  }
-
-  private balanceKey(userId: string, leaveTypeId: string) {
-    return `${userId}:${leaveTypeId}`;
   }
 
   private parseYear(value: string | undefined) {

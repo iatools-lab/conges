@@ -20,6 +20,7 @@ import {
 } from './dto/employee-event.dto';
 import { EmailService } from '../../shared/notifications/email.service';
 import { LeaveEntitlementsService } from '../../shared/leave-entitlements/leave-entitlements.service';
+import { fieldDateWhere, resolveDateRange } from '../../../common/date-range';
 
 export const EVENT_PROOF_MAX_BYTES = 3 * 1024 * 1024;
 
@@ -58,14 +59,21 @@ export class EmployeeEventsService {
 
   async findAll(query: FindEmployeeEventsQueryDto) {
     const user = await this.resolveUser(query.userId, query.userEmail);
+    const range = resolveDateRange(query, { defaultMode: 'all' });
+    const eventDate = fieldDateWhere(range);
     const events = await this.prisma.event.findMany({
-      where: { userId: user.id },
+      where: {
+        userId: user.id,
+        ...(eventDate ? { eventDate } : {}),
+      },
       orderBy: [{ eventDate: 'desc' }, { createdAt: 'desc' }],
       take: query.limit ?? 10,
       select: eventSelect,
     });
 
     return {
+      dateFrom: range.dateFromIso,
+      dateTo: range.dateToIso,
       user: this.toUser(user),
       rows: events.map((event) => this.toResponse(event)),
     };

@@ -13,8 +13,11 @@ export class RhAlertsController {
   findAll(
     @Query('severity') severity?: string,
     @Query('status') status?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+    @Query('year') year?: string,
   ) {
-    return this.alertsService.findAll({ severity, status });
+    return this.alertsService.findAll({ severity, status, dateFrom, dateTo, year });
   }
 
   @Patch(':id/status')

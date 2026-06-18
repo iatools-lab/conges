@@ -25,7 +25,7 @@ if (Test-Path $EnvFile) {
 $sessionSecret = New-RandomHex 48
 
 $content = @"
-DOMAIN_NAME=app.example.com
+DOMAIN_NAME=conges.upowa.org
 SERVER_IP=203.0.113.10
 
 POSTGRES_DB=conges_db
@@ -39,8 +39,8 @@ GOOGLE_CLIENT_ID=449904699288-upv55q520qi2tc3gbg6vh4ouf1lp31md.apps.googleuserco
 RH_AUTO_REJECT_DAYS=7
 ENABLE_SWAGGER=false
 
-CORS_ORIGINS=https://app.example.com,http://app.example.com,http://203.0.113.10
-FRONTEND_URL=https://app.example.com
+CORS_ORIGINS=https://conges.upowa.org,http://conges.upowa.org,http://203.0.113.10
+FRONTEND_URL=https://conges.upowa.org
 VITE_API_URL=/api/v1
 RUN_PRISMA_MIGRATIONS=true
 

@@ -9,6 +9,7 @@ import {
 import { PrismaService } from '../../../prisma/prisma.service';
 import { LeaveBalanceSyncService } from '../../shared/leave-balances/leave-balance-sync.service';
 import { LeaveEntitlementsService } from '../../shared/leave-entitlements/leave-entitlements.service';
+import { overlapDateWhere, resolveDateRange } from '../../../common/date-range';
 
 type DashboardAlertTone = 'valid' | 'pending' | 'rejected' | 'info' | 'neutral';
 type DashboardLeaveTone =
@@ -61,10 +62,11 @@ export class RhDashboardService {
     private readonly leaveEntitlements: LeaveEntitlementsService,
   ) {}
 
-  async findSummary() {
-    const year = new Date().getUTCFullYear();
-    const yearStart = new Date(Date.UTC(year, 0, 1));
-    const nextYearStart = new Date(Date.UTC(year + 1, 0, 1));
+  async findSummary(
+    query: { dateFrom?: string; dateTo?: string; year?: string } = {},
+  ) {
+    const range = resolveDateRange(query, { defaultMode: 'year' });
+    const year = range.year;
 
     await this.leaveBalanceSync.syncYear(year);
     await this.ensurePaidBalances(year);
@@ -103,7 +105,7 @@ export class RhDashboardService {
       this.prisma.leaveRequest.aggregate({
         where: {
           status: LeaveRequestStatus.APPROVED,
-          startDate: { gte: yearStart, lt: nextYearStart },
+          ...overlapDateWhere(range),
           leaveType: { category: LeaveCategory.CONGE_SPECIAL },
         },
         _sum: { days: true },
@@ -128,13 +130,14 @@ export class RhDashboardService {
           status: {
             in: [LeaveRequestStatus.PENDING, LeaveRequestStatus.IN_REVIEW],
           },
+          ...overlapDateWhere(range),
         },
       }),
       this.prisma.event.count({ where: { processed: false } }),
       this.prisma.leaveRequest.aggregate({
         where: {
           status: LeaveRequestStatus.APPROVED,
-          startDate: { gte: yearStart, lt: nextYearStart },
+          ...overlapDateWhere(range),
           owner: { status: { not: UserStatus.INACTIVE } },
           leaveType: { code: { in: [...PAID_POOL_CODES] } },
         },
@@ -159,7 +162,7 @@ export class RhDashboardService {
       }),
       this.prisma.leaveRequest.findMany({
         where: {
-          startDate: { gte: yearStart, lt: nextYearStart },
+          ...overlapDateWhere(range),
           status: { in: DASHBOARD_REQUEST_STATUSES },
         },
         orderBy: [{ startDate: 'desc' }, { reference: 'desc' }],
@@ -186,6 +189,8 @@ export class RhDashboardService {
 
     return {
       year,
+      dateFrom: range.dateFromIso,
+      dateTo: range.dateToIso,
       stats: {
         activeEmployees,
         onLeaveEmployees,

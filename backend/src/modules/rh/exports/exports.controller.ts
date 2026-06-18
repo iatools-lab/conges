@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, Req } from '@nestjs/common';
 import {
   requireAuthSession,
   type AuthenticatedRequest,
@@ -11,8 +11,11 @@ export class RhExportsController {
   constructor(private readonly exportsService: RhExportsService) {}
 
   @Get()
-  findSummary() {
-    return this.exportsService.findSummary();
+  findSummary(
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+  ) {
+    return this.exportsService.findSummary({ dateFrom, dateTo });
   }
 
   @Post(':templateId/generate')

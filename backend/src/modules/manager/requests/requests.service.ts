@@ -21,6 +21,7 @@ import {
 } from './dto/manager-request.dto';
 import { EmailService } from '../../shared/notifications/email.service';
 import { LeaveBalanceSyncService } from '../../shared/leave-balances/leave-balance-sync.service';
+import { overlapDateWhere, resolveDateRange } from '../../../common/date-range';
 
 type BadgeTone =
   | 'valid'
@@ -83,15 +84,14 @@ export class ManagerRequestsService {
       query.managerId,
       query.managerEmail,
     );
-    const year = query.year ?? new Date().getUTCFullYear();
-    const yearStart = new Date(Date.UTC(year, 0, 1));
-    const nextYearStart = new Date(Date.UTC(year + 1, 0, 1));
+    const range = resolveDateRange(query, { defaultMode: 'year' });
+    const year = range.year;
 
     const visibleOwnerWhere = this.buildVisibleOwnerWhere(manager);
 
     const requests = await this.prisma.leaveRequest.findMany({
       where: {
-        startDate: { gte: yearStart, lt: nextYearStart },
+        ...overlapDateWhere(range),
         owner: visibleOwnerWhere,
         OR: [
           { status: { not: LeaveRequestStatus.DRAFT } },
@@ -113,6 +113,8 @@ export class ManagerRequestsService {
 
     return {
       year,
+      dateFrom: range.dateFromIso,
+      dateTo: range.dateToIso,
       manager: {
         id: manager.id,
         name: this.fullName(manager),

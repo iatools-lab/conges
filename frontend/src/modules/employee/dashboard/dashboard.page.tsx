@@ -2,6 +2,13 @@ import { Link } from "@tanstack/react-router";
 import { AppShell } from "@/components/AppShell";
 import { StatCard, Card, CardHeader, Badge, Button } from "@/components/ui-kit";
 import {
+  DateRangeFilter,
+  appendDateRange,
+  currentYearRange,
+  dateRangeQueryKey,
+  type DateRangeValue,
+} from "@/components/DateRangeFilter";
+import {
   AlertCircle,
   Baby,
   CalendarDays,
@@ -13,6 +20,7 @@ import {
 import { useAuthSession } from "@/modules/auth/session";
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
+import { useState } from "react";
 
 type BadgeTone = "valid" | "pending" | "rejected" | "draft" | "info" | "neutral";
 
@@ -75,29 +83,35 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
-function buildRequestsPath(session: { id: string; email: string }, year: number) {
+function buildDashboardPath(userId: string, range: DateRangeValue) {
+  const params = appendDateRange(new URLSearchParams(), range);
+  const query = params.toString();
+  return `/employee/dashboard/${userId}${query ? `?${query}` : ""}`;
+}
+
+function buildRequestsPath(session: { id: string; email: string }, range: DateRangeValue) {
   const params = new URLSearchParams({
     userId: session.id,
     userEmail: session.email,
-    year: String(year),
   });
+  appendDateRange(params, range);
 
   return `/employee/leave-requests?${params.toString()}`;
 }
 
 export function EmployeeDashboard() {
   const { session } = useAuthSession();
+  const [dateRange, setDateRange] = useState<DateRangeValue>(() => currentYearRange());
   const { data, isError, isFetching, isLoading, refetch } = useQuery({
-    queryKey: ["employee-dashboard", session?.id],
-    queryFn: () => apiFetch<EmployeeDashboardSummary>(`/employee/dashboard/${session?.id}`),
+    queryKey: ["employee-dashboard", session?.id, ...dateRangeQueryKey(dateRange)],
+    queryFn: () => apiFetch<EmployeeDashboardSummary>(buildDashboardPath(session!.id, dateRange)),
     enabled: Boolean(session?.id),
   });
   const stats = data?.stats;
   const loading = !session || isLoading;
-  const currentYear = data?.year ?? new Date().getFullYear();
   const requestsQuery = useQuery({
-    queryKey: ["employee-dashboard-requests", session?.id, session?.email, currentYear],
-    queryFn: () => apiFetch<EmployeeLeaveRequestsResponse>(buildRequestsPath(session!, currentYear)),
+    queryKey: ["employee-dashboard-requests", session?.id, session?.email, ...dateRangeQueryKey(dateRange)],
+    queryFn: () => apiFetch<EmployeeLeaveRequestsResponse>(buildRequestsPath(session!, dateRange)),
     enabled: Boolean(session?.id && session?.email),
   });
   const availableDays = formatNumber(stats?.availableDays ?? 0);
@@ -144,6 +158,7 @@ export function EmployeeDashboard() {
 
   return (
     <AppShell title={session ? `Bonjour, ${session.name}` : "Bonjour"} subtitle={session?.poste}>
+      <DateRangeFilter value={dateRange} onChange={setDateRange} className="mb-4" />
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-6">
         <Link
           to="/solde"

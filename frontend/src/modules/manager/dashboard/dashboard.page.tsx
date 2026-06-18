@@ -2,6 +2,16 @@ import { Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AppShell } from "@/components/AppShell";
+import {
+  DateRangeFilter,
+  appendDateRange,
+  currentMonthRange,
+  dateRangeMonthIndex,
+  dateRangeQueryKey,
+  dateRangeYear,
+  monthRange,
+  type DateRangeValue,
+} from "@/components/DateRangeFilter";
 import { Badge, Button, Card, CardHeader, StatCard } from "@/components/ui-kit";
 import { Input } from "@/components/ui/input";
 import {
@@ -155,6 +165,7 @@ const emptyBalances: BalanceRow[] = [];
 
 function buildDashboardPath(
   session: { id: string; email: string },
+  range: DateRangeValue,
   year: number,
   monthIdx: number,
 ) {
@@ -164,6 +175,7 @@ function buildDashboardPath(
     year: String(year),
     month: String(monthIdx + 1),
   });
+  appendDateRange(params, range);
 
   return `/manager/dashboard?${params.toString()}`;
 }
@@ -266,14 +278,23 @@ export function ManagerDashboard() {
   const today = new Date();
   const [monthIdx, setMonthIdx] = useState(today.getMonth());
   const [year, setYear] = useState(today.getFullYear());
+  const [dateRange, setDateRange] = useState<DateRangeValue>(() => currentMonthRange(today));
   const [dept, setDept] = useState<string>("all");
   const [typeF, setTypeF] = useState<string>("all");
   const [statusF, setStatusF] = useState<"all" | LeaveStatus>("all");
   const [query, setQuery] = useState("");
 
   const dashboardQuery = useQuery({
-    queryKey: ["manager-dashboard", session?.id, session?.email, year, monthIdx],
-    queryFn: () => apiFetch<ManagerDashboardResponse>(buildDashboardPath(session!, year, monthIdx)),
+    queryKey: [
+      "manager-dashboard",
+      session?.id,
+      session?.email,
+      year,
+      monthIdx,
+      ...dateRangeQueryKey(dateRange),
+    ],
+    queryFn: () =>
+      apiFetch<ManagerDashboardResponse>(buildDashboardPath(session!, dateRange, year, monthIdx)),
     enabled: ready && !!session?.id && !!session?.email,
   });
 
@@ -351,17 +372,27 @@ export function ManagerDashboard() {
     session?.department?.name ||
     "votre équipe";
 
+  const applyDateRange = (nextRange: DateRangeValue) => {
+    setDateRange(nextRange);
+    if (nextRange.dateFrom) {
+      setYear(dateRangeYear(nextRange, today.getFullYear()));
+      setMonthIdx(dateRangeMonthIndex(nextRange, today.getMonth()));
+    }
+  };
+
   const goPrev = () => {
-    if (monthIdx === 0) {
-      setMonthIdx(11);
-      setYear((value) => value - 1);
-    } else setMonthIdx((value) => value - 1);
+    const nextMonth = monthIdx === 0 ? 11 : monthIdx - 1;
+    const nextYear = monthIdx === 0 ? year - 1 : year;
+    setMonthIdx(nextMonth);
+    setYear(nextYear);
+    setDateRange(monthRange(nextYear, nextMonth));
   };
   const goNext = () => {
-    if (monthIdx === 11) {
-      setMonthIdx(0);
-      setYear((value) => value + 1);
-    } else setMonthIdx((value) => value + 1);
+    const nextMonth = monthIdx === 11 ? 0 : monthIdx + 1;
+    const nextYear = monthIdx === 11 ? year + 1 : year;
+    setMonthIdx(nextMonth);
+    setYear(nextYear);
+    setDateRange(monthRange(nextYear, nextMonth));
   };
 
   return (
@@ -369,6 +400,8 @@ export function ManagerDashboard() {
       title="Tableau de bord Manager"
       subtitle={`Vue d'équipe ${departmentLabel} — ${MONTHS[monthIdx]} ${year}`}
     >
+      <DateRangeFilter value={dateRange} onChange={applyDateRange} className="mb-4" compact />
+
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-6">
         <KpiLink
           to="/manager/calendrier"
@@ -560,6 +593,7 @@ export function ManagerDashboard() {
                   onClick={() => {
                     setMonthIdx(today.getMonth());
                     setYear(today.getFullYear());
+                    setDateRange(monthRange(today.getFullYear(), today.getMonth()));
                   }}
                 >
                   Aujourd'hui
