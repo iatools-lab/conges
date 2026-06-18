@@ -1,0 +1,42 @@
+# Environment files
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Dependencies and build outputs
+**/node_modules/
+**/dist/
+**/dist-ssr/
+**/build/
+**/coverage/
+**/.turbo/
+**/.vite/
+
+# Frontend generated folders
+frontend/.output/
+frontend/.vinxi/
+frontend/.tanstack/
+frontend/.nitro/
+frontend/.wrangler/
+frontend/.dev.vars
+
+# Runtime logs and temporary files
+/backend/logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.temp/
+.tmp/
+
+# OS and editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json

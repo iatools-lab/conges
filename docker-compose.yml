@@ -1,0 +1,127 @@
+name: conges
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: conges-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-conges}
+      POSTGRES_USER: ${POSTGRES_USER:-conges}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquant. Lancez docker/prepare-env.sh ou docker/prepare-env.ps1}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/ensure-database.sh:/docker-entrypoint-initdb.d/10-ensure-database.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - conges_private
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: conges-backend:production
+    container_name: conges-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-conges}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquant}@postgres:5432/${POSTGRES_DB:-conges}?schema=public
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://app.example.com,http://app.example.com,http://203.0.113.10}
+      FRONTEND_URL: ${FRONTEND_URL:-https://app.example.com}
+      AUTH_SESSION_SECRET: ${AUTH_SESSION_SECRET:?AUTH_SESSION_SECRET manquant. Lancez docker/prepare-env.sh ou docker/prepare-env.ps1}
+      AUTH_SESSION_TTL_HOURS: ${AUTH_SESSION_TTL_HOURS:-12}
+      AUTH_ADMIN_PASSWORD_HASH: ${AUTH_ADMIN_PASSWORD_HASH:?AUTH_ADMIN_PASSWORD_HASH manquant. Lancez docker/prepare-env.sh ou docker/prepare-env.ps1}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-449904699288-upv55q520qi2tc3gbg6vh4ouf1lp31md.apps.googleusercontent.com}
+      ENABLE_SWAGGER: ${ENABLE_SWAGGER:-false}
+      RH_AUTO_REJECT_DAYS: ${RH_AUTO_REJECT_DAYS:-7}
+      EMAIL_MODE: ${EMAIL_MODE:-off}
+      MAIL_HOST: ${MAIL_HOST:-}
+      MAIL_PORT: ${MAIL_PORT:-}
+      MAIL_USER: ${MAIL_USER:-}
+      MAIL_PASS: ${MAIL_PASS:-}
+      MAIL_FROM: ${MAIL_FROM:-}
+      DEV_EMAIL_RECIPIENT: ${DEV_EMAIL_RECIPIENT:-}
+      RUN_PRISMA_MIGRATIONS: ${RUN_PRISMA_MIGRATIONS:-true}
+    expose:
+      - "3000"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/v1/healthz').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - conges_private
+
+  nginx:
+    build:
+      context: .
+      dockerfile: docker/nginx/Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-/api/v1}
+        VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-449904699288-upv55q520qi2tc3gbg6vh4ouf1lp31md.apps.googleusercontent.com}
+    image: conges-nginx:production
+    container_name: conges-nginx
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      DOMAIN_NAME: ${DOMAIN_NAME:-app.example.com}
+      SERVER_IP: ${SERVER_IP:-203.0.113.10}
+    ports:
+      - "${NGINX_BIND_ADDRESS:-0.0.0.0}:${NGINX_HTTP_PORT:-8080}:80"
+      - "${NGINX_BIND_ADDRESS:-0.0.0.0}:${NGINX_HTTPS_PORT:-8443}:443"
+    volumes:
+      - letsencrypt:/etc/letsencrypt:ro
+      - certbot_www:/var/www/certbot:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/healthz | grep -q ok"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - conges_private
+
+  certbot:
+    image: certbot/certbot:v2.11.0
+    profiles:
+      - tls
+    depends_on:
+      nginx:
+        condition: service_healthy
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+    command:
+      - certonly
+      - --webroot
+      - --webroot-path=/var/www/certbot
+      - --agree-tos
+      - --no-eff-email
+      - --register-unsafely-without-email
+      - --non-interactive
+      - --keep-until-expiring
+      - -d
+      - ${DOMAIN_NAME:-app.example.com}
+    networks:
+      - conges_private
+
+volumes:
+  postgres_data:
+  letsencrypt:
+  certbot_www:
+
+networks:
+  conges_private:
+    driver: bridge

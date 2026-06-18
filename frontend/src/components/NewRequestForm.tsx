@@ -1,0 +1,429 @@
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogTrigger,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui-kit";
+import { apiFetch } from "@/lib/api";
+import type { AuthSession } from "@/modules/auth/session";
+import { Plus } from "lucide-react";
+
+export type NewRequestPayload = {
+  leaveTypeCode: string;
+  leaveSubtypeCode?: string;
+  startDate: string;
+  endDate: string;
+  reason?: string;
+  draft?: boolean;
+};
+
+export type LeaveTypeOption = {
+  id?: string;
+  code: string;
+  name: string;
+  category?: string;
+  requiresProof: boolean;
+  children?: LeaveTypeOption[];
+};
+
+type BalanceRow = {
+  code: string;
+  remaining: number;
+};
+
+const POOL_PAYE_CODE = "PAYE";
+const POOL_SPECIAL_CODE = "SPECIAL";
+const MATERNITY_CODE = "MAT";
+const MATERNITY_REQUIRED_DAYS = 90;
+const SPECIAL_POOL_CAP_DAYS = 12;
+const PAID_SOURCE_CODES = new Set(["CP", "ANC", "ENF"]);
+const EXCLUDED_SPECIAL_CODES = new Set(["PASSIF", "MAT", "SS"]);
+
+type BalancesResponse = {
+  rows: BalanceRow[];
+};
+
+export function NewRequestForm({
+  trigger,
+  session,
+  leaveTypes,
+  submitting = false,
+  mode = "request",
+  onSubmit,
+}: {
+  trigger?: ReactNode;
+  session: AuthSession;
+  leaveTypes: LeaveTypeOption[];
+  submitting?: boolean;
+  mode?: "request" | "planning";
+  onSubmit: (payload: NewRequestPayload) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [leaveTypeCode, setLeaveTypeCode] = useState(leaveTypes[0]?.code ?? "");
+  const [leaveSubtypeCode, setLeaveSubtypeCode] = useState(
+    leaveTypes[0]?.children?.[0]?.code ?? "",
+  );
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [balanceByCode, setBalanceByCode] = useState<Record<string, number>>({});
+  const [balanceError, setBalanceError] = useState("");
+
+  const requestYear = useMemo(
+    () => (startDate ? Number.parseInt(startDate.slice(0, 4), 10) : new Date().getFullYear()),
+    [startDate],
+  );
+  const isMaternitySelection = normalizeCode(leaveTypeCode) === MATERNITY_CODE;
+  const selectedLeaveType = useMemo(
+    () => leaveTypes.find((type) => type.code === leaveTypeCode),
+    [leaveTypeCode, leaveTypes],
+  );
+  const subtypeOptions = useMemo(
+    () => selectedLeaveType?.children ?? [],
+    [selectedLeaveType],
+  );
+
+  const requestedDays = useMemo(() => countWorkingDays(startDate, endDate), [startDate, endDate]);
+  const availableDays = leaveTypeCode
+    ? getAvailableDaysForSelection(leaveTypeCode, balanceByCode)
+    : undefined;
+  const hasFullMaternityBalance =
+    !isMaternitySelection ||
+    (typeof availableDays === "number" && roundDays(availableDays) >= MATERNITY_REQUIRED_DAYS);
+  const exceedsBalance =
+    requestedDays > 0 &&
+    typeof availableDays === "number" &&
+    requestedDays > roundDays(availableDays);
+  const invalidMaternityDuration =
+    isMaternitySelection && requestedDays > 0 && requestedDays !== MATERNITY_REQUIRED_DAYS;
+
+  const inlineError = isMaternitySelection
+    ? !hasFullMaternityBalance
+      ? `Le congé maternité doit être pris en totalité (${MATERNITY_REQUIRED_DAYS} jours), mais votre solde est insuffisant.`
+      : invalidMaternityDuration
+        ? `Le congé maternité doit être pris en totalité (${MATERNITY_REQUIRED_DAYS} jours ouvrés).`
+        : ""
+    : exceedsBalance && typeof availableDays === "number"
+      ? `Le nombre de jours de congés demandé (${requestedDays}) excède le solde disponible (${roundDays(availableDays)}).`
+      : "";
+  const isPlanning = mode === "planning";
+
+  useEffect(() => {
+    if (!leaveTypes.length) {
+      setLeaveTypeCode("");
+      return;
+    }
+
+    if (!leaveTypes.some((type) => type.code === leaveTypeCode)) {
+      setLeaveTypeCode(leaveTypes[0].code);
+    }
+  }, [leaveTypes, leaveTypeCode]);
+
+  useEffect(() => {
+    if (!subtypeOptions.length) {
+      setLeaveSubtypeCode("");
+      return;
+    }
+
+    if (!subtypeOptions.some((type) => type.code === leaveSubtypeCode)) {
+      setLeaveSubtypeCode(subtypeOptions[0].code);
+    }
+  }, [leaveSubtypeCode, subtypeOptions]);
+
+  useEffect(() => {
+    if (!open || !session?.id) return;
+
+    let cancelled = false;
+    setBalanceError("");
+
+    apiFetch<BalancesResponse>(`/employee/balances/${session.id}?year=${requestYear}`)
+      .then((response) => {
+        if (cancelled) return;
+        const nextMap = response.rows.reduce<Record<string, number>>((acc, row) => {
+          acc[row.code] = row.remaining;
+          return acc;
+        }, {});
+        setBalanceByCode(nextMap);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setBalanceByCode({});
+        setBalanceError("Impossible de vérifier le solde disponible pour cette année.");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, requestYear, session?.id]);
+
+  useEffect(() => {
+    if (!isMaternitySelection || !startDate) return;
+
+    const nextEndDate = addWorkingDays(startDate, MATERNITY_REQUIRED_DAYS - 1);
+    if (nextEndDate !== endDate) {
+      setEndDate(nextEndDate);
+    }
+  }, [endDate, isMaternitySelection, startDate]);
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        {trigger ?? (
+          <Button>
+            <Plus className="size-4" /> {isPlanning ? "Planifier" : "Nouvelle demande"}
+          </Button>
+        )}
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-[560px]">
+        <DialogHeader>
+          <DialogTitle>
+            {isPlanning ? "Planifier un congé" : "Nouvelle demande de congé"}
+          </DialogTitle>
+          <DialogDescription>
+            {isPlanning
+              ? "Enregistrez une planification. Elle restera modifiable tant qu'elle n'est pas soumise."
+              : "Complétez votre demande. Elle sera transmise à votre manager après enregistrement."}
+          </DialogDescription>
+        </DialogHeader>
+
+        <form
+          className="grid gap-4 py-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (inlineError) return;
+
+            const formData = new FormData(e.currentTarget);
+            onSubmit({
+              leaveTypeCode,
+              leaveSubtypeCode: leaveSubtypeCode || undefined,
+              startDate: String(formData.get("startDate") ?? ""),
+              endDate: String(formData.get("endDate") ?? ""),
+              reason: String(formData.get("reason") ?? "").trim() || undefined,
+              draft: isPlanning || undefined,
+            });
+            setOpen(false);
+          }}
+        >
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Employé">
+              <input
+                readOnly
+                value={`${session.name} — ${session.matricule}`}
+                className="w-full rounded-md border px-3 py-2 text-sm bg-muted/50"
+              />
+            </Field>
+            <Field label="Département">
+              <input
+                readOnly
+                value={session.department?.name ?? "Non affecté"}
+                className="w-full rounded-md border px-3 py-2 text-sm bg-muted/50"
+              />
+            </Field>
+          </div>
+
+          <Field label="Type de congé">
+            <select
+              required
+              name="leaveTypeCode"
+              value={leaveTypeCode}
+              onChange={(event) => {
+                const nextCode = event.target.value;
+                const nextType = leaveTypes.find((type) => type.code === nextCode);
+                setLeaveTypeCode(nextCode);
+                setLeaveSubtypeCode(nextType?.children?.[0]?.code ?? "");
+              }}
+              className="w-full rounded-md border px-3 py-2 text-sm bg-background"
+            >
+              {leaveTypes.map((type) => (
+                <option key={type.code} value={type.code}>
+                  {type.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+
+          {subtypeOptions.length > 0 && (
+            <Field label="PrÃ©cision du congÃ©">
+              <select
+                required
+                name="leaveSubtypeCode"
+                value={leaveSubtypeCode}
+                onChange={(event) => setLeaveSubtypeCode(event.target.value)}
+                className="w-full rounded-md border px-3 py-2 text-sm bg-background"
+              >
+                {subtypeOptions.map((type) => (
+                  <option key={type.code} value={type.code}>
+                    {type.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Date de début">
+              <input
+                required
+                name="startDate"
+                type="date"
+                value={startDate}
+                onChange={(event) => setStartDate(event.target.value)}
+                className="w-full rounded-md border px-3 py-2 text-sm bg-background"
+              />
+            </Field>
+            <Field label="Date de fin">
+              <input
+                required
+                name="endDate"
+                type="date"
+                value={endDate}
+                onChange={(event) => setEndDate(event.target.value)}
+                disabled={isMaternitySelection}
+                className="w-full rounded-md border px-3 py-2 text-sm bg-background"
+              />
+              {isMaternitySelection && <input type="hidden" name="endDate" value={endDate} />}
+            </Field>
+          </div>
+
+          <Field label="Nombre de jours demandés">
+            <div className="grid gap-1">
+              <input
+                readOnly
+                value={requestedDays > 0 ? `${requestedDays} jour(s) ouvré(s)` : "-"}
+                className="w-full rounded-md border px-3 py-2 text-sm bg-muted/50"
+              />
+              {typeof availableDays === "number" && (
+                <p className="text-xs text-muted-foreground">
+                  Solde disponible: {roundDays(availableDays)} jour(s)
+                </p>
+              )}
+              {isMaternitySelection && (
+                <p className="text-xs text-muted-foreground">
+                  Le congé maternité doit être pris en totalité ({MATERNITY_REQUIRED_DAYS} jours
+                  ouvrés).
+                </p>
+              )}
+              {balanceError && <p className="text-xs text-muted-foreground">{balanceError}</p>}
+              {inlineError && <p className="text-xs text-destructive">{inlineError}</p>}
+            </div>
+          </Field>
+
+          <Field label="Justificatif (optionnel)">
+            <input
+              type="file"
+              className="w-full rounded-md border px-3 py-2 text-sm bg-background file:mr-3 file:rounded file:border-0 file:bg-muted file:px-2 file:py-1 file:text-xs"
+            />
+          </Field>
+
+          <Field label="Commentaire">
+            <textarea
+              name="reason"
+              rows={3}
+              className="w-full rounded-md border px-3 py-2 text-sm bg-background"
+              placeholder="Motif ou précisions utiles…"
+            />
+          </Field>
+
+          <DialogFooter className="gap-2">
+            <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+              Annuler
+            </Button>
+            <Button
+              type="submit"
+              disabled={submitting || leaveTypes.length === 0 || Boolean(inlineError)}
+            >
+              {isPlanning ? "Enregistrer la planification" : "Envoyer la demande"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function countWorkingDays(startDate: string, endDate: string) {
+  if (!startDate || !endDate) return 0;
+
+  const start = new Date(`${startDate}T00:00:00.000Z`);
+  const end = new Date(`${endDate}T00:00:00.000Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) return 0;
+
+  let days = 0;
+  for (let cursor = new Date(start); cursor <= end; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
+    const day = cursor.getUTCDay();
+    if (day !== 0 && day !== 6) days += 1;
+  }
+
+  return days;
+}
+
+function addWorkingDays(startDate: string, workingDaysToAdd: number) {
+  const start = new Date(`${startDate}T00:00:00.000Z`);
+  if (Number.isNaN(start.getTime())) return "";
+
+  let remaining = Math.max(0, workingDaysToAdd);
+  const cursor = new Date(start);
+
+  while (remaining > 0) {
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+    const day = cursor.getUTCDay();
+    if (day !== 0 && day !== 6) remaining -= 1;
+  }
+
+  return cursor.toISOString().slice(0, 10);
+}
+
+function roundDays(value: number) {
+  return Math.round(value * 10) / 10;
+}
+
+function normalizeCode(code: string) {
+  return code.trim().toUpperCase();
+}
+
+function isPaidSourceCode(code: string) {
+  return PAID_SOURCE_CODES.has(normalizeCode(code));
+}
+
+function isSpecialSourceCode(code: string) {
+  const normalized = normalizeCode(code);
+  return !isPaidSourceCode(normalized) && !EXCLUDED_SPECIAL_CODES.has(normalized);
+}
+
+function getAvailableDaysForSelection(
+  leaveTypeCode: string,
+  balanceByCode: Record<string, number>,
+) {
+  const normalized = normalizeCode(leaveTypeCode);
+
+  if (normalized === POOL_PAYE_CODE) {
+    return roundDays(
+      Object.entries(balanceByCode)
+        .filter(([code]) => isPaidSourceCode(code))
+        .reduce((sum, [, remaining]) => sum + Math.max(remaining, 0), 0),
+    );
+  }
+
+  if (normalized === POOL_SPECIAL_CODE) {
+    const totalSpecial = Object.entries(balanceByCode)
+      .filter(([code]) => isSpecialSourceCode(code))
+      .reduce((sum, [, remaining]) => sum + Math.max(remaining, 0), 0);
+
+    return roundDays(Math.min(totalSpecial, SPECIAL_POOL_CAP_DAYS));
+  }
+
+  return balanceByCode[normalized];
+}
+
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <label className="grid gap-1.5 text-sm">
+      <span className="text-xs font-medium text-muted-foreground">{label}</span>
+      {children}
+    </label>
+  );
+}

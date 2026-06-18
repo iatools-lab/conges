@@ -1,0 +1,13 @@
+DOCUMENT DEPLACE
+================
+
+La documentation de deploiement complete se trouve dans:
+- GUIDE_DEPLOIEMENT.md
+
+Le fichier central de parametres administrateur se trouve dans:
+- DEPLOYMENT_PARAMETERS.env.example
+
+Procedure recommandee:
+1. Copier DEPLOYMENT_PARAMETERS.env.example vers .env
+2. Remplir toutes les valeurs CHANGE_ME_*
+3. Lancer: bash docker/deploy.sh

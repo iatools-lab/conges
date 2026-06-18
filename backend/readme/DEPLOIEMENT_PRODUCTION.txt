@@ -1,0 +1,162 @@
+GUIDE DE DEPLOIEMENT - GESTION DES CONGES
+=========================================
+
+Projet :
+- backend : NestJS + Prisma + PostgreSQL
+- frontend : React / Vite / TanStack
+
+
+1. Prerequis serveur
+--------------------
+Serveur recommande : Ubuntu/Debian.
+
+Installer ou laisser setup.sh installer :
+- git
+- Node.js 22+
+- npm
+- PostgreSQL
+- PM2
+- serve
+
+Ports par defaut :
+- backend : 3000
+- frontend : 8080
+- PostgreSQL : 5432
+
+
+2. Configuration a preparer
+---------------------------
+Avant de lancer setup.sh, modifier les variables en haut du fichier :
+- APP_DIR : dossier d'installation du projet sur le serveur.
+- MONOREPO_REPO_URL : depot GitHub unique du projet conges.
+- APP_BRANCH : branche a deployer.
+- DB_NAME, DB_USER, DB_PASSWORD : base PostgreSQL.
+- FRONTEND_PUBLIC_URL : URL publique du frontend.
+- BACKEND_PUBLIC_URL : URL publique du backend, sans /api/v1.
+- VITE_API_URL : URL API complete, avec /api/v1.
+- AUTH_SESSION_SECRET : secret aleatoire de 32 caracteres minimum.
+- GOOGLE_CLIENT_ID : client OAuth Google autorise.
+- MAIL_* : configuration SMTP.
+
+Ne jamais commiter les vrais mots de passe.
+
+
+3. Installation initiale
+------------------------
+Copier le projet ou les scripts sur le serveur, puis executer :
+
+  chmod +x setup.sh update.sh
+  ./setup.sh
+
+Le script fait :
+- installation des paquets systeme utiles ;
+- installation de PM2 et serve ;
+- creation de la base PostgreSQL ;
+- clonage ou mise a jour du depot unique conges ;
+- generation de backend/.env et frontend/.env ;
+- npm ci ;
+- npx prisma generate ;
+- npx prisma migrate deploy ;
+- npm run build ;
+- demarrage du backend avec PM2 ;
+- demarrage du frontend avec PM2 via serve sur frontend/dist.
+
+Apres build frontend, le fichier d'entree doit etre directement ici :
+
+  frontend/dist/index.html
+
+Les assets statiques doivent etre dans :
+
+  frontend/dist/assets
+
+
+4. Fichiers .env generes
+------------------------
+Backend : backend/.env
+
+Variables importantes :
+- NODE_ENV=production
+- DATABASE_URL
+- PORT
+- CORS_ORIGINS
+- AUTH_SESSION_SECRET
+- GOOGLE_CLIENT_ID
+- EMAIL_MODE
+- MAIL_HOST, MAIL_PORT, MAIL_USER, MAIL_PASS, MAIL_FROM
+
+Frontend : frontend/.env
+
+Variables importantes :
+- VITE_API_URL="https://votre-api.tld/api/v1"
+- VITE_GOOGLE_CLIENT_ID="client-google.apps.googleusercontent.com"
+
+
+5. Mise a jour depuis GitHub
+----------------------------
+Apres une modification du code sur GitHub :
+
+  ./update.sh
+
+Le script fait :
+- git fetch + git pull sur le depot unique conges ;
+- npm ci ;
+- migrations Prisma ;
+- rebuild backend/frontend ;
+- restart PM2 du backend ;
+- restart PM2 du frontend.
+
+
+6. Commandes utiles
+-------------------
+Voir les processus :
+
+  pm2 status
+
+Voir les logs backend :
+
+  pm2 logs conges-backend
+
+Voir les logs frontend :
+
+  pm2 logs conges-frontend
+
+Sauvegarder PM2 apres demarrage :
+
+  pm2 save
+
+
+7. Verification apres deploiement
+---------------------------------
+Tester :
+- ouverture du frontend ;
+- connexion email sans mot de passe et connexion Google ;
+- creation d'une demande de conge ;
+- validation manager ;
+- validation/refus RH ;
+- envoi email si EMAIL_MODE=prod.
+
+Verifier aussi :
+- https actif sur les domaines publics ;
+- CORS_ORIGINS contient exactement l'URL frontend ;
+- VITE_API_URL contient bien /api/v1 ;
+- les logs PM2 ne contiennent pas d'erreur.
+
+
+8. Rollback rapide
+------------------
+En cas de probleme :
+
+  cd /chemin/du/projet/backend
+  git checkout <ancien_commit>
+  npm ci
+  npx prisma generate
+  npm run build
+  pm2 restart conges-backend --update-env
+
+  cd /chemin/du/projet/frontend
+  git checkout <ancien_commit>
+  npm ci
+  npm run build
+  pm2 restart conges-frontend --update-env
+
+Restaurer la base seulement si une migration ou une operation a altere les donnees.

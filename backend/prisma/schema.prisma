@@ -1,0 +1,505 @@
+// Prisma schema — Plateforme de gestion des congés "MaEntreprise"
+// Datasource: PostgreSQL (Lovable Cloud / Supabase compatible)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum Sexe {
+  M
+  F
+}
+
+enum UserStatus {
+  ACTIVE
+  ON_LEAVE
+  INACTIVE
+}
+
+enum RoleType {
+  EMPLOYE
+  MANAGER
+  RH
+  ADMIN
+}
+
+enum LeaveCategory {
+  CONGE_PAYE // Congés payés annuels
+  CONGE_SPECIAL // Mariage, naissance, deuil, etc.
+  CONGE_MATERNITE
+  CONGE_PATERNITE
+  CONGE_MALADIE
+  CONGE_SANS_SOLDE
+  RECUPERATION
+  TELETRAVAIL
+}
+
+enum LeaveRequestStatus {
+  DRAFT
+  PENDING // En attente validation N+1
+  IN_REVIEW // En attente validation N+2 / RH
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum ValidationDecision {
+  APPROVED
+  REJECTED
+  REVIEW_REQUESTED
+}
+
+enum ConflictStatus {
+  ACTIVE
+  RESOLVED
+  IGNORED
+  POSTPONED
+}
+
+enum ConflictSeverity {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum NotificationType {
+  REQUEST_SUBMITTED
+  REQUEST_APPROVED
+  REQUEST_REJECTED
+  REQUEST_REVIEW
+  CONFLICT_DETECTED
+  BALANCE_ALERT
+  SYSTEM
+}
+
+enum EventType {
+  BIRTH
+  MARRIAGE
+  DEATH
+  ILLNESS
+  OTHER
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+  APPROVE
+  REJECT
+  EXPORT
+  SIGNUP
+  FORGOT_PASSWORD
+  VERIFY_OTP
+  RESET_PASSWORD
+  LOGIN_FAILED
+}
+
+enum OvertimeStatus {
+  PENDING_MANAGER
+  IN_REVIEW_RH
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum OtpType {
+  PASSWORD_RESET
+}
+
+enum OtpStatus {
+  PENDING
+  VERIFIED
+  EXPIRED
+  MAX_ATTEMPTS
+}
+
+// ============================================================
+// ORGANISATION
+// ============================================================
+
+model Department {
+  id          String   @id @default(cuid())
+  code        String   @unique // "COM", "IT", "RH"...
+  name        String // "Commercial"
+  description String?
+  managerId   String?
+  manager     User?    @relation("DepartmentManager", fields: [managerId], references: [id])
+  employees   User[]   @relation("DepartmentMembers")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ============================================================
+// UTILISATEURS, RÔLES & HIÉRARCHIE
+// ============================================================
+
+model User {
+  id            String     @id @default(cuid())
+  matricule     String     @unique
+  nom           String
+  prenom        String
+  sexe          Sexe
+  email         String     @unique
+  telephone     String?
+  passwordHash  String? // Auth gérée par Lovable Cloud, optionnel
+  poste         String // Poste occupé
+  dateNaissance DateTime?
+  dateEmbauche  DateTime
+  passifInitial Float      @default(0)
+  status        UserStatus @default(ACTIVE)
+
+  // Département d'appartenance
+  departmentId String?
+  department   Department? @relation("DepartmentMembers", fields: [departmentId], references: [id])
+
+  // Hiérarchie : N+1 / N+2 / N+3
+  n1Id           String?
+  n1             User?   @relation("UserN1", fields: [n1Id], references: [id])
+  subordinatesN1 User[]  @relation("UserN1")
+
+  n2Id           String?
+  n2             User?   @relation("UserN2", fields: [n2Id], references: [id])
+  subordinatesN2 User[]  @relation("UserN2")
+
+  n3Id           String?
+  n3             User?   @relation("UserN3", fields: [n3Id], references: [id])
+  subordinatesN3 User[]  @relation("UserN3")
+
+  // Rôles (table séparée pour éviter privilege escalation)
+  roles UserRole[]
+
+  // Relations métier
+  leaveRequests      LeaveRequest[] @relation("RequestOwner")
+  validations        Validation[]   @relation("Validator")
+  balances           LeaveBalance[]
+  children           Child[]
+  events             Event[]
+  notifications      Notification[]
+  auditLogs          AuditLog[]
+  managedDepartments Department[]   @relation("DepartmentManager")
+  conflictsResolved  Conflict[]     @relation("ConflictResolver")
+  overtimeRequests   OvertimeRequest[] @relation("OvertimeOwner")
+  overtimeDecisionsAsManager OvertimeRequest[] @relation("OvertimeManagerValidator")
+  overtimeDecisionsAsRh OvertimeRequest[] @relation("OvertimeRhValidator")
+  otpRequests        OtpRequest[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([departmentId])
+  @@index([n1Id])
+  @@index([status])
+}
+
+model UserRole {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      RoleType
+  scope     String? // ex: département concerné pour un manager
+  createdAt DateTime @default(now())
+
+  @@unique([userId, role, scope])
+  @@index([role])
+}
+
+// ============================================================
+// OTP / MOT DE PASSE OUBLIÉ
+// ============================================================
+
+model OtpRequest {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      OtpType   @default(PASSWORD_RESET)
+  code      String    // Code OTP haché avec scrypt et sel par code
+  status    OtpStatus @default(PENDING)
+  attempts  Int       @default(0)
+  maxAttempts Int     @default(3)
+  expiresAt DateTime
+  verifiedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([userId, status])
+  @@index([createdAt])
+}
+
+// ============================================================
+// ENFANTS (pour congés liés aux enfants)
+// ============================================================
+
+model Child {
+  id            String   @id @default(cuid())
+  parentId      String
+  parent        User     @relation(fields: [parentId], references: [id], onDelete: Cascade)
+  nom           String
+  prenom        String
+  dateNaissance DateTime
+  sexe          Sexe
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([parentId])
+}
+
+// ============================================================
+// TYPES DE CONGÉS & SOLDES
+// ============================================================
+
+model LeaveType {
+  id            String         @id @default(cuid())
+  code          String         @unique // "CP", "RTT", "MAT"...
+  name          String
+  category      LeaveCategory
+  defaultDays   Float          @default(0) // Quota annuel par défaut
+  requiresProof Boolean        @default(false)
+  paid          Boolean        @default(true)
+  color         String? // Hex pour affichage calendrier
+  active        Boolean        @default(true)
+  description   String?
+  requests      LeaveRequest[]
+  balances      LeaveBalance[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+}
+
+model LeaveBalance {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  leaveTypeId String
+  leaveType   LeaveType @relation(fields: [leaveTypeId], references: [id])
+  year        Int // Année de référence
+  acquired    Float     @default(0) // Jours acquis
+  taken       Float     @default(0) // Jours pris
+  scheduled   Float     @default(0) // Jours planifiés (approuvés non encore pris)
+  carryover   Float     @default(0) // Report année précédente
+  expiresAt   DateTime?
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([userId, leaveTypeId, year])
+  @@index([userId])
+}
+
+// ============================================================
+// DEMANDES DE CONGÉS & WORKFLOW DE VALIDATION
+// ============================================================
+
+model LeaveRequest {
+  id           String             @id @default(cuid())
+  reference    String             @unique // ex: "DM-2026-088"
+  ownerId      String
+  owner        User               @relation("RequestOwner", fields: [ownerId], references: [id])
+  leaveTypeId  String
+  leaveType    LeaveType          @relation(fields: [leaveTypeId], references: [id])
+  startDate    DateTime
+  endDate      DateTime
+  halfDayStart Boolean            @default(false)
+  halfDayEnd   Boolean            @default(false)
+  days         Float // Nombre de jours ouvrés
+  reason       String?
+  status       LeaveRequestStatus @default(PENDING)
+  submittedAt  DateTime?
+  decidedAt    DateTime?
+  cancelledAt  DateTime?
+
+  validations Validation[]
+  attachments Attachment[]
+  conflicts   Conflict[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ownerId])
+  @@index([status])
+  @@index([startDate, endDate])
+}
+
+model Validation {
+  id          String             @id @default(cuid())
+  requestId   String
+  request     LeaveRequest       @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  validatorId String
+  validator   User               @relation("Validator", fields: [validatorId], references: [id])
+  level       Int // 1 = N+1, 2 = N+2, 3 = RH...
+  decision    ValidationDecision
+  comment     String?
+  decidedAt   DateTime           @default(now())
+
+  @@index([requestId])
+  @@index([validatorId])
+}
+
+model Attachment {
+  id         String       @id @default(cuid())
+  requestId  String
+  request    LeaveRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  filename   String
+  url        String
+  mimeType   String?
+  size       Int?
+  uploadedAt DateTime     @default(now())
+}
+
+// ============================================================
+// ÉVÉNEMENTS DÉCLARÉS (naissance, mariage, deuil…)
+// ============================================================
+
+model Event {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type        EventType
+  eventDate   DateTime
+  description String?
+  proofUrl    String?
+  processed   Boolean   @default(false) // Traité par RH ?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([userId])
+}
+
+// ============================================================
+// CONFLITS D'ABSENCE (vu manager)
+// ============================================================
+
+model Conflict {
+  id           String           @id @default(cuid())
+  requestId    String?
+  request      LeaveRequest?    @relation(fields: [requestId], references: [id], onDelete: SetNull)
+  departmentId String?
+  periodStart  DateTime
+  periodEnd    DateTime
+  severity     ConflictSeverity @default(MEDIUM)
+  status       ConflictStatus   @default(ACTIVE)
+  reason       String // "Effectif < seuil", etc.
+  resolverId   String?
+  resolver     User?            @relation("ConflictResolver", fields: [resolverId], references: [id])
+  resolution   String?
+  resolvedAt   DateTime?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  @@index([status])
+}
+
+model OvertimeRequest {
+  id                 String         @id @default(cuid())
+  reference          String         @unique
+  ownerId            String
+  owner              User           @relation("OvertimeOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  workDate           DateTime
+  hours              Float
+  reason             String?
+  status             OvertimeStatus @default(PENDING_MANAGER)
+  submittedAt        DateTime       @default(now())
+  managerValidatorId String?
+  managerValidator   User?          @relation("OvertimeManagerValidator", fields: [managerValidatorId], references: [id], onDelete: SetNull)
+  managerComment     String?
+  managerDecidedAt   DateTime?
+  rhValidatorId      String?
+  rhValidator        User?          @relation("OvertimeRhValidator", fields: [rhValidatorId], references: [id], onDelete: SetNull)
+  rhComment          String?
+  rhDecidedAt        DateTime?
+  cancelledAt        DateTime?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  @@index([ownerId])
+  @@index([status])
+  @@index([workDate])
+  @@index([managerValidatorId])
+  @@index([rhValidatorId])
+}
+
+// ============================================================
+// CONFIGURATION : WORKFLOWS, JOURS FÉRIÉS, PARAMÈTRES
+// ============================================================
+
+model Workflow {
+  id          String         @id @default(cuid())
+  name        String         @unique
+  description String?
+  active      Boolean        @default(true)
+  steps       WorkflowStep[]
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+}
+
+model WorkflowStep {
+  id         String   @id @default(cuid())
+  workflowId String
+  workflow   Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  order      Int // 1, 2, 3...
+  validator  RoleType // EMPLOYE/MANAGER/RH/ADMIN
+  required   Boolean  @default(true)
+  slaHours   Int? // Délai en heures avant relance
+
+  @@unique([workflowId, order])
+}
+
+model PublicHoliday {
+  id        String   @id @default(cuid())
+  date      DateTime
+  name      String
+  country   String   @default("CM")
+  recurring Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@unique([date, country])
+}
+
+model SystemSetting {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       String
+  category    String?
+  description String?
+  updatedAt   DateTime @updatedAt
+}
+
+// ============================================================
+// NOTIFICATIONS & AUDIT
+// ============================================================
+
+model Notification {
+  id          String           @id @default(cuid())
+  userId      String
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type        NotificationType
+  title       String
+  description String?
+  link        String?
+  read        Boolean          @default(false)
+  createdAt   DateTime         @default(now())
+
+  @@index([userId, read])
+}
+
+model AuditLog {
+  id        String      @id @default(cuid())
+  userId    String?
+  user      User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    AuditAction
+  entity    String // "LeaveRequest", "User"...
+  entityId  String?
+  metadata  Json?
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime    @default(now())
+
+  @@index([entity, entityId])
+  @@index([createdAt])
+}
