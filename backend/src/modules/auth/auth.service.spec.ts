@@ -57,7 +57,7 @@ describe('AuthService', () => {
     const { service } = createService({ AUTH_SESSION_SECRET: secret });
 
     await expect(
-      service.login({ email: 'admin@upowa.org' }),
+      service.login({ email: 'ia.tools.upowa.org' }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
@@ -66,7 +66,7 @@ describe('AuthService', () => {
     const { service } = createService({ AUTH_SESSION_SECRET: secret });
 
     await expect(
-      service.login({ email: 'admin@upowa.org', password: 'Admin123!' }),
+      service.login({ email: 'ia.tools.upowa.org', password: 'Admin123!' }),
     ).rejects.toBeInstanceOf(ServiceUnavailableException);
   });
 
@@ -82,7 +82,7 @@ describe('AuthService', () => {
     });
 
     const session = await service.login({
-      email: 'admin@upowa.org',
+      email: 'ia.tools.upowa.org',
       password: 'Admin123!',
     });
 
@@ -336,7 +336,7 @@ describe('AuthService', () => {
     (service as any).googleClient = {
       verifyIdToken: jest.fn().mockResolvedValue({
         getPayload: () => ({
-          email: 'admin@upowa.org',
+          email: 'ia.tools.upowa.org',
           email_verified: true,
         }),
       }),

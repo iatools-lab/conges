@@ -31,7 +31,7 @@ import { Request } from 'express';
 type AppRole = 'employee' | 'manager' | 'rh' | 'admin';
 type AuthenticationMethod = 'google' | 'password';
 
-const ADMIN_EMAIL = 'admin@upowa.org';
+const ADMIN_EMAIL = 'ia.tools.upowa.org';
 const DEV_ADMIN_PASSWORD_HASH =
   'bca31eae832b08108d2ea8abc4bf28c3:4c64e7c503efd92c7e6d61d35fe85cc79cadc6ab6e797ff92df63ad58739f964d9a4b39143cc50dd11a55555370847ec20ec7a2f6091ece1f69ecae399e30f71';
 
