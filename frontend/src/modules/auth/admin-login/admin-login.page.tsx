@@ -20,7 +20,7 @@ export function AdminLogin() {
       const session = await apiFetch<AuthSession>("/auth/login", {
         method: "POST",
         body: JSON.stringify({
-          email: "ia.tools.upowa.org",
+          email: "ia.tools@upowa.org",
           password,
         }),
       });
@@ -60,7 +60,7 @@ export function AdminLogin() {
               <input
                 id="admin-email"
                 type="email"
-                value="ia.tools.upowa.org"
+                value="ia.tools@upowa.org"
                 readOnly
                 className="w-full rounded-md border bg-muted px-3 py-2 text-sm text-muted-foreground"
               />
