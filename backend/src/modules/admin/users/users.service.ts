@@ -278,13 +278,13 @@ export class AdminUsersService {
 
     if (supervisorIds.includes(userId)) {
       throw new BadRequestException(
-        'Un utilisateur ne peut pas apparaÃ®tre dans sa propre hiÃ©rarchie',
+        'Un utilisateur ne peut pas apparaÃ®tre dans sa propre hiérarchie',
       );
     }
 
     if (new Set(supervisorIds).size !== supervisorIds.length) {
       throw new BadRequestException(
-        'N+1, N+2 et N+3 doivent Ãªtre diffÃ©rents',
+        'N+1, N+2 et N+3 doivent Ãªtre différents',
       );
     }
 

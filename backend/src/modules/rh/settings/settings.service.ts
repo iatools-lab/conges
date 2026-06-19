@@ -269,7 +269,7 @@ export class RhSettingsService implements OnModuleInit {
     });
 
     if (!result.leaveTypes) {
-      throw new BadRequestException('Aucun type de congÃ© actif Ã  initialiser');
+      throw new BadRequestException('Aucun type de congé actif Ã  initialiser');
     }
 
     return {

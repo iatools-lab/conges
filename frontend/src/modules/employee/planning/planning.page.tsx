@@ -858,7 +858,7 @@ export function Planifier() {
             {editSubtypeOptions.length > 0 && (
               <label className="grid gap-1.5 text-sm">
                 <span className="text-xs font-medium text-muted-foreground">
-                  PrÃ©cision du congÃ©
+                  Précision du congé
                 </span>
                 <select
                   className="w-full rounded-md border px-3 py-2 text-sm bg-background"

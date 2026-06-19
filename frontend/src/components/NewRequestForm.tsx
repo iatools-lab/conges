@@ -285,7 +285,7 @@ export function NewRequestForm({
           </Field>
 
           {subtypeOptions.length > 0 && (
-            <Field label="PrÃ©cision du congÃ©">
+            <Field label="Précision du congé">
               <select
                 required
                 name="leaveSubtypeCode"

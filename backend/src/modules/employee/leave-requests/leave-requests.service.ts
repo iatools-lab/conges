@@ -597,8 +597,8 @@ export class EmployeeLeaveRequestsService {
     if (normalizedSubtypeCode && !requestedCandidate) {
       throw new BadRequestException(
         poolKind === PAID_POOL_CODE
-          ? 'Ce sous-type ne fait pas partie des congÃ©s payÃ©s.'
-          : 'Ce sous-type ne fait pas partie des congÃ©s spÃ©ciaux.',
+          ? 'Ce sous-type ne fait pas partie des congés payés.'
+          : 'Ce sous-type ne fait pas partie des congés spéciaux.',
       );
     }
 
