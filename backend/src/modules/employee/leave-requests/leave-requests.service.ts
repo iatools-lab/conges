@@ -23,6 +23,7 @@ import {
 import { EmailService } from '../../shared/notifications/email.service';
 import { LeaveBalanceSyncService } from '../../shared/leave-balances/leave-balance-sync.service';
 import { overlapDateWhere, resolveDateRange } from '../../../common/date-range';
+import { countWorkingDays as countBusinessDays } from '../../../common/working-days';
 
 const employeeLeaveRequestSelect = {
   id: true,
@@ -119,11 +120,26 @@ export class EmployeeLeaveRequestsService {
     };
   }
 
+  async findHolidays() {
+    const rows = await this.prisma.publicHoliday.findMany({
+      where: { country: 'CM' },
+      orderBy: { date: 'asc' },
+      select: { id: true, date: true, name: true, recurring: true },
+    });
+
+    return {
+      rows: rows.map((holiday) => ({
+        ...holiday,
+        date: holiday.date.toISOString().slice(0, 10),
+      })),
+    };
+  }
+
   async create(dto: CreateEmployeeLeaveRequestDto) {
     const user = await this.resolveUser(dto.userId, dto.userEmail);
     const startDate = this.parseDate(dto.startDate);
     const endDate = this.parseDate(dto.endDate);
-    const days = this.countWorkingDays(startDate, endDate);
+    const days = await this.countWorkingDays(startDate, endDate);
     const isDraft = dto.draft === true;
     if (days <= 0) throw new BadRequestException('Période invalide');
 
@@ -220,7 +236,7 @@ export class EmployeeLeaveRequestsService {
     const endDate = dto.endDate
       ? this.parseDate(dto.endDate)
       : existing.endDate;
-    const days = this.countWorkingDays(startDate, endDate);
+    const days = await this.countWorkingDays(startDate, endDate);
     if (days <= 0) throw new BadRequestException('Période invalide');
     const startYear = startDate.getUTCFullYear();
     const existingYear = existing.startDate.getUTCFullYear();
@@ -779,7 +795,9 @@ export class EmployeeLeaveRequestsService {
         code: PAID_POOL_CODE,
         name: 'Congés payés (total annuel)',
         category: LeaveCategory.CONGE_PAYE,
-        requiresProof: paidChildren.some((leaveType) => leaveType.requiresProof),
+        requiresProof: paidChildren.some(
+          (leaveType) => leaveType.requiresProof,
+        ),
         children: paidChildren,
       });
     }
@@ -790,7 +808,9 @@ export class EmployeeLeaveRequestsService {
         code: SPECIAL_POOL_CODE,
         name: 'Congés spéciaux (plafond 12 jours)',
         category: LeaveCategory.CONGE_SPECIAL,
-        requiresProof: specialChildren.some((leaveType) => leaveType.requiresProof),
+        requiresProof: specialChildren.some(
+          (leaveType) => leaveType.requiresProof,
+        ),
         children: specialChildren,
       });
     }
@@ -979,20 +999,18 @@ export class EmployeeLeaveRequestsService {
     return date;
   }
 
-  private countWorkingDays(start: Date, end: Date) {
+  private async countWorkingDays(start: Date, end: Date) {
     if (start > end) return 0;
 
-    let days = 0;
-    for (
-      let cursor = new Date(start);
-      cursor <= end;
-      cursor.setUTCDate(cursor.getUTCDate() + 1)
-    ) {
-      const day = cursor.getUTCDay();
-      if (day !== 0 && day !== 6) days += 1;
-    }
+    const holidays = await this.prisma.publicHoliday.findMany({
+      where: {
+        country: 'CM',
+        OR: [{ date: { gte: start, lte: end } }, { recurring: true }],
+      },
+      select: { date: true, recurring: true },
+    });
 
-    return days;
+    return countBusinessDays(start, end, holidays);
   }
 
   private buildReference(startDate: Date) {

@@ -35,6 +35,7 @@ Avant de lancer setup.sh, modifier les variables en haut du fichier :
 - BACKEND_PUBLIC_URL : URL publique du backend, sans /api/v1.
 - VITE_API_URL : URL API complete, avec /api/v1.
 - AUTH_SESSION_SECRET : secret aleatoire de 32 caracteres minimum.
+- AUTH_GOOGLE_ONLY : true pour imposer Google et désactiver les mots de passe.
 - GOOGLE_CLIENT_ID : client OAuth Google autorise.
 - MAIL_* : configuration SMTP.
 

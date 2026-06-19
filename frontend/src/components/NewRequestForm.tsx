@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui-kit";
 import { apiFetch } from "@/lib/api";
+import { countWorkingDays, endDateForWorkingDays, type HolidayRule } from "@/lib/working-days";
 import type { AuthSession } from "@/modules/auth/session";
 import { Plus } from "lucide-react";
 
@@ -48,6 +49,10 @@ type BalancesResponse = {
   rows: BalanceRow[];
 };
 
+type HolidaysResponse = {
+  rows: Array<HolidayRule & { id: string }>;
+};
+
 export function NewRequestForm({
   trigger,
   session,
@@ -72,6 +77,9 @@ export function NewRequestForm({
   const [endDate, setEndDate] = useState("");
   const [balanceByCode, setBalanceByCode] = useState<Record<string, number>>({});
   const [balanceError, setBalanceError] = useState("");
+  const [holidays, setHolidays] = useState<HolidayRule[]>([]);
+  const [holidayError, setHolidayError] = useState("");
+  const [holidaysLoading, setHolidaysLoading] = useState(false);
 
   const requestYear = useMemo(
     () => (startDate ? Number.parseInt(startDate.slice(0, 4), 10) : new Date().getFullYear()),
@@ -82,12 +90,12 @@ export function NewRequestForm({
     () => leaveTypes.find((type) => type.code === leaveTypeCode),
     [leaveTypeCode, leaveTypes],
   );
-  const subtypeOptions = useMemo(
-    () => selectedLeaveType?.children ?? [],
-    [selectedLeaveType],
-  );
+  const subtypeOptions = useMemo(() => selectedLeaveType?.children ?? [], [selectedLeaveType]);
 
-  const requestedDays = useMemo(() => countWorkingDays(startDate, endDate), [startDate, endDate]);
+  const requestedDays = useMemo(
+    () => countWorkingDays(startDate, endDate, holidays),
+    [endDate, holidays, startDate],
+  );
   const availableDays = leaveTypeCode
     ? getAvailableDaysForSelection(leaveTypeCode, balanceByCode)
     : undefined;
@@ -100,16 +108,21 @@ export function NewRequestForm({
     requestedDays > roundDays(availableDays);
   const invalidMaternityDuration =
     isMaternitySelection && requestedDays > 0 && requestedDays !== MATERNITY_REQUIRED_DAYS;
+  const hasInvalidWorkingPeriod = Boolean(startDate && endDate && requestedDays <= 0);
 
-  const inlineError = isMaternitySelection
-    ? !hasFullMaternityBalance
-      ? `Le congé maternité doit être pris en totalité (${MATERNITY_REQUIRED_DAYS} jours), mais votre solde est insuffisant.`
-      : invalidMaternityDuration
-        ? `Le congé maternité doit être pris en totalité (${MATERNITY_REQUIRED_DAYS} jours ouvrés).`
-        : ""
-    : exceedsBalance && typeof availableDays === "number"
-      ? `Le nombre de jours de congés demandé (${requestedDays}) excède le solde disponible (${roundDays(availableDays)}).`
-      : "";
+  const inlineError = holidayError
+    ? holidayError
+    : hasInvalidWorkingPeriod
+      ? "La période ne contient aucun jour ouvré."
+      : isMaternitySelection
+        ? !hasFullMaternityBalance
+          ? `Le congé maternité doit être pris en totalité (${MATERNITY_REQUIRED_DAYS} jours), mais votre solde est insuffisant.`
+          : invalidMaternityDuration
+            ? `Le congé maternité doit être pris en totalité (${MATERNITY_REQUIRED_DAYS} jours ouvrés).`
+            : ""
+        : exceedsBalance && typeof availableDays === "number"
+          ? `Le nombre de jours de congés demandé (${requestedDays}) excède le solde disponible (${roundDays(availableDays)}).`
+          : "";
   const isPlanning = mode === "planning";
 
   useEffect(() => {
@@ -161,13 +174,38 @@ export function NewRequestForm({
   }, [open, requestYear, session?.id]);
 
   useEffect(() => {
+    if (!open) return;
+
+    let cancelled = false;
+    setHolidayError("");
+    setHolidaysLoading(true);
+
+    apiFetch<HolidaysResponse>("/employee/leave-requests/holidays")
+      .then((response) => {
+        if (!cancelled) setHolidays(response.rows);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setHolidays([]);
+        setHolidayError("Impossible de charger le calendrier des jours fériés.");
+      })
+      .finally(() => {
+        if (!cancelled) setHolidaysLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  useEffect(() => {
     if (!isMaternitySelection || !startDate) return;
 
-    const nextEndDate = addWorkingDays(startDate, MATERNITY_REQUIRED_DAYS - 1);
+    const nextEndDate = endDateForWorkingDays(startDate, MATERNITY_REQUIRED_DAYS, holidays);
     if (nextEndDate !== endDate) {
       setEndDate(nextEndDate);
     }
-  }, [endDate, isMaternitySelection, startDate]);
+  }, [endDate, holidays, isMaternitySelection, startDate]);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -334,7 +372,13 @@ export function NewRequestForm({
             </Button>
             <Button
               type="submit"
-              disabled={submitting || leaveTypes.length === 0 || Boolean(inlineError)}
+              disabled={
+                submitting ||
+                holidaysLoading ||
+                leaveTypes.length === 0 ||
+                requestedDays <= 0 ||
+                Boolean(inlineError)
+              }
             >
               {isPlanning ? "Enregistrer la planification" : "Envoyer la demande"}
             </Button>
@@ -343,38 +387,6 @@ export function NewRequestForm({
       </DialogContent>
     </Dialog>
   );
-}
-
-function countWorkingDays(startDate: string, endDate: string) {
-  if (!startDate || !endDate) return 0;
-
-  const start = new Date(`${startDate}T00:00:00.000Z`);
-  const end = new Date(`${endDate}T00:00:00.000Z`);
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) return 0;
-
-  let days = 0;
-  for (let cursor = new Date(start); cursor <= end; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
-    const day = cursor.getUTCDay();
-    if (day !== 0 && day !== 6) days += 1;
-  }
-
-  return days;
-}
-
-function addWorkingDays(startDate: string, workingDaysToAdd: number) {
-  const start = new Date(`${startDate}T00:00:00.000Z`);
-  if (Number.isNaN(start.getTime())) return "";
-
-  let remaining = Math.max(0, workingDaysToAdd);
-  const cursor = new Date(start);
-
-  while (remaining > 0) {
-    cursor.setUTCDate(cursor.getUTCDate() + 1);
-    const day = cursor.getUTCDay();
-    if (day !== 0 && day !== 6) remaining -= 1;
-  }
-
-  return cursor.toISOString().slice(0, 10);
 }
 
 function roundDays(value: number) {

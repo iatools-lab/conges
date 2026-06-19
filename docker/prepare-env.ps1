@@ -34,6 +34,7 @@ POSTGRES_PASSWORD=CHANGE_ME_POSTGRES_PASSWORD
 
 AUTH_SESSION_SECRET=$sessionSecret
 AUTH_SESSION_TTL_HOURS=12
+AUTH_GOOGLE_ONLY=true
 AUTH_ADMIN_PASSWORD_HASH=CHANGE_ME_ADMIN_PASSWORD_HASH
 GOOGLE_CLIENT_ID=449904699288-upv55q520qi2tc3gbg6vh4ouf1lp31md.apps.googleusercontent.com
 RH_AUTO_REJECT_DAYS=7
@@ -63,5 +64,5 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [System.IO.File]::WriteAllText($EnvFile, $content, $utf8NoBom)
 
 Write-Host ".env cree: $EnvFile"
-Write-Host "Renseignez DOMAIN_NAME, SERVER_IP, POSTGRES_PASSWORD et AUTH_ADMIN_PASSWORD_HASH dans .env avant de lancer docker/deploy.sh."
+Write-Host "Renseignez DOMAIN_NAME, SERVER_IP et POSTGRES_PASSWORD dans .env avant de lancer docker/deploy.sh."
 Write-Host "Vous pouvez aussi partir du modele DEPLOYMENT_PARAMETERS.env.example, puis copier vers .env."

@@ -73,6 +73,7 @@ Remplir obligatoirement:
 - SERVER_IP
 - POSTGRES_PASSWORD
 - AUTH_SESSION_SECRET
+- AUTH_GOOGLE_ONLY=true pour imposer Google et désactiver tous les mots de passe
 - GOOGLE_CLIENT_ID
 
 Pour l'email:

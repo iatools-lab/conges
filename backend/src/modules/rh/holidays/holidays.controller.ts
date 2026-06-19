@@ -4,16 +4,16 @@ import {
   Delete,
   Get,
   Param,
-  Post,
   Patch,
+  Post,
   Query,
 } from '@nestjs/common';
-import { AdminHolidaysService } from './holidays.service';
-import { CreateHolidayDto } from './dto/create-holiday.dto';
-import { UpdateHolidayDto } from './dto/update-holiday.dto';
+import { AdminHolidaysService } from '../../admin/holidays/holidays.service';
+import { CreateHolidayDto } from '../../admin/holidays/dto/create-holiday.dto';
+import { UpdateHolidayDto } from '../../admin/holidays/dto/update-holiday.dto';
 
-@Controller('admin/holidays')
-export class AdminHolidaysController {
+@Controller('rh/holidays')
+export class RhHolidaysController {
   constructor(private readonly service: AdminHolidaysService) {}
 
   @Get()

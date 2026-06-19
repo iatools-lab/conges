@@ -108,6 +108,7 @@ const rhGroups: NavigationGroup[] = [
     label: "Administration RH",
     icon: <Settings className="size-4" />,
     items: [
+      item(rhModule, "holidays", <CalendarOff className="size-4" />),
       item(rhModule, "exports", <ScrollText className="size-4" />),
       item(rhModule, "audit", <History className="size-4" />),
       item(rhModule, "settings", <Settings className="size-4" />),

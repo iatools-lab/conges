@@ -1,18 +1,14 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import {
-  OtpStatus,
-  OtpType,
-  RoleType,
-  UserStatus,
-} from '@prisma/client';
+import { OtpStatus, OtpType, RoleType, UserStatus } from '@prisma/client';
 import { randomBytes, scryptSync, timingSafeEqual } from 'crypto';
 import { OAuth2Client } from 'google-auth-library';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -33,6 +29,7 @@ import { EmailService } from '../shared/notifications/email.service';
 import { Request } from 'express';
 
 type AppRole = 'employee' | 'manager' | 'rh' | 'admin';
+type AuthenticationMethod = 'google' | 'password';
 
 const ADMIN_EMAIL = 'admin@upowa.org';
 const DEV_ADMIN_PASSWORD_HASH =
@@ -49,6 +46,7 @@ export class AuthService {
   ) {}
 
   async signup(dto: SignupDto, req?: Request) {
+    this.assertPasswordAuthenticationEnabled();
     const email = dto.email.trim().toLowerCase();
     if (dto.password !== dto.confirmPassword) {
       throw new BadRequestException('Les mots de passe ne correspondent pas.');
@@ -59,13 +57,19 @@ export class AuthService {
       select: { id: true, passwordHash: true, status: true },
     });
     if (!existingUser) {
-      throw new BadRequestException('Aucun compte n\'a été créé pour cet email. Contactez votre administrateur.');
+      throw new BadRequestException(
+        "Aucun compte n'a été créé pour cet email. Contactez votre administrateur.",
+      );
     }
     if (existingUser.passwordHash) {
-      throw new ConflictException('Le mot de passe a déjà été défini pour ce compte.');
+      throw new ConflictException(
+        'Le mot de passe a déjà été défini pour ce compte.',
+      );
     }
     if (existingUser.status !== UserStatus.ACTIVE) {
-      throw new BadRequestException('Ce compte est inactif. Contactez votre administrateur.');
+      throw new BadRequestException(
+        'Ce compte est inactif. Contactez votre administrateur.',
+      );
     }
 
     // Hasher le mot de passe
@@ -119,11 +123,16 @@ export class AuthService {
   }
 
   async login(dto: LoginDto, req?: Request) {
+    this.assertPasswordAuthenticationEnabled();
     const email = dto.email.trim().toLowerCase();
     const password = dto.password?.trim();
 
     try {
-      const session = await this.createSessionForEmail(email, password);
+      const session = await this.createSessionForEmail(
+        email,
+        'password',
+        password,
+      );
 
       // Audit log - login réussi
       await this.prisma.auditLog.create({
@@ -151,7 +160,10 @@ export class AuthService {
           action: 'LOGIN_FAILED',
           entity: 'User',
           entityId: user?.id,
-          metadata: { email, reason: error instanceof Error ? error.message : 'unknown' },
+          metadata: {
+            email,
+            reason: error instanceof Error ? error.message : 'unknown',
+          },
           ipAddress: req?.ip,
           userAgent: req?.headers['user-agent'],
         },
@@ -189,7 +201,7 @@ export class AuthService {
         throw new UnauthorizedException('Compte Google non vérifié');
       }
 
-      const session = await this.createSessionForEmail(email);
+      const session = await this.createSessionForEmail(email, 'google');
 
       // Audit log
       await this.prisma.auditLog.create({
@@ -212,6 +224,7 @@ export class AuthService {
   }
 
   async forgotPassword(dto: ForgotPasswordDto, req?: Request) {
+    this.assertPasswordAuthenticationEnabled();
     const email = dto.email.trim().toLowerCase();
 
     const user = await this.prisma.user.findUnique({
@@ -222,7 +235,10 @@ export class AuthService {
     // Ne pas révéler si l'email existe ou non (sécurité)
     if (!user || user.status === UserStatus.INACTIVE) {
       // On simule un succès pour ne pas révéler l'existence du compte
-      return { message: 'Si cet email existe, un code de réinitialisation a été envoyé.' };
+      return {
+        message:
+          'Si cet email existe, un code de réinitialisation a été envoyé.',
+      };
     }
 
     // Désactiver les OTP précédents en cours
@@ -282,10 +298,13 @@ export class AuthService {
       },
     });
 
-    return { message: 'Si cet email existe, un code de réinitialisation a été envoyé.' };
+    return {
+      message: 'Si cet email existe, un code de réinitialisation a été envoyé.',
+    };
   }
 
   async verifyOtp(dto: VerifyOtpDto, req?: Request) {
+    this.assertPasswordAuthenticationEnabled();
     const email = dto.email.trim().toLowerCase();
     const code = dto.code.trim();
 
@@ -309,7 +328,9 @@ export class AuthService {
     });
 
     if (!otpRequest) {
-      throw new BadRequestException('Aucun code de vérification en cours. Veuillez en demander un nouveau.');
+      throw new BadRequestException(
+        'Aucun code de vérification en cours. Veuillez en demander un nouveau.',
+      );
     }
 
     // Vérifier l'expiration
@@ -318,7 +339,9 @@ export class AuthService {
         where: { id: otpRequest.id },
         data: { status: OtpStatus.EXPIRED },
       });
-      throw new BadRequestException('Le code a expiré. Veuillez en demander un nouveau.');
+      throw new BadRequestException(
+        'Le code a expiré. Veuillez en demander un nouveau.',
+      );
     }
 
     // Vérifier le nombre de tentatives
@@ -327,7 +350,9 @@ export class AuthService {
         where: { id: otpRequest.id },
         data: { status: OtpStatus.MAX_ATTEMPTS },
       });
-      throw new BadRequestException('Trop de tentatives. Veuillez demander un nouveau code.');
+      throw new BadRequestException(
+        'Trop de tentatives. Veuillez demander un nouveau code.',
+      );
     }
 
     // Vérifier le code (comparaison hash)
@@ -345,7 +370,10 @@ export class AuthService {
           action: 'VERIFY_OTP',
           entity: 'OtpRequest',
           entityId: otpRequest.id,
-          metadata: { success: false, remainingAttempts: otpRequest.maxAttempts - otpRequest.attempts - 1 },
+          metadata: {
+            success: false,
+            remainingAttempts: otpRequest.maxAttempts - otpRequest.attempts - 1,
+          },
           ipAddress: req?.ip,
           userAgent: req?.headers['user-agent'],
         },
@@ -392,6 +420,7 @@ export class AuthService {
   }
 
   async resetPassword(dto: ResetPasswordDto, req?: Request) {
+    this.assertPasswordAuthenticationEnabled();
     const email = dto.email.trim().toLowerCase();
 
     const user = await this.prisma.user.findUnique({
@@ -419,7 +448,9 @@ export class AuthService {
     });
 
     if (!otpRequest) {
-      throw new BadRequestException('Veuillez d\'abord vérifier votre code OTP.');
+      throw new BadRequestException(
+        "Veuillez d'abord vérifier votre code OTP.",
+      );
     }
 
     if (new Date() > otpRequest.expiresAt) {
@@ -602,8 +633,16 @@ export class AuthService {
     };
   }
 
-  private async createSessionForEmail(email: string, password?: string) {
+  private async createSessionForEmail(
+    email: string,
+    authenticationMethod: AuthenticationMethod,
+    password?: string,
+  ) {
     if (email === ADMIN_EMAIL) {
+      if (authenticationMethod === 'google') {
+        return this.toAdminSession();
+      }
+
       if (!password) {
         throw new UnauthorizedException('Mot de passe requis');
       }
@@ -634,18 +673,20 @@ export class AuthService {
       throw new UnauthorizedException('Email non autorisé');
     }
 
-    if (user.passwordHash) {
-      if (!password) {
-        throw new UnauthorizedException('Mot de passe requis');
-      }
+    if (authenticationMethod === 'password') {
+      if (user.passwordHash) {
+        if (!password) {
+          throw new UnauthorizedException('Mot de passe requis');
+        }
 
-      if (!this.verifyPassword(password, user.passwordHash)) {
-        throw new UnauthorizedException('Mot de passe invalide');
+        if (!this.verifyPassword(password, user.passwordHash)) {
+          throw new UnauthorizedException('Mot de passe invalide');
+        }
+      } else if (password) {
+        throw new UnauthorizedException(
+          'Mot de passe non défini. Veuillez créer votre mot de passe avant de vous connecter.',
+        );
       }
-    } else if (password) {
-      throw new UnauthorizedException(
-        'Mot de passe non défini. Veuillez créer votre mot de passe avant de vous connecter.',
-      );
     }
 
     const explicitRoles = this.toAppRoles(user.roles.map((role) => role.role));
@@ -704,11 +745,35 @@ export class AuthService {
     return DEV_ADMIN_PASSWORD_HASH;
   }
 
+  private assertPasswordAuthenticationEnabled() {
+    if (!this.isGoogleOnlyAuthentication()) return;
+
+    throw new ForbiddenException(
+      'Cette fonctionnalité est désactivée. Utilisez la connexion Google.',
+    );
+  }
+
+  private isGoogleOnlyAuthentication() {
+    const value = this.configService
+      .get<string>('AUTH_GOOGLE_ONLY')
+      ?.trim()
+      .toLowerCase();
+
+    return (
+      value === 'true' || value === '1' || value === 'yes' || value === 'on'
+    );
+  }
+
   private getAuditUserId(userId: string) {
     return userId === 'admin-upowa' ? null : userId;
   }
 
-  private createToken(sub: string, email: string, roles: AppRole[], customTtlSeconds?: number) {
+  private createToken(
+    sub: string,
+    email: string,
+    roles: AppRole[],
+    customTtlSeconds?: number,
+  ) {
     try {
       return createSessionToken(
         {

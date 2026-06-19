@@ -86,6 +86,12 @@ type OldestPending = {
   submittedAt: string | null;
 };
 
+type CalendarHoliday = {
+  id: string;
+  date: string;
+  name: string;
+};
+
 type ManagerDashboardResponse = {
   year: number;
   month: number;
@@ -111,6 +117,7 @@ type ManagerDashboardResponse = {
   attention: {
     oldestPending: OldestPending[];
   };
+  holidays: CalendarHoliday[];
   team: Member[];
 };
 
@@ -162,6 +169,7 @@ const emptyAttention: ManagerDashboardResponse["attention"] = {
   oldestPending: [],
 };
 const emptyBalances: BalanceRow[] = [];
+const emptyHolidays: CalendarHoliday[] = [];
 
 function buildDashboardPath(
   session: { id: string; email: string },
@@ -302,8 +310,28 @@ export function ManagerDashboard() {
   const stats = dashboardQuery.data?.stats ?? emptyStats;
   const attention = dashboardQuery.data?.attention ?? emptyAttention;
   const balances = dashboardQuery.data?.balances ?? emptyBalances;
+  const holidays = dashboardQuery.data?.holidays ?? emptyHolidays;
   const daysInMonth = new Date(year, monthIdx + 1, 0).getDate();
   const firstDow = (new Date(year, monthIdx, 1).getDay() + 6) % 7;
+  const holidaysByDay = useMemo(
+    () =>
+      new Map(
+        holidays
+          .filter((holiday) =>
+            holiday.date.startsWith(`${year}-${String(monthIdx + 1).padStart(2, "0")}`),
+          )
+          .map((holiday) => [Number(holiday.date.slice(8, 10)), holiday]),
+      ),
+    [holidays, monthIdx, year],
+  );
+  const nonWorkingDays = useMemo(() => {
+    const days = new Set<number>();
+    for (let day = 1; day <= daysInMonth; day += 1) {
+      const weekDay = new Date(Date.UTC(year, monthIdx, day)).getUTCDay();
+      if (weekDay === 0 || weekDay === 6 || holidaysByDay.has(day)) days.add(day);
+    }
+    return days;
+  }, [daysInMonth, holidaysByDay, monthIdx, year]);
 
   const departments = useMemo(
     () => Array.from(new Set(team.map((member) => member.department))),
@@ -349,22 +377,20 @@ export function ManagerDashboard() {
     [attention.oldestPending, nowMs],
   );
 
-
   const coverage = useMemo(() => {
     const days = Array.from({ length: daysInMonth }, () => 0);
     filtered.forEach((member) => {
       member.bars.forEach((bar) => {
-        for (let day = bar.s; day <= bar.e && day <= daysInMonth; day += 1) days[day - 1] += 1;
+        for (let day = bar.s; day <= bar.e && day <= daysInMonth; day += 1) {
+          if (!nonWorkingDays.has(day)) days[day - 1] += 1;
+        }
       });
     });
     return days;
-  }, [filtered, daysInMonth]);
+  }, [daysInMonth, filtered, nonWorkingDays]);
 
   const maxAbsences = Math.max(1, ...coverage);
-  const totalAbsences = filtered.reduce(
-    (sum, member) => sum + member.bars.reduce((acc, bar) => acc + (bar.e - bar.s + 1), 0),
-    0,
-  );
+  const totalAbsences = coverage.reduce((sum, dayAbsences) => sum + dayAbsences, 0);
   const departmentLabel =
     dashboardQuery.data?.manager.managedDepartments
       .map((department) => department.name)
@@ -503,9 +529,7 @@ export function ManagerDashboard() {
         <CardHeader
           title={`Soldes de congés ${year} — équipe`}
           action={
-            <span className="text-xs text-muted-foreground">
-              {balances.length} employé(s)
-            </span>
+            <span className="text-xs text-muted-foreground">{balances.length} employé(s)</span>
           }
         />
         {dashboardQuery.isLoading ? (
@@ -553,18 +577,10 @@ export function ManagerDashboard() {
                         )}
                       </td>
                       <td className="px-5 py-3">
-                        {row.alert === "negative" && (
-                          <Badge tone="rejected">Solde négatif</Badge>
-                        )}
-                        {row.alert === "passif" && (
-                          <Badge tone="pending">Passif à apurer</Badge>
-                        )}
-                        {row.alert === "low" && (
-                          <Badge tone="pending">Solde faible</Badge>
-                        )}
-                        {row.alert === "ok" && (
-                          <Badge tone="valid">OK</Badge>
-                        )}
+                        {row.alert === "negative" && <Badge tone="rejected">Solde négatif</Badge>}
+                        {row.alert === "passif" && <Badge tone="pending">Passif à apurer</Badge>}
+                        {row.alert === "low" && <Badge tone="pending">Solde faible</Badge>}
+                        {row.alert === "ok" && <Badge tone="valid">OK</Badge>}
                       </td>
                     </tr>
                   ))}
@@ -626,7 +642,10 @@ export function ManagerDashboard() {
                   onChange={(event) => setQuery(event.target.value)}
                 />
               </div>
-              <Select value={statusF} onValueChange={(value) => setStatusF(value as "all" | LeaveStatus)}>
+              <Select
+                value={statusF}
+                onValueChange={(value) => setStatusF(value as "all" | LeaveStatus)}
+              >
                 <SelectTrigger className="w-48">
                   <SelectValue placeholder="Statut" />
                 </SelectTrigger>
@@ -695,10 +714,12 @@ export function ManagerDashboard() {
                       {Array.from({ length: daysInMonth }).map((_, index) => {
                         const dow = (firstDow + index) % 7;
                         const weekend = dow >= 5;
+                        const holiday = holidaysByDay.get(index + 1);
                         return (
                           <div
                             key={index}
-                            className={`py-1 text-center leading-tight ${weekend ? "rounded-sm bg-muted/60" : ""}`}
+                            className={`py-1 text-center leading-tight ${weekend || holiday ? "rounded-sm bg-muted/60" : ""}`}
+                            title={holiday?.name}
                           >
                             <div className="text-[10px] opacity-60">{WEEKDAYS[dow]}</div>
                             <div className="font-medium text-foreground/80">
@@ -741,8 +762,9 @@ export function ManagerDashboard() {
                             >
                               {Array.from({ length: daysInMonth }).map((_, index) => {
                                 const dow = (firstDow + index) % 7;
+                                const nonWorking = dow >= 5 || holidaysByDay.has(index + 1);
                                 return (
-                                  <div key={index} className={dow >= 5 ? "bg-muted/70" : ""} />
+                                  <div key={index} className={nonWorking ? "bg-muted/70" : ""} />
                                 );
                               })}
                             </div>
@@ -782,6 +804,20 @@ export function ManagerDashboard() {
                                 </Tooltip>
                               );
                             })}
+                            <div
+                              className="pointer-events-none absolute inset-0 z-10 grid gap-px"
+                              style={{
+                                gridTemplateColumns: `repeat(${daysInMonth}, minmax(0, 1fr))`,
+                              }}
+                            >
+                              {Array.from({ length: daysInMonth }).map((_, index) => (
+                                <div
+                                  key={index}
+                                  className={nonWorkingDays.has(index + 1) ? "bg-muted/75" : ""}
+                                  title={holidaysByDay.get(index + 1)?.name}
+                                />
+                              ))}
+                            </div>
                           </div>
                         </div>
                       ))}
@@ -801,9 +837,10 @@ export function ManagerDashboard() {
                     >
                       {coverage.map((value, index) => {
                         const dow = (firstDow + index) % 7;
+                        const nonWorking = nonWorkingDays.has(index + 1);
                         const height = value === 0 ? 4 : (value / maxAbsences) * 100;
                         const tone =
-                          value === 0
+                          nonWorking || value === 0
                             ? "bg-muted"
                             : value >= 3
                               ? "bg-stat-red-fg"
@@ -813,8 +850,11 @@ export function ManagerDashboard() {
                         return (
                           <div
                             key={index}
-                            className={`relative flex items-end ${dow >= 5 ? "opacity-80" : ""}`}
-                            title={`${index + 1}: ${value} absent(s)`}
+                            className={`relative flex items-end ${nonWorking || dow >= 5 ? "opacity-80" : ""}`}
+                            title={
+                              holidaysByDay.get(index + 1)?.name ??
+                              `${index + 1}: ${value} absent(s)`
+                            }
                           >
                             <div
                               className={`w-full rounded-sm ${tone}`}

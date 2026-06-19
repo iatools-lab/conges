@@ -39,7 +39,8 @@ services:
       FRONTEND_URL: ${FRONTEND_URL:-https://conges.upowa.org}
       AUTH_SESSION_SECRET: ${AUTH_SESSION_SECRET:?AUTH_SESSION_SECRET manquant. Lancez docker/prepare-env.sh ou docker/prepare-env.ps1}
       AUTH_SESSION_TTL_HOURS: ${AUTH_SESSION_TTL_HOURS:-12}
-      AUTH_ADMIN_PASSWORD_HASH: ${AUTH_ADMIN_PASSWORD_HASH:?AUTH_ADMIN_PASSWORD_HASH manquant. Lancez docker/prepare-env.sh ou docker/prepare-env.ps1}
+      AUTH_GOOGLE_ONLY: ${AUTH_GOOGLE_ONLY:-false}
+      AUTH_ADMIN_PASSWORD_HASH: ${AUTH_ADMIN_PASSWORD_HASH:-}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-449904699288-upv55q520qi2tc3gbg6vh4ouf1lp31md.apps.googleusercontent.com}
       ENABLE_SWAGGER: ${ENABLE_SWAGGER:-false}
       RH_AUTO_REJECT_DAYS: ${RH_AUTO_REJECT_DAYS:-7}
@@ -69,6 +70,7 @@ services:
       args:
         VITE_API_URL: ${VITE_API_URL:-/api/v1}
         VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-449904699288-upv55q520qi2tc3gbg6vh4ouf1lp31md.apps.googleusercontent.com}
+        VITE_AUTH_GOOGLE_ONLY: ${AUTH_GOOGLE_ONLY:-false}
     image: conges-nginx:production
     container_name: conges-nginx
     restart: unless-stopped

@@ -27,10 +27,19 @@ const leaveTypesWithMaternity: LeaveTypeOption[] = [
   { code: "MAT", name: "Congés maternité", requiresProof: true },
 ];
 
+function mockFormApi(
+  balances: Array<{ code: string; remaining: number }>,
+  holidays: Array<{ id: string; date: string; name: string; recurring: boolean }> = [],
+) {
+  vi.mocked(apiFetch).mockImplementation((path) =>
+    Promise.resolve(path.includes("/holidays") ? { rows: holidays } : { rows: balances }),
+  );
+}
+
 describe("NewRequestForm", () => {
   beforeEach(() => {
     vi.mocked(apiFetch).mockReset();
-    vi.mocked(apiFetch).mockResolvedValue({ rows: [{ code: "CP", remaining: 10 }] });
+    mockFormApi([{ code: "CP", remaining: 10 }]);
   });
 
   it("submits a planned draft payload in planning mode", async () => {
@@ -96,7 +105,7 @@ describe("NewRequestForm", () => {
   });
 
   it("blocks submission when requested days exceed available balance", async () => {
-    vi.mocked(apiFetch).mockResolvedValue({ rows: [{ code: "CP", remaining: 1 }] });
+    mockFormApi([{ code: "CP", remaining: 1 }]);
     const user = userEvent.setup();
     const onSubmit = vi.fn();
     render(<NewRequestForm session={session} leaveTypes={leaveTypes} onSubmit={onSubmit} />);
@@ -115,21 +124,42 @@ describe("NewRequestForm", () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it("forces maternity leave to use the full 90-day entitlement", async () => {
-    vi.mocked(apiFetch).mockResolvedValue({
-      rows: [
-        { code: "CP", remaining: 10 },
-        { code: "MAT", remaining: 90 },
+  it("excludes public holidays from the displayed working-day count", async () => {
+    mockFormApi(
+      [{ code: "CP", remaining: 10 }],
+      [
+        {
+          id: "holiday-1",
+          date: "2026-06-02",
+          name: "Jour férié",
+          recurring: false,
+        },
       ],
+    );
+    const user = userEvent.setup();
+    render(<NewRequestForm session={session} leaveTypes={leaveTypes} onSubmit={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: /nouvelle demande/i }));
+    await waitFor(() => expect(apiFetch).toHaveBeenCalledWith("/employee/leave-requests/holidays"));
+    fireEvent.change(screen.getByLabelText(/date de début/i), {
+      target: { value: "2026-06-01" },
     });
+    fireEvent.change(screen.getByLabelText(/date de fin/i), {
+      target: { value: "2026-06-03" },
+    });
+
+    expect(await screen.findByDisplayValue("2 jour(s) ouvré(s)")).toBeInTheDocument();
+  });
+
+  it("forces maternity leave to use the full 90-day entitlement", async () => {
+    mockFormApi([
+      { code: "CP", remaining: 10 },
+      { code: "MAT", remaining: 90 },
+    ]);
     const user = userEvent.setup();
     const onSubmit = vi.fn();
     render(
-      <NewRequestForm
-        session={session}
-        leaveTypes={leaveTypesWithMaternity}
-        onSubmit={onSubmit}
-      />,
+      <NewRequestForm session={session} leaveTypes={leaveTypesWithMaternity} onSubmit={onSubmit} />,
     );
 
     await user.click(screen.getByRole("button", { name: /nouvelle demande/i }));

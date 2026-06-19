@@ -18,6 +18,10 @@ import { FindManagerDashboardQueryDto } from './dto/manager-dashboard.dto';
 import { LeaveEntitlementsService } from '../../shared/leave-entitlements/leave-entitlements.service';
 import { LeaveBalanceSyncService } from '../../shared/leave-balances/leave-balance-sync.service';
 import { overlapDateWhere, resolveDateRange } from '../../../common/date-range';
+import {
+  expandHolidayDateKeys,
+  utcDateKey,
+} from '../../../common/working-days';
 
 type LeaveBarStatus = 'draft' | 'pending' | 'manager' | 'rh' | 'conflict';
 const REGULAR_PAID_CODES = new Set(['CP', 'ANC', 'ENF']);
@@ -79,8 +83,7 @@ export class ManagerDashboardService {
     const range = resolveDateRange(query, { defaultMode: 'month', now });
     const year = range.year;
     const month = query.month ?? range.month ?? now.getUTCMonth() + 1;
-    const monthStart =
-      range.dateFrom ?? new Date(Date.UTC(year, month - 1, 1));
+    const monthStart = range.dateFrom ?? new Date(Date.UTC(year, month - 1, 1));
     const nextMonthStart =
       range.endExclusive ?? new Date(Date.UTC(year, month, 1));
     const yearStart = new Date(Date.UTC(year, 0, 1));
@@ -98,115 +101,127 @@ export class ManagerDashboardService {
       urgentPendingRequests,
       upcomingAbsenceOwners,
       oldestPendingRequests,
+      holidayRules,
     ] = await Promise.all([
-        this.prisma.user.findMany({
-          where: ownerWhere,
-          orderBy: [
-            { department: { name: 'asc' } },
-            { nom: 'asc' },
-            { prenom: 'asc' },
-          ],
-          select: {
-            ...dashboardUserSelect,
-            leaveRequests: {
-              where: {
-                status: {
-                  notIn: [
-                    LeaveRequestStatus.REJECTED,
-                    LeaveRequestStatus.CANCELLED,
-                  ],
-                },
-                ...overlapDateWhere(range),
+      this.prisma.user.findMany({
+        where: ownerWhere,
+        orderBy: [
+          { department: { name: 'asc' } },
+          { nom: 'asc' },
+          { prenom: 'asc' },
+        ],
+        select: {
+          ...dashboardUserSelect,
+          leaveRequests: {
+            where: {
+              status: {
+                notIn: [
+                  LeaveRequestStatus.REJECTED,
+                  LeaveRequestStatus.CANCELLED,
+                ],
               },
-              orderBy: [{ startDate: 'asc' }, { reference: 'asc' }],
-              select: dashboardUserSelect.leaveRequests.select,
+              ...overlapDateWhere(range),
             },
+            orderBy: [{ startDate: 'asc' }, { reference: 'asc' }],
+            select: dashboardUserSelect.leaveRequests.select,
           },
-        }),
-        this.prisma.leaveRequest.count({
-          where: {
-            status: LeaveRequestStatus.PENDING,
-            ...overlapDateWhere(range),
-            owner: actionOwnerWhere,
+        },
+      }),
+      this.prisma.leaveRequest.count({
+        where: {
+          status: LeaveRequestStatus.PENDING,
+          ...overlapDateWhere(range),
+          owner: actionOwnerWhere,
+        },
+      }),
+      this.prisma.conflict.count({
+        where: {
+          status: ConflictStatus.ACTIVE,
+          ...(range.endExclusive
+            ? { periodStart: { lt: range.endExclusive } }
+            : {}),
+          ...(range.dateFrom ? { periodEnd: { gte: range.dateFrom } } : {}),
+          OR: [
+            ...(departmentIds.length
+              ? [{ departmentId: { in: departmentIds } }]
+              : []),
+            { request: { owner: ownerWhere } },
+          ],
+        },
+      }),
+      this.prisma.leaveRequest.findMany({
+        where: {
+          status: {
+            notIn: [LeaveRequestStatus.REJECTED, LeaveRequestStatus.CANCELLED],
           },
-        }),
-        this.prisma.conflict.count({
-          where: {
-            status: ConflictStatus.ACTIVE,
-            ...(range.endExclusive
-              ? { periodStart: { lt: range.endExclusive } }
-              : {}),
-            ...(range.dateFrom ? { periodEnd: { gte: range.dateFrom } } : {}),
-            OR: [
-              ...(departmentIds.length
-                ? [{ departmentId: { in: departmentIds } }]
-                : []),
-              { request: { owner: ownerWhere } },
-            ],
+          ...overlapDateWhere(range),
+          owner: ownerWhere,
+        },
+        distinct: ['ownerId'],
+        select: { ownerId: true },
+      }),
+      this.prisma.leaveRequest.count({
+        where: {
+          status: LeaveRequestStatus.PENDING,
+          submittedAt: { not: null, lte: urgentThreshold },
+          ...overlapDateWhere(range),
+          owner: actionOwnerWhere,
+        },
+      }),
+      this.prisma.leaveRequest.findMany({
+        where: {
+          status: {
+            notIn: [LeaveRequestStatus.REJECTED, LeaveRequestStatus.CANCELLED],
           },
-        }),
-        this.prisma.leaveRequest.findMany({
-          where: {
-            status: {
-              notIn: [
-                LeaveRequestStatus.REJECTED,
-                LeaveRequestStatus.CANCELLED,
-              ],
-            },
-            ...overlapDateWhere(range),
-            owner: ownerWhere,
+          AND: [
+            { startDate: { lt: nextSevenDaysStart } },
+            { endDate: { gte: todayStart } },
+            overlapDateWhere(range),
+          ],
+          owner: ownerWhere,
+        },
+        distinct: ['ownerId'],
+        select: { ownerId: true },
+      }),
+      this.prisma.leaveRequest.findMany({
+        where: {
+          status: LeaveRequestStatus.PENDING,
+          submittedAt: { not: null },
+          ...overlapDateWhere(range),
+          owner: actionOwnerWhere,
+        },
+        orderBy: [{ submittedAt: 'asc' }, { createdAt: 'asc' }],
+        take: 5,
+        select: {
+          id: true,
+          reference: true,
+          startDate: true,
+          endDate: true,
+          submittedAt: true,
+          owner: { select: { nom: true, prenom: true, matricule: true } },
+          leaveType: {
+            select: { code: true, name: true, category: true },
           },
-          distinct: ['ownerId'],
-          select: { ownerId: true },
-        }),
-        this.prisma.leaveRequest.count({
-          where: {
-            status: LeaveRequestStatus.PENDING,
-            submittedAt: { not: null, lte: urgentThreshold },
-            ...overlapDateWhere(range),
-            owner: actionOwnerWhere,
-          },
-        }),
-        this.prisma.leaveRequest.findMany({
-          where: {
-            status: {
-              notIn: [
-                LeaveRequestStatus.REJECTED,
-                LeaveRequestStatus.CANCELLED,
-              ],
-            },
-            AND: [
-              { startDate: { lt: nextSevenDaysStart } },
-              { endDate: { gte: todayStart } },
-              overlapDateWhere(range),
-            ],
-            owner: ownerWhere,
-          },
-          distinct: ['ownerId'],
-          select: { ownerId: true },
-        }),
-        this.prisma.leaveRequest.findMany({
-          where: {
-            status: LeaveRequestStatus.PENDING,
-            submittedAt: { not: null },
-            ...overlapDateWhere(range),
-            owner: actionOwnerWhere,
-          },
-          orderBy: [{ submittedAt: 'asc' }, { createdAt: 'asc' }],
-          take: 5,
-          select: {
-            id: true,
-            reference: true,
-            startDate: true,
-            endDate: true,
-            submittedAt: true,
-            owner: { select: { nom: true, prenom: true, matricule: true } },
-            leaveType: {
-              select: { code: true, name: true, category: true },
-            },
-          },
-        }),
-      ]);
+        },
+      }),
+      this.prisma.publicHoliday.findMany({
+        where: {
+          country: 'CM',
+          OR: [
+            { date: { gte: monthStart, lt: nextMonthStart } },
+            { recurring: true },
+          ],
+        },
+        orderBy: { date: 'asc' },
+        select: { id: true, date: true, name: true, recurring: true },
+      }),
+    ]);
+
+    const holidayDates = expandHolidayDateKeys(
+      holidayRules,
+      monthStart,
+      new Date(nextMonthStart.getTime() - 1),
+    );
 
     const sortedTeam = team.slice().sort((left, right) => {
       const recentDiff =
@@ -252,8 +267,8 @@ export class ManagerDashboardService {
 
     const balances = sortedTeam.map((member) => {
       const memberBalances = balancesByUser.get(member.id) ?? [];
-      const mainBalances = memberBalances.filter(
-        (b) => this.isRegularPaidBalance(b.leaveType),
+      const mainBalances = memberBalances.filter((b) =>
+        this.isRegularPaidBalance(b.leaveType),
       );
       const passifBalance = memberBalances.find(
         (b) => b.leaveType.code.toUpperCase() === 'PASSIF',
@@ -301,17 +316,30 @@ export class ManagerDashboardService {
     const totalAbsenceDays = rows.reduce(
       (sum, member) =>
         sum +
-        member.bars.reduce(
-          (memberSum, bar) => memberSum + (bar.e - bar.s + 1),
-          0,
-        ),
+        member.bars.reduce((memberSum, bar) => {
+          let workingDays = 0;
+          for (let day = bar.s; day <= bar.e; day += 1) {
+            const date = new Date(Date.UTC(year, month - 1, day));
+            const weekDay = date.getUTCDay();
+            if (
+              weekDay !== 0 &&
+              weekDay !== 6 &&
+              !holidayDates.has(utcDateKey(date))
+            ) {
+              workingDays += 1;
+            }
+          }
+          return memberSum + workingDays;
+        }, 0),
       0,
     );
     const annualPlansMissing = sortedTeam.filter(
       (member) => !plannedOwnerIds.has(member.id),
     ).length;
     const planningRate = sortedTeam.length
-      ? Math.round(((sortedTeam.length - annualPlansMissing) / sortedTeam.length) * 100)
+      ? Math.round(
+          ((sortedTeam.length - annualPlansMissing) / sortedTeam.length) * 100,
+        )
       : 100;
 
     return {
@@ -350,6 +378,15 @@ export class ManagerDashboardService {
           submittedAt: request.submittedAt?.toISOString() ?? null,
         })),
       },
+      holidays: holidayRules.flatMap((holiday) =>
+        [
+          ...expandHolidayDateKeys(
+            [holiday],
+            monthStart,
+            new Date(nextMonthStart.getTime() - 1),
+          ),
+        ].map((date) => ({ id: holiday.id, date, name: holiday.name })),
+      ),
       team: rows,
     };
   }
@@ -572,7 +609,8 @@ export class ManagerDashboardService {
     if (code === 'CP') return 'CP';
     if (code === 'RTT') return 'RTT';
     if (code === 'PASSIF') return 'Passif';
-    if (leaveType.category === LeaveCategory.CONGE_SPECIAL) return 'Sp\u00e9cial';
+    if (leaveType.category === LeaveCategory.CONGE_SPECIAL)
+      return 'Sp\u00e9cial';
     if (leaveType.category === LeaveCategory.CONGE_MALADIE) return 'Maladie';
     if (leaveType.category === LeaveCategory.CONGE_SANS_SOLDE)
       return 'Sans solde';

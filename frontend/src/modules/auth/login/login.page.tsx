@@ -3,6 +3,7 @@ import { Mail, Palmtree } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api";
+import { AUTH_GOOGLE_ONLY } from "@/modules/auth/config";
 import { getAuthSession, saveAuthSession, type AuthSession } from "@/modules/auth/session";
 
 const GOOGLE_CLIENT_ID = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined)?.trim();
@@ -83,7 +84,10 @@ export function Login() {
     let isDisposed = false;
 
     async function mountGoogleButton() {
-      if (!GOOGLE_CLIENT_ID) return;
+      if (!GOOGLE_CLIENT_ID) {
+        if (AUTH_GOOGLE_ONLY) setError("Connexion Google indisponible");
+        return;
+      }
 
       try {
         await loadGoogleIdentityScript();
@@ -189,69 +193,76 @@ export function Login() {
         </div>
         <div className="bg-card border rounded-xl p-8 shadow-sm">
           <h2 className="text-xl font-semibold mb-6">Connexion à votre compte</h2>
-          <form className="space-y-4" onSubmit={submit}>
-            <div>
-              <label htmlFor="login-email" className="block text-sm font-medium mb-1.5">
-                Email professionnel
-              </label>
-              <div className="relative">
-                <input
-                  id="login-email"
-                  type="email"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  placeholder="votre.email@upowa.org"
-                  required
-                  autoFocus
-                  autoComplete="email"
-                  className="w-full rounded-md border bg-background px-3 py-2 pr-10 text-sm"
-                />
-                <Mail className="absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              </div>
-            </div>
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label htmlFor="login-password" className="block text-sm font-medium">
-                  Mot de passe
+          {!AUTH_GOOGLE_ONLY && (
+            <form className="space-y-4" onSubmit={submit}>
+              <div>
+                <label htmlFor="login-email" className="block text-sm font-medium mb-1.5">
+                  Email professionnel
                 </label>
-                <button
-                  type="button"
-                  onClick={() => router.navigate({ to: "/forgot-password" })}
-                  className="text-xs text-navy hover:underline"
-                >
-                  Mot de passe oublié ?
-                </button>
+                <div className="relative">
+                  <input
+                    id="login-email"
+                    type="email"
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    placeholder="votre.email@upowa.org"
+                    required
+                    autoFocus
+                    autoComplete="email"
+                    className="w-full rounded-md border bg-background px-3 py-2 pr-10 text-sm"
+                  />
+                  <Mail className="absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                </div>
               </div>
-              <input
-                id="login-password"
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                placeholder="Votre mot de passe"
-                required
-                autoComplete="current-password"
-                className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-              />
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label htmlFor="login-password" className="block text-sm font-medium">
+                    Mot de passe
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => router.navigate({ to: "/forgot-password" })}
+                    className="text-xs text-navy hover:underline"
+                  >
+                    Mot de passe oublié ?
+                  </button>
+                </div>
+                <input
+                  id="login-password"
+                  type="password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  placeholder="Votre mot de passe"
+                  required
+                  autoComplete="current-password"
+                  className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="w-full rounded-md bg-navy text-navy-foreground py-2.5 text-sm font-medium hover:bg-navy-hover disabled:opacity-60"
+              >
+                {isSubmitting ? "Connexion..." : "Se connecter"}
+              </button>
+            </form>
+          )}
+          {error && (
+            <div className="mt-4 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+              {error}
             </div>
-            {error && (
-              <div className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-                {error}
-              </div>
-            )}
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="w-full rounded-md bg-navy text-navy-foreground py-2.5 text-sm font-medium hover:bg-navy-hover disabled:opacity-60"
-            >
-              {isSubmitting ? "Connexion..." : "Se connecter"}
-            </button>
-          </form>
-          <div className="my-5 flex items-center gap-3 text-xs text-muted-foreground">
-            <div className="h-px flex-1 bg-border" />
-            <span>ou</span>
-            <div className="h-px flex-1 bg-border" />
-          </div>
-          <div id={GOOGLE_BUTTON_ID} className="flex min-h-10 justify-center">
+          )}
+          {!AUTH_GOOGLE_ONLY && (
+            <div className="my-5 flex items-center gap-3 text-xs text-muted-foreground">
+              <div className="h-px flex-1 bg-border" />
+              <span>ou</span>
+              <div className="h-px flex-1 bg-border" />
+            </div>
+          )}
+          <div
+            id={GOOGLE_BUTTON_ID}
+            className={`flex min-h-10 justify-center ${AUTH_GOOGLE_ONLY ? "mt-6" : ""}`}
+          >
             <button
               type="button"
               disabled
@@ -261,16 +272,18 @@ export function Login() {
               Continuer avec Google
             </button>
           </div>
-          <div className="mt-6 text-center text-sm text-muted-foreground">
-            Pas encore de compte ?{" "}
-            <button
-              type="button"
-              onClick={() => router.navigate({ to: "/signup" })}
-              className="text-navy hover:underline font-medium"
-            >
-              Créer un compte
-            </button>
-          </div>
+          {!AUTH_GOOGLE_ONLY && (
+            <div className="mt-6 text-center text-sm text-muted-foreground">
+              Pas encore de compte ?{" "}
+              <button
+                type="button"
+                onClick={() => router.navigate({ to: "/signup" })}
+                className="text-navy hover:underline font-medium"
+              >
+                Créer un compte
+              </button>
+            </div>
+          )}
         </div>
       </div>
       <div className="absolute bottom-4 text-xs text-muted-foreground">

@@ -33,6 +33,7 @@ import { Route as RhPassifRouteImport } from './modules/routing/rh.passif'
 import { Route as RhParametresRouteImport } from './modules/routing/rh.parametres'
 import { Route as RhHierarchieRouteImport } from './modules/routing/rh.hierarchie'
 import { Route as RhGlobalRouteImport } from './modules/routing/rh.global'
+import { Route as RhFeriesRouteImport } from './modules/routing/rh.feries'
 import { Route as RhExportsRouteImport } from './modules/routing/rh.exports'
 import { Route as RhEnfantsRouteImport } from './modules/routing/rh.enfants'
 import { Route as RhEmployesRouteImport } from './modules/routing/rh.employes'
@@ -173,6 +174,11 @@ const RhHierarchieRoute = RhHierarchieRouteImport.update({
 const RhGlobalRoute = RhGlobalRouteImport.update({
   id: '/rh/global',
   path: '/rh/global',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RhFeriesRoute = RhFeriesRouteImport.update({
+  id: '/rh/feries',
+  path: '/rh/feries',
   getParentRoute: () => rootRouteImport,
 } as any)
 const RhExportsRoute = RhExportsRouteImport.update({
@@ -318,6 +324,7 @@ export interface FileRoutesByFullPath {
   '/rh/employes': typeof RhEmployesRoute
   '/rh/enfants': typeof RhEnfantsRoute
   '/rh/exports': typeof RhExportsRoute
+  '/rh/feries': typeof RhFeriesRoute
   '/rh/global': typeof RhGlobalRoute
   '/rh/hierarchie': typeof RhHierarchieRoute
   '/rh/parametres': typeof RhParametresRoute
@@ -365,6 +372,7 @@ export interface FileRoutesByTo {
   '/rh/employes': typeof RhEmployesRoute
   '/rh/enfants': typeof RhEnfantsRoute
   '/rh/exports': typeof RhExportsRoute
+  '/rh/feries': typeof RhFeriesRoute
   '/rh/global': typeof RhGlobalRoute
   '/rh/hierarchie': typeof RhHierarchieRoute
   '/rh/parametres': typeof RhParametresRoute
@@ -413,6 +421,7 @@ export interface FileRoutesById {
   '/rh/employes': typeof RhEmployesRoute
   '/rh/enfants': typeof RhEnfantsRoute
   '/rh/exports': typeof RhExportsRoute
+  '/rh/feries': typeof RhFeriesRoute
   '/rh/global': typeof RhGlobalRoute
   '/rh/hierarchie': typeof RhHierarchieRoute
   '/rh/parametres': typeof RhParametresRoute
@@ -462,6 +471,7 @@ export interface FileRouteTypes {
     | '/rh/employes'
     | '/rh/enfants'
     | '/rh/exports'
+    | '/rh/feries'
     | '/rh/global'
     | '/rh/hierarchie'
     | '/rh/parametres'
@@ -509,6 +519,7 @@ export interface FileRouteTypes {
     | '/rh/employes'
     | '/rh/enfants'
     | '/rh/exports'
+    | '/rh/feries'
     | '/rh/global'
     | '/rh/hierarchie'
     | '/rh/parametres'
@@ -556,6 +567,7 @@ export interface FileRouteTypes {
     | '/rh/employes'
     | '/rh/enfants'
     | '/rh/exports'
+    | '/rh/feries'
     | '/rh/global'
     | '/rh/hierarchie'
     | '/rh/parametres'
@@ -604,6 +616,7 @@ export interface RootRouteChildren {
   RhEmployesRoute: typeof RhEmployesRoute
   RhEnfantsRoute: typeof RhEnfantsRoute
   RhExportsRoute: typeof RhExportsRoute
+  RhFeriesRoute: typeof RhFeriesRoute
   RhGlobalRoute: typeof RhGlobalRoute
   RhHierarchieRoute: typeof RhHierarchieRoute
   RhParametresRoute: typeof RhParametresRoute
@@ -783,6 +796,13 @@ declare module '@tanstack/react-router' {
       path: '/rh/global'
       fullPath: '/rh/global'
       preLoaderRoute: typeof RhGlobalRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/rh/feries': {
+      id: '/rh/feries'
+      path: '/rh/feries'
+      fullPath: '/rh/feries'
+      preLoaderRoute: typeof RhFeriesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/rh/exports': {
@@ -972,6 +992,7 @@ const rootRouteChildren: RootRouteChildren = {
   RhEmployesRoute: RhEmployesRoute,
   RhEnfantsRoute: RhEnfantsRoute,
   RhExportsRoute: RhExportsRoute,
+  RhFeriesRoute: RhFeriesRoute,
   RhGlobalRoute: RhGlobalRoute,
   RhHierarchieRoute: RhHierarchieRoute,
   RhParametresRoute: RhParametresRoute,

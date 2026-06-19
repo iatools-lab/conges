@@ -64,10 +64,12 @@ type GlobalViewResponse = {
 
 type ExcelCell = string | number | boolean | Date | null | undefined;
 type ExcelReadResult = ExcelCell[][] | { rows?: ExcelCell[][] };
+type HistoryImportCategory = "pris" | "planifier";
 
 type HistoryImportRow = {
   reference: string;
   matricule: string;
+  category: HistoryImportCategory;
   type: string;
   startDate: string;
   endDate: string;
@@ -76,10 +78,21 @@ type HistoryImportRow = {
 
 type HistoryImportResponse = {
   imported: number;
+  importedTaken: number;
+  importedPlanned: number;
   skipped: number;
-  rows: Array<HistoryImportRow & { id: string; employeeName: string; leaveType: string }>;
+  rows: Array<
+    HistoryImportRow & {
+      id: string;
+      employeeName: string;
+      leaveType: string;
+      categoryLabel: string;
+      statusCode: string;
+      statusLabel: string;
+    }
+  >;
   skippedRows: Array<{ reference: string; matricule: string; reason: string }>;
-  totals: { days: number };
+  totals: { days: number; takenDays: number; plannedDays: number };
 };
 
 type ProcessedFilter = "ALL" | "APPROVED" | "REJECTED" | "CANCELLED";
@@ -114,6 +127,23 @@ function cellToNumber(value: ExcelCell, rowNumber: number) {
   }
 
   return Math.round(raw * 10) / 10;
+}
+
+function cellToCategory(value: ExcelCell, rowNumber: number): HistoryImportCategory {
+  const normalized = normalizeHeader(value);
+
+  if (["pris", "prix", "prise", "prises", "taken", "consomme", "consommes", "congepris", "congespris"].includes(normalized)) {
+    return "pris";
+  }
+  if (["planifier", "planifie", "planifies", "planifiee", "planifiees", "planification", "planned"].includes(normalized)) {
+    return "planifier";
+  }
+
+  throw new Error(`Categorie invalide a la ligne ${rowNumber}: utilisez pris ou planifier`);
+}
+
+function formatImportCategory(category: HistoryImportCategory) {
+  return category === "pris" ? "Pris" : "Planifie";
 }
 
 function cellToDate(value: ExcelCell, rowNumber: number, label: string) {
@@ -189,6 +219,9 @@ function parseHistoryImportRows(result: ExcelReadResult): HistoryImportRow[] {
     if (["matricule", "mat", "codeemploye", "codecollaborateur"].includes(normalized)) {
       return "matricule";
     }
+    if (["categorie", "category", "statutimport", "nature"].includes(normalized)) {
+      return "category";
+    }
     if (["type", "typedeconge", "conge"].includes(normalized)) return "type";
     if (["datedebut", "debut", "startdate"].includes(normalized)) return "startDate";
     if (["datefin", "fin", "enddate"].includes(normalized)) return "endDate";
@@ -208,10 +241,10 @@ function parseHistoryImportRows(result: ExcelReadResult): HistoryImportRow[] {
     return "";
   });
 
-  const required = ["reference", "matricule", "type", "startDate", "endDate", "days"];
+  const required = ["reference", "matricule", "category", "type", "startDate", "endDate", "days"];
   const missing = required.filter((column) => !columns.includes(column));
   if (missing.length) {
-    throw new Error("Colonnes requises: reference, matricule, type, date debut, date fin, nombre de jours");
+    throw new Error("Colonnes requises: reference, matricule, categorie, type, date debut, date fin, nombre de jours");
   }
 
   const rows = bodyRows.map((row, rowIndex) => {
@@ -222,6 +255,7 @@ function parseHistoryImportRows(result: ExcelReadResult): HistoryImportRow[] {
       if (!column) return;
       if (column === "reference") values.reference = cellToText(row[columnIndex]);
       if (column === "matricule") values.matricule = cellToText(row[columnIndex]);
+      if (column === "category") values.category = cellToCategory(row[columnIndex], rowNumber);
       if (column === "type") values.type = cellToText(row[columnIndex]);
       if (column === "startDate") {
         values.startDate = cellToDate(row[columnIndex], rowNumber, "Date debut");
@@ -234,6 +268,7 @@ function parseHistoryImportRows(result: ExcelReadResult): HistoryImportRow[] {
 
     if (!values.reference) throw new Error(`Reference manquante a la ligne ${rowNumber}`);
     if (!values.matricule) throw new Error(`Matricule manquant a la ligne ${rowNumber}`);
+    if (!values.category) throw new Error(`Categorie manquante a la ligne ${rowNumber}`);
     if (!values.type) throw new Error(`Type de conge manquant a la ligne ${rowNumber}`);
     if (!values.startDate || !values.endDate || values.days === undefined) {
       throw new Error(`Ligne incomplete a la ligne ${rowNumber}`);
@@ -256,9 +291,9 @@ function parseHistoryImportRows(result: ExcelReadResult): HistoryImportRow[] {
 
 function downloadHistoryTemplate() {
   const csv = [
-    "reference;matricule;type;date debut;date fin;nombre de jours",
-    "OLD-2025-001;EMP001;paye;2025-04-01;2025-04-05;5",
-    "OLD-2025-002;EMP002;special;2025-05-12;2025-05-13;2",
+    "reference;matricule;categorie;type;date debut;date fin;nombre de jours",
+    "OLD-2025-001;EMP001;pris;paye;2025-04-01;2025-04-05;5",
+    "PLAN-2025-001;EMP002;planifier;paye;2025-08-12;2025-08-20;7",
   ].join("\n");
   const blob = new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -391,10 +426,13 @@ export function RhDemandesConges() {
     onSuccess: (response) => {
       setLastHistoryImport(response);
       setHistoryPreviewRows([]);
-      toast.success(`${response.imported} conge(s) historique(s) importe(s)`, {
-        description: response.skipped
-          ? `${response.skipped} reference(s) deja existante(s) ignoree(s).`
-          : undefined,
+      toast.success(`${response.imported} ligne(s) importee(s)`, {
+        description: [
+          `${response.importedTaken} pris, ${response.importedPlanned} planifie(s).`,
+          response.skipped ? `${response.skipped} reference(s) deja existante(s) ignoree(s).` : "",
+        ]
+          .filter(Boolean)
+          .join(" "),
       });
       void queryClient.invalidateQueries({ queryKey });
       void queryClient.invalidateQueries({ queryKey: ["rh-dashboard"] });
@@ -437,6 +475,10 @@ export function RhDemandesConges() {
     return row.statusCode === processedFilter;
   });
   const historyPreviewTotalDays = historyPreviewRows.reduce((sum, row) => sum + row.days, 0);
+  const historyPreviewTakenRows = historyPreviewRows.filter((row) => row.category === "pris");
+  const historyPreviewPlannedRows = historyPreviewRows.filter((row) => row.category === "planifier");
+  const historyPreviewTakenDays = historyPreviewTakenRows.reduce((sum, row) => sum + row.days, 0);
+  const historyPreviewPlannedDays = historyPreviewPlannedRows.reduce((sum, row) => sum + row.days, 0);
   const canImportHistory = historyPreviewRows.length > 0 && !importHistoryMutation.isPending;
 
   const handleHistoryFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -451,7 +493,11 @@ export function RhDemandesConges() {
       const rows = parseHistoryImportRows(sheet);
       setHistoryPreviewRows(rows);
       setLastHistoryImport(null);
-      toast.success(`${rows.length} ligne(s) prete(s) a importer`);
+      const takenCount = rows.filter((row) => row.category === "pris").length;
+      const plannedCount = rows.filter((row) => row.category === "planifier").length;
+      toast.success(`${rows.length} ligne(s) prete(s) a importer`, {
+        description: `${takenCount} pris, ${plannedCount} planifie(s).`,
+      });
     } catch (error) {
       toast.error("Lecture impossible", {
         description: error instanceof Error ? error.message : "Erreur inconnue",
@@ -780,6 +826,12 @@ export function RhDemandesConges() {
                 <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
                   <Badge tone="pending">{historyPreviewRows.length} ligne(s) prête(s)</Badge>
                   <Badge tone="info">{formatNumber(historyPreviewTotalDays)} jour(s)</Badge>
+                  <Badge tone="valid">
+                    {historyPreviewTakenRows.length} pris - {formatNumber(historyPreviewTakenDays)} jour(s)
+                  </Badge>
+                  <Badge tone="planned">
+                    {historyPreviewPlannedRows.length} planifie(s) - {formatNumber(historyPreviewPlannedDays)} jour(s)
+                  </Badge>
                 </div>
                 <div className="overflow-x-auto rounded-md border bg-background">
                   <table className="w-full text-sm">
@@ -787,6 +839,7 @@ export function RhDemandesConges() {
                       <tr className="text-left">
                         <th className="px-4 py-3">Référence</th>
                         <th className="px-4 py-3">Matricule</th>
+                        <th className="px-4 py-3">Categorie</th>
                         <th className="px-4 py-3">Type</th>
                         <th className="px-4 py-3">Période</th>
                         <th className="px-4 py-3 text-right">Jours</th>
@@ -797,6 +850,11 @@ export function RhDemandesConges() {
                         <tr key={row.reference}>
                           <td className="px-4 py-3 font-medium">{row.reference}</td>
                           <td className="px-4 py-3">{row.matricule}</td>
+                          <td className="px-4 py-3">
+                            <Badge tone={row.category === "pris" ? "valid" : "planned"}>
+                              {formatImportCategory(row.category)}
+                            </Badge>
+                          </td>
                           <td className="px-4 py-3">{row.type}</td>
                           <td className="px-4 py-3">
                             {row.startDate} - {row.endDate}
@@ -816,8 +874,11 @@ export function RhDemandesConges() {
             )}
             {lastHistoryImport && !historyPreviewRows.length && (
               <div className="border-b bg-muted/20 px-5 py-3 text-sm text-muted-foreground">
-                Dernier import: {lastHistoryImport.imported} ligne(s),{" "}
-                {formatNumber(lastHistoryImport.totals.days)} jour(s)
+                Dernier import: {lastHistoryImport.imported} ligne(s) (
+                {lastHistoryImport.importedTaken} pris, {lastHistoryImport.importedPlanned} planifie(s)),{" "}
+                {formatNumber(lastHistoryImport.totals.days)} jour(s) dont{" "}
+                {formatNumber(lastHistoryImport.totals.takenDays)} pris et{" "}
+                {formatNumber(lastHistoryImport.totals.plannedDays)} planifie(s)
                 {lastHistoryImport.skipped
                   ? `, ${lastHistoryImport.skipped} référence(s) ignorée(s)`
                   : ""}

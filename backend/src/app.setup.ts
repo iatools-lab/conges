@@ -28,11 +28,13 @@ function getCorsOrigins(configService: ConfigService): string[] {
 function assertProductionConfig(configService: ConfigService) {
   if (process.env.NODE_ENV !== 'production') return;
 
-  const requiredKeys = [
-    'AUTH_SESSION_SECRET',
-    'AUTH_ADMIN_PASSWORD_HASH',
-    'CORS_ORIGINS',
-  ];
+  const googleOnly = ['true', '1', 'yes', 'on'].includes(
+    configService.get<string>('AUTH_GOOGLE_ONLY')?.trim().toLowerCase() ?? '',
+  );
+  const requiredKeys = ['AUTH_SESSION_SECRET', 'CORS_ORIGINS'];
+  requiredKeys.push(
+    googleOnly ? 'GOOGLE_CLIENT_ID' : 'AUTH_ADMIN_PASSWORD_HASH',
+  );
   const missingKeys = requiredKeys.filter(
     (key) => !configService.get<string>(key)?.trim(),
   );

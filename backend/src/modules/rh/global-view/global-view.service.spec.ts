@@ -94,6 +94,7 @@ function createHarness() {
       startDate: data.startDate,
       endDate: data.endDate,
       days: data.days,
+      status: data.status,
       ownerId: data.ownerId,
       leaveTypeId: data.leaveTypeId,
       owner: {
@@ -294,6 +295,7 @@ describe('RhGlobalViewService', () => {
         {
           reference: 'OLD-2025-001',
           matricule: 'EMP001',
+          category: 'pris',
           type: 'paye',
           startDate: '2025-04-01',
           endDate: '2025-04-05',
@@ -314,6 +316,7 @@ describe('RhGlobalViewService', () => {
           ownerId: 'employee-1',
           leaveTypeId: 'type-cp',
           status: LeaveRequestStatus.APPROVED,
+          submittedAt: new Date('2025-04-01T00:00:00.000Z'),
         }),
       }),
     );
@@ -329,5 +332,81 @@ describe('RhGlobalViewService', () => {
       prisma,
     );
     expect(result.imported).toBe(1);
+    expect(result.importedTaken).toBe(1);
+    expect(result.importedPlanned).toBe(0);
+    expect(result.totals).toEqual({
+      days: 5,
+      takenDays: 5,
+      plannedDays: 0,
+    });
+  });
+
+  it('imports planned historical rows as draft planned leave', async () => {
+    const { prisma, leaveBalanceSync, service } = createHarness();
+    prisma.user.findMany
+      .mockResolvedValueOnce([
+        {
+          id: 'employee-1',
+          matricule: 'EMP001',
+          nom: 'Employee',
+          prenom: 'Test',
+        },
+      ])
+      .mockResolvedValueOnce([]);
+
+    const result = await service.importHistory({
+      rhId: rhUser.id,
+      rows: [
+        {
+          reference: 'PLAN-2025-001',
+          matricule: 'EMP001',
+          category: 'planifier',
+          type: 'paye',
+          startDate: '2025-08-12',
+          endDate: '2025-08-20',
+          days: 7,
+        },
+      ],
+    });
+
+    expect(prisma.leaveRequest.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          reference: 'PLAN-2025-001',
+          status: LeaveRequestStatus.DRAFT,
+          submittedAt: null,
+          decidedAt: null,
+          reason: 'Planification importee par RH',
+        }),
+      }),
+    );
+    const createPayload = prisma.leaveRequest.create.mock.calls[0][0];
+    expect(createPayload.data.validations).toBeUndefined();
+    expect(prisma.validation.create).not.toHaveBeenCalled();
+    expect(leaveBalanceSync.syncForKeys).toHaveBeenCalledWith(
+      [
+        {
+          userId: 'employee-1',
+          leaveTypeId: 'type-cp',
+          year: 2025,
+        },
+      ],
+      prisma,
+    );
+    expect(result.imported).toBe(1);
+    expect(result.importedTaken).toBe(0);
+    expect(result.importedPlanned).toBe(1);
+    expect(result.rows[0]).toEqual(
+      expect.objectContaining({
+        reference: 'PLAN-2025-001',
+        category: 'planifier',
+        statusCode: LeaveRequestStatus.DRAFT,
+      }),
+    );
+    expect(result.totals).toEqual({
+      days: 7,
+      takenDays: 0,
+      plannedDays: 7,
+    });
   });
 });

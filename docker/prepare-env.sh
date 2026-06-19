@@ -32,6 +32,7 @@ POSTGRES_PASSWORD=CHANGE_ME_POSTGRES_PASSWORD
 
 AUTH_SESSION_SECRET=$session_secret
 AUTH_SESSION_TTL_HOURS=12
+AUTH_GOOGLE_ONLY=true
 AUTH_ADMIN_PASSWORD_HASH=CHANGE_ME_ADMIN_PASSWORD_HASH
 GOOGLE_CLIENT_ID=449904699288-upv55q520qi2tc3gbg6vh4ouf1lp31md.apps.googleusercontent.com
 RH_AUTO_REJECT_DAYS=7
@@ -60,5 +61,5 @@ EOF
 chmod 600 "$ENV_FILE" 2>/dev/null || true
 
 echo ".env cree: $ENV_FILE"
-echo "Renseignez DOMAIN_NAME, SERVER_IP, POSTGRES_PASSWORD et AUTH_ADMIN_PASSWORD_HASH dans .env avant de lancer docker/deploy.sh."
+echo "Renseignez DOMAIN_NAME, SERVER_IP et POSTGRES_PASSWORD dans .env avant de lancer docker/deploy.sh."
 echo "Vous pouvez aussi partir du modele DEPLOYMENT_PARAMETERS.env.example, puis copier vers .env."

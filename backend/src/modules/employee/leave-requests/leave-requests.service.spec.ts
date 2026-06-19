@@ -74,6 +74,9 @@ function createHarness() {
       findUnique: jest.fn(),
       findMany: jest.fn(),
     },
+    publicHoliday: {
+      findMany: jest.fn(),
+    },
     leaveRequest: {
       create: jest.fn(),
       findFirst: jest.fn(),
@@ -116,6 +119,7 @@ function createHarness() {
       scheduled: 0,
     },
   ]);
+  prisma.publicHoliday.findMany.mockResolvedValue([]);
   prisma.user.findMany.mockResolvedValue([
     { id: 'manager-1', email: 'n1@upowa.org' },
     { id: 'manager-2', email: 'n2@upowa.org' },
@@ -228,6 +232,30 @@ describe('EmployeeLeaveRequestsService', () => {
     expect(emailService.sendMany).toHaveBeenCalledWith([]);
     expect(result.status).toBe('planned');
     expect(result.stext).toBe('Planifié');
+  });
+
+  it('does not count a public holiday as a working leave day', async () => {
+    const { prisma, service } = createHarness();
+    prisma.publicHoliday.findMany.mockResolvedValue([
+      {
+        date: new Date('2026-06-02T00:00:00.000Z'),
+        recurring: false,
+      },
+    ]);
+
+    await service.create({
+      userId: user.id,
+      leaveTypeCode: leaveType.code,
+      startDate: '2026-06-01',
+      endDate: '2026-06-03',
+      draft: true,
+    });
+
+    expect(prisma.leaveRequest.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ days: 2 }),
+      }),
+    );
   });
 
   it('creates a maternity leave request only for the full 90-day entitlement', async () => {

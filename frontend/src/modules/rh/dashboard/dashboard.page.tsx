@@ -19,6 +19,7 @@ import {
   ArrowRight,
   Baby,
   CalendarClock,
+  CalendarOff,
   ClipboardCheck,
   FileText,
   Globe,
@@ -148,6 +149,11 @@ const quickActions = [
     icon: <Settings2 className="size-5" />,
     label: "Paramétrer les congés",
     to: "/rh/parametres",
+  },
+  {
+    icon: <CalendarOff className="size-5" />,
+    label: "Gérer les jours fériés",
+    to: "/rh/feries",
   },
   {
     icon: <FileText className="size-5" />,

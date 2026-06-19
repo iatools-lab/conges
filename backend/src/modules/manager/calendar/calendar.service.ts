@@ -15,6 +15,7 @@ import {
 import { PrismaService } from '../../../prisma/prisma.service';
 import { FindManagerCalendarQueryDto } from './dto/manager-calendar.dto';
 import { overlapDateWhere, resolveDateRange } from '../../../common/date-range';
+import { expandHolidayDateKeys } from '../../../common/working-days';
 
 const calendarRequestSelect = {
   id: true,
@@ -54,14 +55,13 @@ export class ManagerCalendarService {
     const range = resolveDateRange(query, { defaultMode: 'month', now });
     const year = range.year;
     const month = query.month ?? range.month ?? now.getUTCMonth() + 1;
-    const monthStart =
-      range.dateFrom ?? new Date(Date.UTC(year, month - 1, 1));
+    const monthStart = range.dateFrom ?? new Date(Date.UTC(year, month - 1, 1));
     const nextMonthStart =
       range.endExclusive ?? new Date(Date.UTC(year, month, 1));
     const ownerWhere = this.buildManagedOwnerWhere(manager);
     const scopedDepartments = this.getManagedDepartments(manager);
 
-    const [team, requests] = await Promise.all([
+    const [team, requests, holidayRules] = await Promise.all([
       this.prisma.user.findMany({
         where: ownerWhere,
         orderBy: [
@@ -92,6 +92,17 @@ export class ManagerCalendarService {
         ],
         select: calendarRequestSelect,
       }),
+      this.prisma.publicHoliday.findMany({
+        where: {
+          country: 'CM',
+          OR: [
+            { date: { gte: monthStart, lt: nextMonthStart } },
+            { recurring: true },
+          ],
+        },
+        orderBy: { date: 'asc' },
+        select: { id: true, date: true, name: true, recurring: true },
+      }),
     ]);
 
     const leaves = requests.map((request) =>
@@ -111,6 +122,15 @@ export class ManagerCalendarService {
       },
       departments: this.toDepartments(team, scopedDepartments),
       leaveTypes: this.toLeaveTypes(requests),
+      holidays: holidayRules.flatMap((holiday) =>
+        [
+          ...expandHolidayDateKeys(
+            [holiday],
+            monthStart,
+            new Date(nextMonthStart.getTime() - 1),
+          ),
+        ].map((date) => ({ id: holiday.id, date, name: holiday.name })),
+      ),
       summary: {
         teamSize: team.length,
         periods: leaves.length,

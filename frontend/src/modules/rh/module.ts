@@ -15,6 +15,7 @@ export const rhModule: FrontendModule = {
     { id: "special-leaves", label: "Congés spéciaux", path: "/rh/speciaux" },
     { id: "leave-balances", label: "Soldes CP", path: "/rh/soldes-cp" },
     { id: "leave-liabilities", label: "Passif", path: "/rh/passif" },
+    { id: "holidays", label: "Jours fériés", path: "/rh/feries" },
     { id: "exports", label: "Exports", path: "/rh/exports" },
     { id: "audit", label: "Audit", path: "/rh/audit" },
     { id: "settings", label: "Paramètres RH", path: "/rh/parametres" },

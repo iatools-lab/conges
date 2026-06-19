@@ -37,6 +37,11 @@ export class EmployeeLeaveRequestsController {
     );
   }
 
+  @Get('holidays')
+  findHolidays() {
+    return this.leaveRequestsService.findHolidays();
+  }
+
   @Post()
   create(
     @Body() dto: CreateEmployeeLeaveRequestDto,

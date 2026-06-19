@@ -16,7 +16,7 @@ import { Card, CardHeader, Button, Badge } from "@/components/ui-kit";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { apiFetch } from "@/lib/api";
 import { useAuthSession } from "@/modules/auth/session";
-import { ChevronLeft, ChevronRight, Download, Filter } from "lucide-react";
+import { CalendarOff, ChevronLeft, ChevronRight, Download, Filter } from "lucide-react";
 
 type CalendarLeave = {
   id: string;
@@ -36,6 +36,12 @@ type CalendarLeave = {
   days: number;
 };
 
+type CalendarHoliday = {
+  id: string;
+  date: string;
+  name: string;
+};
+
 type ManagerCalendarResponse = {
   year: number;
   month: number;
@@ -53,6 +59,7 @@ type ManagerCalendarResponse = {
     totalDays: number;
     activeConflicts: number;
   };
+  holidays: CalendarHoliday[];
   leaves: CalendarLeave[];
 };
 
@@ -87,10 +94,16 @@ const emptyCalendar: ManagerCalendarResponse = {
   departments: [],
   leaveTypes: [],
   summary: { teamSize: 0, periods: 0, totalDays: 0, activeConflicts: 0 },
+  holidays: [],
   leaves: [],
 };
 
-function buildCalendarPath(session: { id: string; email: string }, range: DateRangeValue, year: number, month: number) {
+function buildCalendarPath(
+  session: { id: string; email: string },
+  range: DateRangeValue,
+  year: number,
+  month: number,
+) {
   const params = new URLSearchParams({
     managerId: session.id,
     managerEmail: session.email,
@@ -176,8 +189,16 @@ export function ManagerCalendrier() {
   const [type, setType] = useState("ALL");
 
   const calendarQuery = useQuery({
-    queryKey: ["manager-calendar", session?.id, session?.email, year, month, ...dateRangeQueryKey(dateRange)],
-    queryFn: () => apiFetch<ManagerCalendarResponse>(buildCalendarPath(session!, dateRange, year, month)),
+    queryKey: [
+      "manager-calendar",
+      session?.id,
+      session?.email,
+      year,
+      month,
+      ...dateRangeQueryKey(dateRange),
+    ],
+    queryFn: () =>
+      apiFetch<ManagerCalendarResponse>(buildCalendarPath(session!, dateRange, year, month)),
     enabled: ready && !!session?.id && !!session?.email,
   });
 
@@ -196,22 +217,31 @@ export function ManagerCalendrier() {
       ),
     [data.leaves, dept, type],
   );
+  const holidaysByDate = useMemo(
+    () => new Map(data.holidays.map((holiday) => [holiday.date, holiday])),
+    [data.holidays],
+  );
 
   const byDay = useMemo(() => {
     const map = new Map<number, CalendarLeave[]>();
     for (let day = 1; day <= daysInMonth; day += 1) {
       const current = toDayMs(year, month, day);
+      const currentDate = new Date(current);
+      const isWeekend = currentDate.getUTCDay() === 0 || currentDate.getUTCDay() === 6;
+      const isHoliday = holidaysByDate.has(currentDate.toISOString().slice(0, 10));
       map.set(
         day,
-        leaves.filter((leave) => {
-          const start = new Date(leave.startDate).getTime();
-          const end = new Date(leave.endDate).getTime();
-          return current >= start && current <= end;
-        }),
+        isWeekend || isHoliday
+          ? []
+          : leaves.filter((leave) => {
+              const start = new Date(leave.startDate).getTime();
+              const end = new Date(leave.endDate).getTime();
+              return current >= start && current <= end;
+            }),
       );
     }
     return map;
-  }, [leaves, year, month, daysInMonth]);
+  }, [daysInMonth, holidaysByDate, leaves, month, year]);
 
   const strongAbsenceDays = useMemo(
     () =>
@@ -382,6 +412,10 @@ export function ManagerCalendrier() {
                 const inMonth = dayNum >= 1 && dayNum <= daysInMonth;
                 const dow = index % 7;
                 const isWeekend = dow === 5 || dow === 6;
+                const dateKey = inMonth
+                  ? new Date(Date.UTC(year, month, dayNum)).toISOString().slice(0, 10)
+                  : "";
+                const holiday = holidaysByDate.get(dateKey);
                 const isToday =
                   inMonth &&
                   dayNum === today.getDate() &&
@@ -393,7 +427,8 @@ export function ManagerCalendrier() {
                     key={index}
                     className={`flex min-h-[110px] flex-col border-r border-t border-border bg-card p-1.5 text-xs ${
                       !inMonth ? "bg-muted/30 text-muted-foreground/40" : ""
-                    } ${isWeekend && inMonth ? "bg-muted/40" : ""}`}
+                    } ${(isWeekend || holiday) && inMonth ? "bg-muted/40" : ""}`}
+                    title={holiday?.name}
                   >
                     <div className="mb-1 flex items-center justify-between">
                       <span
@@ -409,6 +444,12 @@ export function ManagerCalendrier() {
                         </span>
                       )}
                     </div>
+                    {holiday && (
+                      <div className="mb-1 flex items-center gap-1 truncate text-[10px] font-medium text-destructive">
+                        <CalendarOff className="size-3 shrink-0" />
+                        <span className="truncate">{holiday.name}</span>
+                      </div>
+                    )}
                     <div className="flex-1 space-y-0.5 overflow-hidden">
                       {list.slice(0, 3).map((leave) => {
                         const typeInfo = getTypeInfo(leave.leaveType.code, leave.leaveType.label);

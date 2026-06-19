@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment */
 import {
   BadRequestException,
+  ForbiddenException,
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -24,7 +25,10 @@ function createService(config: Record<string, string | undefined>) {
     sendMany: jest.fn(),
   } as any;
 
-  return { service: new AuthService(prisma, configService, emailService), prisma };
+  return {
+    service: new AuthService(prisma, configService, emailService),
+    prisma,
+  };
 }
 
 function activeUser(overrides: Record<string, unknown> = {}) {
@@ -54,9 +58,7 @@ describe('AuthService', () => {
 
     await expect(
       service.login({ email: 'admin@upowa.org' }),
-    ).rejects.toBeInstanceOf(
-      UnauthorizedException,
-    );
+    ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
   it('requires a configured admin password hash in production', async () => {
@@ -71,7 +73,9 @@ describe('AuthService', () => {
   it('returns a signed admin session with a configured admin hash', async () => {
     process.env.NODE_ENV = 'production';
     const bootstrap = createService({ AUTH_SESSION_SECRET: secret });
-    const adminPasswordHash = (bootstrap.service as any).hashPassword('Admin123!');
+    const adminPasswordHash = (bootstrap.service as any).hashPassword(
+      'Admin123!',
+    );
     const { service, prisma } = createService({
       AUTH_SESSION_SECRET: secret,
       AUTH_ADMIN_PASSWORD_HASH: adminPasswordHash,
@@ -174,6 +178,40 @@ describe('AuthService', () => {
     expect(verifySessionToken(session.token, secret).valid).toBe(true);
   });
 
+  it('blocks every password operation when Google-only mode is enabled', async () => {
+    const { service, prisma } = createService({
+      AUTH_GOOGLE_ONLY: 'true',
+      AUTH_SESSION_SECRET: secret,
+    });
+
+    const operations = [
+      () =>
+        service.signup({
+          email: 'user@upowa.org',
+          password: 'Secret123!',
+          confirmPassword: 'Secret123!',
+        }),
+      () =>
+        service.login({
+          email: 'user@upowa.org',
+          password: 'Secret123!',
+        }),
+      () => service.forgotPassword({ email: 'user@upowa.org' }),
+      () => service.verifyOtp({ email: 'user@upowa.org', code: '123456' }),
+      () =>
+        service.resetPassword({
+          email: 'user@upowa.org',
+          code: '123456',
+          newPassword: 'NewSecret123!',
+        }),
+    ];
+
+    for (const operation of operations) {
+      await expect(operation()).rejects.toBeInstanceOf(ForbiddenException);
+    }
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+  });
+
   it('rejects password login before the password is created', async () => {
     process.env.NODE_ENV = 'production';
     const prisma = {
@@ -263,7 +301,9 @@ describe('AuthService', () => {
       AUTH_SESSION_SECRET: secret,
       GOOGLE_CLIENT_ID: 'expected-client-id',
     });
-    prisma.user.findUnique.mockResolvedValue(activeUser());
+    prisma.user.findUnique.mockResolvedValue(
+      activeUser({ passwordHash: 'an-existing-password-hash' }),
+    );
     (service as any).googleClient = {
       verifyIdToken: jest.fn().mockResolvedValue({
         getPayload: () => ({
@@ -285,6 +325,43 @@ describe('AuthService', () => {
       }),
     );
     expect(verifySessionToken(session.token, secret).valid).toBe(true);
+  });
+
+  it('allows the principal admin to authenticate with its verified Google account', async () => {
+    const { service, prisma } = createService({
+      AUTH_GOOGLE_ONLY: 'true',
+      AUTH_SESSION_SECRET: secret,
+      GOOGLE_CLIENT_ID: 'expected-client-id',
+    });
+    (service as any).googleClient = {
+      verifyIdToken: jest.fn().mockResolvedValue({
+        getPayload: () => ({
+          email: 'admin@upowa.org',
+          email_verified: true,
+        }),
+      }),
+    };
+
+    const session = await service.loginWithGoogle({
+      credential: 'token',
+      clientId: 'expected-client-id',
+    });
+
+    expect(session).toEqual(
+      expect.objectContaining({
+        id: 'admin-upowa',
+        primaryRole: 'admin',
+      }),
+    );
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    expect(prisma.auditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          userId: null,
+          metadata: { method: 'google' },
+        }),
+      }),
+    );
   });
 
   it('hashes OTP codes with a unique salt', () => {

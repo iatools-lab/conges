@@ -24,6 +24,10 @@ export class ImportRhLeaveHistoryRowDto {
   type!: string;
 
   @IsString()
+  @MaxLength(40)
+  category!: string;
+
+  @IsString()
   startDate!: string;
 
   @IsString()

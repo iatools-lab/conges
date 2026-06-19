@@ -35,6 +35,8 @@ type BadgeTone =
   | 'review'
   | 'planned';
 
+type ImportedLeaveHistoryCategory = 'pris' | 'planifier';
+
 const TRACKED_REQUEST_STATUSES = [
   LeaveRequestStatus.DRAFT,
   LeaveRequestStatus.PENDING,
@@ -47,6 +49,7 @@ const TRACKED_REQUEST_STATUSES = [
 type NormalizedHistoryImportRow = {
   reference: string;
   matricule: string;
+  category: ImportedLeaveHistoryCategory;
   type: string;
   startDate: Date;
   endDate: Date;
@@ -374,6 +377,10 @@ export class RhGlobalViewService {
         id: string;
         reference: string;
         matricule: string;
+        category: ImportedLeaveHistoryCategory;
+        categoryLabel: string;
+        statusCode: LeaveRequestStatus;
+        statusLabel: string;
         employeeName: string;
         leaveType: string;
         startDate: string;
@@ -416,6 +423,9 @@ export class RhGlobalViewService {
           );
         }
 
+        const isTakenImport = row.category === 'pris';
+        const now = new Date();
+
         await this.leaveBalanceInitializer.initializeUserYear(
           employee.id,
           row.startDate.getUTCFullYear(),
@@ -430,19 +440,27 @@ export class RhGlobalViewService {
             startDate: row.startDate,
             endDate: row.endDate,
             days: row.days,
-            reason: 'Historique importe par RH',
-            status: LeaveRequestStatus.APPROVED,
-            submittedAt: row.startDate,
-            decidedAt: new Date(),
-            validations: {
-              create: {
-                validatorId: rhUser.id,
-                level: 3,
-                decision: ValidationDecision.APPROVED,
-                comment: 'Import historique RH',
-                decidedAt: new Date(),
-              },
-            },
+            reason: isTakenImport
+              ? 'Historique importe par RH'
+              : 'Planification importee par RH',
+            status: isTakenImport
+              ? LeaveRequestStatus.APPROVED
+              : LeaveRequestStatus.DRAFT,
+            submittedAt: isTakenImport ? row.startDate : null,
+            decidedAt: isTakenImport ? now : null,
+            ...(isTakenImport
+              ? {
+                  validations: {
+                    create: {
+                      validatorId: rhUser.id,
+                      level: 3,
+                      decision: ValidationDecision.APPROVED,
+                      comment: 'Import historique RH',
+                      decidedAt: now,
+                    },
+                  },
+                }
+              : {}),
           },
           select: {
             id: true,
@@ -450,12 +468,14 @@ export class RhGlobalViewService {
             startDate: true,
             endDate: true,
             days: true,
+            status: true,
             ownerId: true,
             leaveTypeId: true,
             owner: { select: { matricule: true, nom: true, prenom: true } },
             leaveType: { select: { name: true, code: true } },
           },
         });
+        const status = this.toBadgeStatus(imported.status);
 
         await transaction.auditLog.create({
           data: {
@@ -468,6 +488,8 @@ export class RhGlobalViewService {
               reference: imported.reference,
               matricule: imported.owner.matricule,
               leaveType: imported.leaveType.code,
+              category: row.category,
+              status: imported.status,
               days: imported.days,
             },
           },
@@ -482,6 +504,10 @@ export class RhGlobalViewService {
           id: imported.id,
           reference: imported.reference,
           matricule: imported.owner.matricule,
+          category: row.category,
+          categoryLabel: this.importCategoryLabel(row.category),
+          statusCode: imported.status,
+          statusLabel: status.label,
           employeeName: this.fullName(imported.owner),
           leaveType: imported.leaveType.name,
           startDate: this.toInputDate(imported.startDate),
@@ -496,14 +522,29 @@ export class RhGlobalViewService {
       return { importedRows, skippedRows };
     });
 
+    const importedTakenRows = result.importedRows.filter(
+      (row) => row.category === 'pris',
+    );
+    const importedPlannedRows = result.importedRows.filter(
+      (row) => row.category === 'planifier',
+    );
+
     return {
       imported: result.importedRows.length,
+      importedTaken: importedTakenRows.length,
+      importedPlanned: importedPlannedRows.length,
       skipped: result.skippedRows.length,
       rows: result.importedRows,
       skippedRows: result.skippedRows,
       totals: {
         days: this.roundDays(
           result.importedRows.reduce((sum, row) => sum + row.days, 0),
+        ),
+        takenDays: this.roundDays(
+          importedTakenRows.reduce((sum, row) => sum + row.days, 0),
+        ),
+        plannedDays: this.roundDays(
+          importedPlannedRows.reduce((sum, row) => sum + row.days, 0),
         ),
       },
     };
@@ -783,6 +824,7 @@ export class RhGlobalViewService {
       const rowNumber = index + 1;
       const reference = row.reference.trim();
       const matricule = row.matricule.trim();
+      const category = this.resolveImportedHistoryCategory(row.category, rowNumber);
       const type = row.type.trim();
       const startDate = this.parseImportDate(row.startDate, 'date debut', rowNumber);
       const endDate = this.parseImportDate(row.endDate, 'date fin', rowNumber);
@@ -809,6 +851,7 @@ export class RhGlobalViewService {
       return {
         reference,
         matricule,
+        category,
         type,
         startDate,
         endDate,
@@ -831,6 +874,51 @@ export class RhGlobalViewService {
     }
 
     return rows;
+  }
+
+  private resolveImportedHistoryCategory(
+    value: string | undefined,
+    rowNumber: number,
+  ): ImportedLeaveHistoryCategory {
+    const token = this.normalizeImportToken(value ?? '');
+
+    if (
+      [
+        'PRIS',
+        'PRIX',
+        'PRISE',
+        'PRISES',
+        'TAKEN',
+        'CONSOMME',
+        'CONSOMMES',
+        'CONGEPRIS',
+        'CONGESPRIS',
+      ].includes(token)
+    ) {
+      return 'pris';
+    }
+
+    if (
+      [
+        'PLANIFIER',
+        'PLANIFIE',
+        'PLANIFIES',
+        'PLANIFIEE',
+        'PLANIFIEES',
+        'PLANIFICATION',
+        'PLANNED',
+      ].includes(token)
+    ) {
+      return 'planifier';
+    }
+
+    throw new BadRequestException(
+      `Categorie invalide a la ligne ${rowNumber}: utilisez "pris" ou "planifier"`,
+    );
+  }
+
+  private importCategoryLabel(category: ImportedLeaveHistoryCategory) {
+    return category === 'pris' ? 'Pris' : 'Planifie';
   }
 
   private parseImportDate(value: string, field: string, rowNumber: number) {
