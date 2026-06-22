@@ -101,6 +101,64 @@ export class LeaveEntitlementsService {
     annualDays = ANNUAL_PAID_LEAVE_DAYS,
     today = new Date(),
   ) {
+    const maxDays = Math.max(annualDays, 0);
+    const TRANSITION_END = new Date(Date.UTC(2028, 3, 1)); // 1er avril 2028
+    const FIXED_CYCLE_START = new Date(Date.UTC(year - 1, 3, 1)); // 1er avril de l'année N-1
+
+    // Après le 1er avril 2028, on revient au fonctionnement actuel
+    if (today >= TRANSITION_END) {
+      return this.computeOriginalPaidLeaveDays(hireDate, year, maxDays, today);
+    }
+
+    // Période transitoire : cycle fixe du 1er avril au 31 mars
+    const firstAnniversary = this.addUtcYears(hireDate, 1);
+    const cycleEnd = this.addUtcYears(FIXED_CYCLE_START, 1);
+    const referenceDate = year === today.getUTCFullYear() ? today : cycleEnd;
+
+    // Si l'employé a déjà ≥1 an au début du cycle fixe → cycle fixe complet
+    if (firstAnniversary <= FIXED_CYCLE_START) {
+      if (referenceDate <= FIXED_CYCLE_START) return 0;
+      const completedMonths = this.getCompletedMonths(
+        FIXED_CYCLE_START,
+        referenceDate,
+      );
+      return this.roundDays(
+        Math.min(completedMonths * MONTHLY_PAID_LEAVE_DAYS, maxDays),
+      );
+    }
+
+    // Employé avec <1 an : logique basée sur date d'embauche (inchangée)
+    // jusqu'au 1er anniversaire, puis cycle fixe après
+    const hireCycleStart = this.getCycleStart(hireDate, year);
+
+    // Si le 1er anniversaire tombe après la fin du cycle → cycle embauche uniquement
+    if (firstAnniversary >= cycleEnd || referenceDate <= hireCycleStart) {
+      return this.computeOriginalPaidLeaveDays(hireDate, year, maxDays, today);
+    }
+
+    // Phase 1 : de l'embauche au 1er anniversaire (cycle embauche)
+    // Phase 2 : du 1er anniversaire à aujourd'hui/fin de cycle (cycle fixe)
+    if (referenceDate <= firstAnniversary) {
+      return this.computeOriginalPaidLeaveDays(hireDate, year, maxDays, today);
+    }
+
+    // Mois écoulés depuis le 1er anniversaire (cycle fixe)
+    const monthsFromAnniversary = this.getCompletedMonths(
+      firstAnniversary,
+      referenceDate,
+    );
+
+    return this.roundDays(
+      Math.min(monthsFromAnniversary * MONTHLY_PAID_LEAVE_DAYS, maxDays),
+    );
+  }
+
+  private computeOriginalPaidLeaveDays(
+    hireDate: Date,
+    year: number,
+    annualDays: number,
+    today: Date,
+  ) {
     const cycleStart = this.getCycleStart(hireDate, year);
     const cycleEnd = this.addUtcYears(cycleStart, 1);
     const referenceDate = year === today.getUTCFullYear() ? today : cycleEnd;

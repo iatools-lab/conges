@@ -86,6 +86,8 @@ type HierarchyConnections = {
 
 type PrismaClientLike = PrismaService | Prisma.TransactionClient;
 
+const TRANSACTION_TIMEOUT = 30_000; // 30 secondes pour les imports volumineux
+
 @Injectable()
 export class RhEmployeesService {
   constructor(
@@ -122,83 +124,88 @@ export class RhEmployeesService {
 
   async importEmployees(dto: ImportRhEmployeesDto) {
     try {
-      return await this.prisma.$transaction(async (transaction) => {
-        const records: ImportedEmployeeRecord[] = [];
-        let created = 0;
-        let updated = 0;
+      return await this.prisma.$transaction(
+        async (transaction) => {
+          const records: ImportedEmployeeRecord[] = [];
+          let created = 0;
+          let updated = 0;
 
-        for (const employeeDto of dto.employees) {
-          const normalizedMatricule = employeeDto.matricule.trim();
-          const normalizedEmail = employeeDto.email.trim().toLowerCase();
+          for (const employeeDto of dto.employees) {
+            const normalizedMatricule = employeeDto.matricule.trim();
+            const normalizedEmail = employeeDto.email.trim().toLowerCase();
 
-          const [existingByMatricule, existingByEmail] = await Promise.all([
-            transaction.user.findUnique({
-              where: { matricule: normalizedMatricule },
-              select: { id: true },
-            }),
-            transaction.user.findUnique({
-              where: { email: normalizedEmail },
-              select: { id: true },
-            }),
-          ]);
+            const [existingByMatricule, existingByEmail] = await Promise.all([
+              transaction.user.findUnique({
+                where: { matricule: normalizedMatricule },
+                select: { id: true },
+              }),
+              transaction.user.findUnique({
+                where: { email: normalizedEmail },
+                select: { id: true },
+              }),
+            ]);
 
-          if (
-            existingByMatricule &&
-            existingByEmail &&
-            existingByMatricule.id !== existingByEmail.id
-          ) {
-            throw new ConflictException(
-              `Conflit d'import: matricule ${normalizedMatricule} et e-mail ${normalizedEmail} correspondent à deux employés différents`,
+            if (
+              existingByMatricule &&
+              existingByEmail &&
+              existingByMatricule.id !== existingByEmail.id
+            ) {
+              throw new ConflictException(
+                `Conflit d'import: matricule ${normalizedMatricule} et e-mail ${normalizedEmail} correspondent à deux employés différents`,
+              );
+            }
+
+            const existing = existingByMatricule ?? existingByEmail;
+
+            if (existing) {
+              await this.updateWithClient(
+                transaction,
+                existing.id,
+                employeeDto,
+                false,
+              );
+              records.push({
+                employeeId: existing.id,
+                matricule: normalizedMatricule,
+                hierarchy: this.extractHierarchyMatricules(employeeDto),
+              });
+              updated += 1;
+            } else {
+              const createdEmployee = await this.createWithClient(
+                transaction,
+                employeeDto,
+                false,
+              );
+              records.push({
+                employeeId: createdEmployee.id,
+                matricule: normalizedMatricule,
+                hierarchy: this.extractHierarchyMatricules(employeeDto),
+              });
+              created += 1;
+            }
+          }
+
+          for (const record of records) {
+            await this.applyHierarchyConnections(
+              transaction,
+              record.employeeId,
+              record.hierarchy,
             );
           }
 
-          const existing = existingByMatricule ?? existingByEmail;
+          const importedMatricules = records.map((record) => record.matricule);
+          const employees = await transaction.user.findMany({
+            where: { matricule: { in: importedMatricules } },
+            orderBy: [{ nom: 'asc' }, { prenom: 'asc' }],
+            select: employeeSelect,
+          });
 
-          if (existing) {
-            await this.updateWithClient(
-              transaction,
-              existing.id,
-              employeeDto,
-              false,
-            );
-            records.push({
-              employeeId: existing.id,
-              matricule: normalizedMatricule,
-              hierarchy: this.extractHierarchyMatricules(employeeDto),
-            });
-            updated += 1;
-          } else {
-            const createdEmployee = await this.createWithClient(
-              transaction,
-              employeeDto,
-              false,
-            );
-            records.push({
-              employeeId: createdEmployee.id,
-              matricule: normalizedMatricule,
-              hierarchy: this.extractHierarchyMatricules(employeeDto),
-            });
-            created += 1;
-          }
-        }
-
-        for (const record of records) {
-          await this.applyHierarchyConnections(
-            transaction,
-            record.employeeId,
-            record.hierarchy,
-          );
-        }
-
-        const importedMatricules = records.map((record) => record.matricule);
-        const employees = await transaction.user.findMany({
-          where: { matricule: { in: importedMatricules } },
-          orderBy: [{ nom: 'asc' }, { prenom: 'asc' }],
-          select: employeeSelect,
-        });
-
-        return { created, updated, employees };
-      });
+          return { created, updated, employees };
+        },
+        {
+          timeout: TRANSACTION_TIMEOUT,
+        },
+      );
     } catch (error) {
       this.handlePrismaError(error);
       throw error;
