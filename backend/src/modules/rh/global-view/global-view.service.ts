@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -80,6 +81,7 @@ export class RhGlobalViewService {
         id: true,
         reference: true,
         status: true,
+        submittedAt: true,
         ownerId: true,
         startDate: true,
         leaveTypeId: true,
@@ -95,16 +97,82 @@ export class RhGlobalViewService {
     });
 
     if (!existing) throw new NotFoundException('Demande introuvable');
+    const transition = this.getRhTransition(dto.decision);
+    const now = new Date();
+
     if (existing.status !== LeaveRequestStatus.IN_REVIEW) {
+      const previousDecision = await this.prisma.validation.findFirst({
+        where: {
+          requestId: existing.id,
+          validatorId: rhUser.id,
+          level: 3,
+          decision: transition.validationDecision,
+          ...(existing.submittedAt
+            ? { decidedAt: { gte: existing.submittedAt } }
+            : {}),
+        },
+        orderBy: { decidedAt: 'desc' },
+      });
+      if (previousDecision) {
+        return {
+          id: existing.id,
+          reference: existing.reference,
+          status: transition.status,
+        };
+      }
       throw new BadRequestException(
         'La demande doit etre validee par le N+1 avant decision RH.',
       );
     }
 
-    const transition = this.getRhTransition(dto.decision);
-    const now = new Date();
+    const result = await this.prisma.$transaction(async (transaction) => {
+      const claimed = await transaction.leaveRequest.updateMany({
+        where: { id: existing.id, status: LeaveRequestStatus.IN_REVIEW },
+        data: {
+          status: transition.status,
+          decidedAt: now,
+          cancelledAt: null,
+        },
+      });
 
-    const emails = await this.prisma.$transaction(async (transaction) => {
+      if (claimed.count === 0) {
+        const [current, previousDecision] = await Promise.all([
+          transaction.leaveRequest.findUnique({
+            where: { id: existing.id },
+            select: { status: true },
+          }),
+          transaction.validation.findFirst({
+            where: {
+              requestId: existing.id,
+              validatorId: rhUser.id,
+              level: 3,
+              decision: transition.validationDecision,
+              ...(existing.submittedAt
+                ? { decidedAt: { gte: existing.submittedAt } }
+                : {}),
+            },
+            orderBy: { decidedAt: 'desc' },
+          }),
+        ]);
+
+        if (current && previousDecision) {
+          return {
+            emails: [] as Array<{
+              to: string;
+              subject: string;
+              text: string;
+              link: string;
+              actionLabel: string;
+            }>,
+            applied: false,
+          };
+        }
+
+        throw new ConflictException(
+          'Cette demande a déjà été traitée par un autre processus',
+        );
+      }
+
       await transaction.validation.create({
         data: {
           requestId: existing.id,
@@ -113,15 +181,6 @@ export class RhGlobalViewService {
           decision: transition.validationDecision,
           comment: comment || null,
           decidedAt: now,
-        },
-      });
-
-      await transaction.leaveRequest.update({
-        where: { id: existing.id },
-        data: {
-          status: transition.status,
-          decidedAt: now,
-          cancelledAt: null,
         },
       });
 
@@ -190,10 +249,12 @@ export class RhGlobalViewService {
         },
       });
 
-      return emails;
+      return { emails, applied: true };
     });
 
-    await this.emailService.sendMany(emails);
+    if (result.applied) {
+      await this.emailService.sendMany(result.emails);
+    }
 
     return {
       id: existing.id,
@@ -824,23 +885,38 @@ export class RhGlobalViewService {
       const rowNumber = index + 1;
       const reference = row.reference.trim();
       const matricule = row.matricule.trim();
-      const category = this.resolveImportedHistoryCategory(row.category, rowNumber);
+      const category = this.resolveImportedHistoryCategory(
+        row.category,
+        rowNumber,
+      );
       const type = row.type.trim();
-      const startDate = this.parseImportDate(row.startDate, 'date debut', rowNumber);
+      const startDate = this.parseImportDate(
+        row.startDate,
+        'date debut',
+        rowNumber,
+      );
       const endDate = this.parseImportDate(row.endDate, 'date fin', rowNumber);
       const days = this.roundDays(Number(row.days));
 
       if (!reference) {
-        throw new BadRequestException(`Reference manquante a la ligne ${rowNumber}`);
+        throw new BadRequestException(
+          `Reference manquante a la ligne ${rowNumber}`,
+        );
       }
       if (!matricule) {
-        throw new BadRequestException(`Matricule manquant a la ligne ${rowNumber}`);
+        throw new BadRequestException(
+          `Matricule manquant a la ligne ${rowNumber}`,
+        );
       }
       if (!type) {
-        throw new BadRequestException(`Type de conge manquant a la ligne ${rowNumber}`);
+        throw new BadRequestException(
+          `Type de conge manquant a la ligne ${rowNumber}`,
+        );
       }
       if (!Number.isFinite(days) || days <= 0) {
-        throw new BadRequestException(`Nombre de jours invalide a la ligne ${rowNumber}`);
+        throw new BadRequestException(
+          `Nombre de jours invalide a la ligne ${rowNumber}`,
+        );
       }
       if (endDate < startDate) {
         throw new BadRequestException(
@@ -940,7 +1016,9 @@ export class RhGlobalViewService {
         : null;
 
     if (!parts) {
-      throw new BadRequestException(`${field} invalide a la ligne ${rowNumber}`);
+      throw new BadRequestException(
+        `${field} invalide a la ligne ${rowNumber}`,
+      );
     }
 
     const date = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
@@ -950,7 +1028,9 @@ export class RhGlobalViewService {
       date.getUTCDate() === parts.day;
 
     if (Number.isNaN(date.getTime()) || !valid) {
-      throw new BadRequestException(`${field} invalide a la ligne ${rowNumber}`);
+      throw new BadRequestException(
+        `${field} invalide a la ligne ${rowNumber}`,
+      );
     }
 
     return date;

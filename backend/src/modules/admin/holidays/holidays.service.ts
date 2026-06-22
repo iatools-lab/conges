@@ -21,7 +21,7 @@ export class AdminHolidaysService implements OnModuleInit {
   }
 
   async findMany(year?: number, country?: string) {
-    const where: any = {};
+    const where: Prisma.PublicHolidayWhereInput = {};
     if (country) where.country = country;
     if (year) {
       const start = new Date(Date.UTC(year, 0, 1));
@@ -71,7 +71,7 @@ export class AdminHolidaysService implements OnModuleInit {
     });
     if (!exists) throw new NotFoundException('Holiday not found');
 
-    const data: any = {};
+    const data: Prisma.PublicHolidayUpdateInput = {};
     if (dto.date) data.date = new Date(dto.date);
     if (dto.name) data.name = dto.name;
     if (dto.country) data.country = dto.country.trim().toUpperCase();

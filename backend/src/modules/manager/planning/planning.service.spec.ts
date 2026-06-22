@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
 import { RoleType, UserStatus } from '@prisma/client';
 import { ManagerPlanningService } from './planning.service';
 

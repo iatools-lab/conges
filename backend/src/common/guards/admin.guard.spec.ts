@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-argument */
 import { ExecutionContext } from '@nestjs/common';
 import { AdminGuard } from './admin.guard';
 import { createSessionToken } from '../auth/session-token';
@@ -66,6 +65,14 @@ describe('AdminGuard', () => {
     expect(
       createGuard().canActivate(
         createContext('/api/v1/admin/users', { 'x-user-roles': 'admin' }),
+      ),
+    ).toBe(false);
+
+    expect(
+      createGuard().canActivate(
+        createContext('/api/v1/admin/roles', {
+          authorization: `Bearer ${token(['rh'])}`,
+        }),
       ),
     ).toBe(false);
   });

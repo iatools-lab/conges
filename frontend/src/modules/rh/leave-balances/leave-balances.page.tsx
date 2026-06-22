@@ -82,9 +82,7 @@ function parseCsvText(text: string): ExcelCell[][] {
     .split(/\r?\n/)
     .filter((line) => line.trim())
     .map((line) =>
-      line
-        .split(delimiter)
-        .map((cell) => cell.trim().replace(/^"|"$/g, "").replace(/""/g, '"')),
+      line.split(delimiter).map((cell) => cell.trim().replace(/^"|"$/g, "").replace(/""/g, '"')),
     );
 }
 
@@ -214,7 +212,7 @@ export function RhLeaveBalancesPage() {
     return previewRows.filter((row) => row.matricule.toLowerCase().includes(query));
   }, [previewRows, search]);
 
-  const resultRows = lastResult?.rows ?? [];
+  const resultRows = useMemo(() => lastResult?.rows ?? [], [lastResult?.rows]);
   const filteredResultRows = useMemo(() => {
     const query = search.trim().toLowerCase();
     if (!query) return resultRows;
@@ -307,11 +305,19 @@ export function RhLeaveBalancesPage() {
             <Button variant="outline" onClick={() => fileInputRef.current?.click()}>
               <FileUp className="size-4" /> Charger
             </Button>
-            <Button variant="primary" disabled={!canImport} onClick={() => importMutation.mutate(previewRows)}>
+            <Button
+              variant="primary"
+              disabled={!canImport}
+              onClick={() => importMutation.mutate(previewRows)}
+            >
               <UploadCloud className="size-4" />
               {importMutation.isPending ? "Import..." : "Importer"}
             </Button>
-            <Button variant="ghost" disabled={!previewRows.length && !lastResult} onClick={clearPreview}>
+            <Button
+              variant="ghost"
+              disabled={!previewRows.length && !lastResult}
+              onClick={clearPreview}
+            >
               <Trash2 className="size-4" /> Vider
             </Button>
           </div>
@@ -329,7 +335,11 @@ export function RhLeaveBalancesPage() {
         <CardHeader
           title={previewRows.length ? "Apercu avant import" : "Resultat du dernier import"}
           action={
-            <Button variant="ghost" disabled={!previewRows.length && !lastResult} onClick={clearPreview}>
+            <Button
+              variant="ghost"
+              disabled={!previewRows.length && !lastResult}
+              onClick={clearPreview}
+            >
               <RotateCcw className="size-4" /> Reinitialiser
             </Button>
           }
@@ -358,7 +368,9 @@ export function RhLeaveBalancesPage() {
               </tbody>
             </table>
             {!filteredPreviewRows.length && (
-              <div className="px-5 py-8 text-sm text-muted-foreground">Aucune ligne ne correspond.</div>
+              <div className="px-5 py-8 text-sm text-muted-foreground">
+                Aucune ligne ne correspond.
+              </div>
             )}
           </div>
         ) : (
@@ -381,7 +393,9 @@ export function RhLeaveBalancesPage() {
                     <td className="px-5 py-3">{row.matricule}</td>
                     <td className="px-5 py-3 text-right">{formatNumber(row.previousRemaining)}</td>
                     <td className="px-5 py-3 text-right">{formatNumber(row.importedBalance)}</td>
-                    <td className="px-5 py-3 text-right font-semibold">{formatNumber(row.newRemaining)}</td>
+                    <td className="px-5 py-3 text-right font-semibold">
+                      {formatNumber(row.newRemaining)}
+                    </td>
                     <td className="px-5 py-3 text-right">{formatNumber(row.newCarryover)}</td>
                   </tr>
                 ))}

@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { AuditAction, LeaveCategory, Prisma } from '@prisma/client';
+import { AuditAction, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { GenerateRhExportDto } from './dto/rh-export.dto';
 import { fieldDateWhere, resolveDateRange } from '../../../common/date-range';
@@ -463,12 +463,14 @@ export class RhExportsService {
     user: { nom: string; prenom: string; email: string } | null;
   }) {
     const metadata = this.asRecord(log.metadata);
-    const actorName = String(
-      metadata.actorName ?? (log.user ? this.fullName(log.user) : 'RH'),
+    const actorName = this.toText(
+      metadata.actorName,
+      log.user ? this.fullName(log.user) : 'RH',
     );
-    const filename = String(metadata.filename ?? 'export.csv');
-    const templateName = String(
-      metadata.templateName ?? log.entityId ?? 'Export',
+    const filename = this.toText(metadata.filename, 'export.csv');
+    const templateName = this.toText(
+      metadata.templateName,
+      log.entityId ?? 'Export',
     );
     const sizeBytes = Number(metadata.sizeBytes ?? 0);
 
@@ -524,9 +526,18 @@ export class RhExportsService {
   }
 
   private escapeCsvCell(value: unknown) {
-    const text = String(value ?? '');
+    const text = this.toText(value, '');
     if (/[";\n\r]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
     return text;
+  }
+
+  private toText(value: unknown, fallback: string) {
+    if (typeof value === 'string') return value;
+    if (typeof value === 'number' || typeof value === 'boolean') {
+      return String(value);
+    }
+    if (value instanceof Date) return value.toISOString();
+    return fallback;
   }
 
   private getYearRange(year: number) {

@@ -75,7 +75,9 @@ export class ManagerConflictsService {
 
     const rows = await this.prisma.conflict.findMany({
       where: {
-        ...(range.endExclusive ? { periodStart: { lt: range.endExclusive } } : {}),
+        ...(range.endExclusive
+          ? { periodStart: { lt: range.endExclusive } }
+          : {}),
         ...(range.dateFrom ? { periodEnd: { gte: range.dateFrom } } : {}),
         OR: [
           { request: { owner: ownerWhere } },

@@ -24,7 +24,14 @@ export class AdminSettingsService {
         data: dto,
       });
     }
-    return this.prisma.systemSetting.create({ data: dto as any });
+    return this.prisma.systemSetting.create({
+      data: {
+        key: dto.key,
+        value: dto.value,
+        category: dto.category ?? null,
+        description: dto.description ?? null,
+      },
+    });
   }
 
   remove(id: string) {

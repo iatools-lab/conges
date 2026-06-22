@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/require-await */
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import {
   LeaveCategory,
@@ -71,13 +70,15 @@ function createHarness() {
     leaveRequest: {
       findMany: jest.fn(),
       findUnique: jest.fn(),
-      update: jest.fn(),
+      findUniqueOrThrow: jest.fn(),
+      updateMany: jest.fn(),
     },
     leaveBalance: {
       findMany: jest.fn(),
     },
     validation: {
       create: jest.fn(),
+      findFirst: jest.fn(),
     },
     notification: {
       createMany: jest.fn(),
@@ -111,9 +112,11 @@ function createHarness() {
       scheduled: 3,
     },
   ]);
-  prisma.leaveRequest.update.mockResolvedValue(
+  prisma.leaveRequest.updateMany.mockResolvedValue({ count: 1 });
+  prisma.leaveRequest.findUniqueOrThrow.mockResolvedValue(
     managerRequest({ status: LeaveRequestStatus.IN_REVIEW }),
   );
+  prisma.validation.findFirst.mockResolvedValue(null);
 
   return {
     prisma,
@@ -240,7 +243,7 @@ describe('ManagerRequestsService', () => {
         level: 1,
       }),
     });
-    expect(prisma.leaveRequest.update).toHaveBeenCalledWith(
+    expect(prisma.leaveRequest.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           status: LeaveRequestStatus.IN_REVIEW,

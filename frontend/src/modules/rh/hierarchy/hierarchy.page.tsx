@@ -36,7 +36,6 @@ type ApiDepartment = {
 
 type ApiUsersResponse = { rows: ApiUser[] };
 type ApiDepartmentsResponse = { rows: ApiDepartment[] };
-type ApiRolesResponse = { rows: Array<{ id: string; role: string }> };
 
 const inputClass = "w-full rounded-md border bg-background px-3 py-2 text-sm";
 const emptyUsers: ApiUser[] = [];
@@ -86,13 +85,13 @@ export function RhHierarchy() {
   >({});
 
   const usersQuery = useQuery({
-    queryKey: ["admin-users", "hierarchy"],
-    queryFn: () => apiFetch<ApiUsersResponse>("/admin/users?limit=500"),
+    queryKey: ["rh-hierarchy-users"],
+    queryFn: () => apiFetch<ApiUsersResponse>("/rh/hierarchy/users"),
   });
 
   const departmentsQuery = useQuery({
-    queryKey: ["admin-departments", "hierarchy"],
-    queryFn: () => apiFetch<ApiDepartmentsResponse>("/admin/departments"),
+    queryKey: ["rh-hierarchy-departments"],
+    queryFn: () => apiFetch<ApiDepartmentsResponse>("/rh/hierarchy/departments"),
   });
 
   const users = usersQuery.data?.rows ?? emptyUsers;
@@ -169,24 +168,11 @@ export function RhHierarchy() {
   }, [users]);
 
   const refreshAll = () => {
-    void queryClient.invalidateQueries({ queryKey: ["admin-users"] });
-    void queryClient.invalidateQueries({ queryKey: ["admin-departments"] });
+    void queryClient.invalidateQueries({ queryKey: ["rh-hierarchy-users"] });
+    void queryClient.invalidateQueries({ queryKey: ["rh-hierarchy-departments"] });
     void queryClient.invalidateQueries({ queryKey: ["account-profile"] });
     void queryClient.invalidateQueries({ queryKey: ["rh-global-view"] });
     void queryClient.invalidateQueries({ queryKey: ["rh-dashboard"] });
-  };
-
-  const ensureManagerRole = async (userId: string) => {
-    const roleRows = await apiFetch<ApiRolesResponse>(
-      `/admin/roles?userId=${encodeURIComponent(userId)}`,
-    );
-    const hasManager = roleRows.rows.some((row) => row.role === "MANAGER");
-    if (!hasManager) {
-      await apiFetch("/admin/roles", {
-        method: "POST",
-        body: JSON.stringify({ userId, role: "MANAGER" }),
-      });
-    }
   };
 
   const updateUserMutation = useMutation({
@@ -197,7 +183,7 @@ export function RhHierarchy() {
       n2Id?: string | null;
       n3Id?: string | null;
     }) =>
-      apiFetch(`/admin/users/${payload.userId}`, {
+      apiFetch(`/rh/hierarchy/users/${payload.userId}`, {
         method: "PATCH",
         body: JSON.stringify({
           ...(payload.managerId !== undefined ? { managerId: payload.managerId } : {}),
@@ -210,7 +196,7 @@ export function RhHierarchy() {
 
   const updateDepartmentMutation = useMutation({
     mutationFn: (payload: { departmentId: string; managerId: string }) =>
-      apiFetch(`/admin/departments/${payload.departmentId}`, {
+      apiFetch(`/rh/hierarchy/departments/${payload.departmentId}`, {
         method: "PATCH",
         body: JSON.stringify({ managerId: payload.managerId }),
       }),
@@ -247,10 +233,6 @@ export function RhHierarchy() {
     }
 
     try {
-      for (const supervisorId of selectedIds) {
-        await ensureManagerRole(supervisorId);
-      }
-
       await updateUserMutation.mutateAsync({
         userId,
         n1Id: n1Id || null,
@@ -293,7 +275,6 @@ export function RhHierarchy() {
         });
       }
 
-      await ensureManagerRole(managerId);
       toast.success(`Chef affecte pour ${expectedDepartmentName}`);
       refreshAll();
     } catch (error) {

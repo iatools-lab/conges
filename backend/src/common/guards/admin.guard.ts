@@ -34,7 +34,7 @@ export class AdminGuard implements CanActivate {
     if (path.startsWith('/api/v1/auth/profile'))
       return ['employee', 'manager', 'rh', 'admin'];
     if (path.startsWith('/api/v1/auth')) return null;
-    if (path.startsWith('/api/v1/admin')) return ['admin', 'rh'];
+    if (path.startsWith('/api/v1/admin')) return ['admin'];
     if (path.startsWith('/api/v1/rh')) return ['rh', 'admin'];
     if (path.startsWith('/api/v1/manager')) return ['manager', 'admin'];
     if (path.startsWith('/api/v1/employee'))

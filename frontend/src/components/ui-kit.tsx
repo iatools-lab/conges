@@ -78,9 +78,11 @@ export function Button({
   children,
   variant = "primary",
   className = "",
+  asChild,
   ...props
 }: React.ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: "primary" | "ghost" | "outline" | "danger" | "success" | "warning";
+  asChild?: boolean;
 }) {
   const styles: Record<string, string> = {
     primary: "bg-navy text-navy-foreground hover:bg-navy-hover",

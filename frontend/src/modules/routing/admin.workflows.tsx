@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Workflows } from "@/modules/admin/workflows/workflows.page";
 
 export const Route = createFileRoute("/admin/workflows")({
-  component: Workflows,
+  component: () => null,
   head: () => ({ meta: [{ title: "Workflows · Conges upOwa" }] }),
 });

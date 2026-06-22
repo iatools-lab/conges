@@ -122,6 +122,8 @@ const disabledPaths = new Set([
   "/heures-supp",
   "/manager/heures-supp",
   "/rh/heures-supp",
+  "/admin/roles",
+  "/admin/workflows",
 ]);
 
 function normalizePath(pathname: string) {

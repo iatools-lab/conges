@@ -155,7 +155,12 @@ export class RhEmployeesService {
           const existing = existingByMatricule ?? existingByEmail;
 
           if (existing) {
-            await this.updateWithClient(transaction, existing.id, employeeDto, false);
+            await this.updateWithClient(
+              transaction,
+              existing.id,
+              employeeDto,
+              false,
+            );
             records.push({
               employeeId: existing.id,
               matricule: normalizedMatricule,
@@ -251,7 +256,10 @@ export class RhEmployeesService {
       client,
     );
 
-    const createdEmployee = await this.findEmployeeRecordById(client, employee.id);
+    const createdEmployee = await this.findEmployeeRecordById(
+      client,
+      employee.id,
+    );
     return this.toResponse(createdEmployee);
   }
 
@@ -296,13 +304,17 @@ export class RhEmployeesService {
         },
         create: roles.map((role) => ({ role })),
       };
-
     }
 
     if (resolveHierarchy) {
       Object.assign(
         data,
-        await this.buildHierarchyConnections(client, dto, rolesForHierarchy, id),
+        await this.buildHierarchyConnections(
+          client,
+          dto,
+          rolesForHierarchy,
+          id,
+        ),
       );
     }
 
@@ -383,10 +395,7 @@ export class RhEmployeesService {
       throw new BadRequestException('Passif initial invalide');
     }
 
-    return Math.min(
-      Math.round(passiveDays * 10) / 10,
-      MAX_PASSIVE_LEAVE_DAYS,
-    );
+    return Math.min(Math.round(passiveDays * 10) / 10, MAX_PASSIVE_LEAVE_DAYS);
   }
 
   private normalizeOptionalMatricule(value?: string) {
@@ -453,7 +462,10 @@ export class RhEmployeesService {
 
     const normalizedRoles = roles ?? [];
     if (!n1Id && normalizedRoles.includes(RoleType.RH)) {
-      const directorGeneralId = await findDirectorGeneralId(client, userId ?? undefined);
+      const directorGeneralId = await findDirectorGeneralId(
+        client,
+        userId ?? undefined,
+      );
       if (directorGeneralId && directorGeneralId !== userId) {
         data.n1 = { connect: { id: directorGeneralId } };
       }
@@ -472,7 +484,12 @@ export class RhEmployeesService {
       select: { roles: { select: { role: true } } },
     });
     const roles = employee?.roles.map((role) => role.role) ?? [];
-    const data = await this.buildHierarchyConnections(client, hierarchy, roles, userId);
+    const data = await this.buildHierarchyConnections(
+      client,
+      hierarchy,
+      roles,
+      userId,
+    );
     if (Object.keys(data).length === 0) return;
 
     await client.user.update({
@@ -496,7 +513,9 @@ export class RhEmployeesService {
     });
 
     if (!employee) {
-      throw new NotFoundException(`${level} introuvable pour le matricule ${normalized}`);
+      throw new NotFoundException(
+        `${level} introuvable pour le matricule ${normalized}`,
+      );
     }
 
     return employee.id;

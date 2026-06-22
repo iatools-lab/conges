@@ -187,7 +187,13 @@ function KpiLink({
   );
 }
 
-function RhLeaveTable({ rows, emptyMessage }: { rows: RhDashboardLeaveRow[]; emptyMessage: string }) {
+function RhLeaveTable({
+  rows,
+  emptyMessage,
+}: {
+  rows: RhDashboardLeaveRow[];
+  emptyMessage: string;
+}) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[760px] text-sm">
@@ -267,8 +273,7 @@ export function RhDashboard() {
   const plannedLeaves = summary.plannedLeaves ?? [];
   const requestLeaves = summary.requestLeaves ?? [];
   const totalLeaves = plannedLeaves.length + requestLeaves.length;
-  const totalLeaveDays =
-    stats.remainingLiability + stats.plannedDays + stats.takenDays;
+  const totalLeaveDays = stats.remainingLiability + stats.plannedDays + stats.takenDays;
 
   return (
     <AppShell title="Tableau de bord RH" subtitle="Priorités, risques et pilotage congés">
@@ -463,7 +468,9 @@ export function RhDashboard() {
 
           <Card>
             <div className="border-b px-5 py-4 flex items-center justify-between gap-3">
-              <h3 className="font-semibold">Demandes, validations et congés pris ({requestLeaves.length})</h3>
+              <h3 className="font-semibold">
+                Demandes, validations et congés pris ({requestLeaves.length})
+              </h3>
               <Button asChild variant="ghost" size="sm">
                 <Link to="/rh/global">Voir en détail</Link>
               </Button>

@@ -647,9 +647,7 @@ export function Users() {
 
   const toggleSelected = (id: string) => {
     setSelectedIds((current) =>
-      current.includes(id)
-        ? current.filter((selectedId) => selectedId !== id)
-        : [...current, id],
+      current.includes(id) ? current.filter((selectedId) => selectedId !== id) : [...current, id],
     );
   };
 

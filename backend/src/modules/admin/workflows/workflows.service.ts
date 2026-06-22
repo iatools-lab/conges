@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CreateWorkflowDto } from './dto/create-workflow.dto';
 import { UpdateWorkflowDto } from './dto/update-workflow.dto';
+import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class AdminWorkflowsService {
@@ -33,7 +34,7 @@ export class AdminWorkflowsService {
           ? {
               create: dto.steps.map((s) => ({
                 order: s.order,
-                validator: s.validator as any,
+                validator: s.validator,
                 slaHours: s.slaHours ?? null,
                 required: typeof s.required === 'undefined' ? true : s.required,
               })),
@@ -52,7 +53,7 @@ export class AdminWorkflowsService {
     });
     if (!exists) throw new NotFoundException('Workflow not found');
 
-    const data: any = {};
+    const data: Prisma.WorkflowUpdateInput = {};
     if (dto.name) data.name = dto.name;
     if (dto.description) data.description = dto.description;
 
@@ -62,7 +63,7 @@ export class AdminWorkflowsService {
       data.steps = {
         create: dto.steps.map((s) => ({
           order: s.order ?? 1,
-          validator: s.validator as any,
+          validator: s.validator,
           slaHours: s.slaHours ?? null,
           required: typeof s.required === 'undefined' ? true : s.required,
         })),

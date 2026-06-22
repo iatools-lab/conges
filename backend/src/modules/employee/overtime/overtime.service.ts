@@ -9,7 +9,6 @@ import {
   NotificationType,
   OvertimeStatus,
   Prisma,
-  RoleType,
   UserStatus,
 } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';

@@ -7,8 +7,6 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import {
-  RH_ALERT_SEVERITIES,
-  RH_ALERT_STATUSES,
   RhAlertSeverity,
   RhAlertStatus,
   UpdateRhAlertRuleDto,

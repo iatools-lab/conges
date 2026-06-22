@@ -89,13 +89,7 @@ type TeamPlan = {
     days: number;
     type: string;
     typeCode: string;
-    status:
-      | "DRAFT"
-      | "PENDING"
-      | "IN_REVIEW"
-      | "APPROVED"
-      | "REJECTED"
-      | "CANCELLED";
+    status: "DRAFT" | "PENDING" | "IN_REVIEW" | "APPROVED" | "REJECTED" | "CANCELLED";
   }>;
 };
 
@@ -134,7 +128,6 @@ const emptyPlanning: ManagerPlanningResponse = {
   team: [],
   stats: { soumis: 0, total: 0, brouillon: 0, jours: 0, taux: 100 },
 };
-
 
 const statusMap: Record<
   ReqStatus,
@@ -221,7 +214,9 @@ function exportHistoryRowCsv(row: ManagerRequest) {
     row.statusLabel,
     row.motif,
   ];
-  const csv = [headers, values].map((line) => line.map((cell) => escapeCsvValue(cell)).join(";")).join("\n");
+  const csv = [headers, values]
+    .map((line) => line.map((cell) => escapeCsvValue(cell)).join(";"))
+    .join("\n");
   const blob = new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -241,7 +236,11 @@ function readInitialFilters() {
   const query = params.get("q")?.trim() ?? "";
   const status = params.get("status");
   const safeStatus: "ALL" | ReqStatus =
-    status === "ALL" || status === "pending" || status === "revision" || status === "valid" || status === "rejected"
+    status === "ALL" ||
+    status === "pending" ||
+    status === "revision" ||
+    status === "valid" ||
+    status === "rejected"
       ? status
       : "pending";
 
@@ -471,10 +470,34 @@ export function ManagerDemandes() {
       </div>
 
       <div className="mt-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard label="Attente action N+1" value={requestsQuery.isLoading ? "..." : filtered.filter((row) => row.status === "pending").length} tone="orange" />
-        <StatCard label="Planifications département" value={planningQuery.isLoading ? "..." : planningRows.length} tone="yellow" />
-        <StatCard label="Historique traité" value={requestsQuery.isLoading ? "..." : historyRows.length} tone="blue" />
-        <StatCard label="Total filtré" value={(filtered.filter((row) => row.status === "pending").length + planningRows.length + historyRows.length).toString()} tone="blue" />
+        <StatCard
+          label="Attente action N+1"
+          value={
+            requestsQuery.isLoading
+              ? "..."
+              : filtered.filter((row) => row.status === "pending").length
+          }
+          tone="orange"
+        />
+        <StatCard
+          label="Planifications département"
+          value={planningQuery.isLoading ? "..." : planningRows.length}
+          tone="yellow"
+        />
+        <StatCard
+          label="Historique traité"
+          value={requestsQuery.isLoading ? "..." : historyRows.length}
+          tone="blue"
+        />
+        <StatCard
+          label="Total filtré"
+          value={(
+            filtered.filter((row) => row.status === "pending").length +
+            planningRows.length +
+            historyRows.length
+          ).toString()}
+          tone="blue"
+        />
       </div>
 
       {(requestsQuery.isError || planningQuery.isError) && (
@@ -492,7 +515,9 @@ export function ManagerDemandes() {
               }}
               disabled={requestsQuery.isFetching || planningQuery.isFetching}
             >
-              <RefreshCw className={`size-4 ${(requestsQuery.isFetching || planningQuery.isFetching) ? "animate-spin" : ""}`} />
+              <RefreshCw
+                className={`size-4 ${requestsQuery.isFetching || planningQuery.isFetching ? "animate-spin" : ""}`}
+              />
               Réessayer
             </Button>
           </div>
@@ -501,7 +526,9 @@ export function ManagerDemandes() {
 
       <Tabs value={tab} onValueChange={(value) => setTab(value as typeof tab)}>
         <TabsList className="bg-muted">
-          <TabsTrigger value="pending">En attente d'action N+1 ({filtered.filter((row) => row.status === "pending").length})</TabsTrigger>
+          <TabsTrigger value="pending">
+            En attente d'action N+1 ({filtered.filter((row) => row.status === "pending").length})
+          </TabsTrigger>
           <TabsTrigger value="planning">Congés planifiés ({planningRows.length})</TabsTrigger>
           <TabsTrigger value="history">Historique traité ({historyRows.length})</TabsTrigger>
         </TabsList>
@@ -513,99 +540,107 @@ export function ManagerDemandes() {
               action={<Badge tone="pending">Niveau N+1</Badge>}
             />
 
-        {requestsQuery.isLoading ? (
-          <div className="px-5 py-10 text-center text-sm text-muted-foreground">
-            Chargement des demandes manager...
-          </div>
-        ) : requestsQuery.isError ? (
-          <div className="px-5 py-10 text-center text-sm text-destructive">
-            Impossible de charger les demandes manager.
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/40 text-xs text-muted-foreground">
-                <tr className="text-left">
-                  <th className="px-5 py-3">Référence</th>
-                  <th className="px-5 py-3">Employé</th>
-                  <th className="px-5 py-3">N+1</th>
-                  <th className="px-5 py-3">Département</th>
-                  <th className="px-5 py-3">Type de congé</th>
-                  <th className="px-5 py-3">Période</th>
-                  <th className="px-5 py-3">Jours</th>
-                  <th className="px-5 py-3">Statut</th>
-                  <th className="px-5 py-3 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {filtered.filter((row) => row.status === "pending").length === 0 && (
-                  <tr>
-                    <td colSpan={9} className="px-5 py-10 text-center text-muted-foreground">
-                      Aucune demande en attente d'action N+1 pour ces filtres.
-                    </td>
-                  </tr>
-                )}
-                {filtered.filter((row) => row.status === "pending").map((request) => {
-                  const status = statusMap[request.status];
-                  const canDecide = request.canDecide && request.status === "pending";
-                  return (
-                    <tr key={request.id} className="hover:bg-muted/30">
-                      <td className="px-5 py-3 font-medium">{request.reference}</td>
-                      <td className="px-5 py-3">
-                        <div className="flex items-center gap-2">
-                          <div className="size-7 rounded-full bg-gradient-to-br from-stat-blue-fg to-stat-purple-fg" />
-                          <div>
-                            <div className="font-medium">{request.emp}</div>
-                            <div className="text-[11px] text-muted-foreground">
-                              {request.matricule} · {request.dept}
-                            </div>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-5 py-3">{session?.name ?? "Manager"}</td>
-                      <td className="px-5 py-3">{request.departmentName}</td>
-                      <td className="px-5 py-3">{request.type}</td>
-                      <td className="px-5 py-3 text-muted-foreground">
-                        {request.debut} → {request.fin}
-                      </td>
-                      <td className="px-5 py-3">{request.jours} j</td>
-                      <td className="px-5 py-3">
-                        <Badge tone={status.tone}>{request.statusLabel ?? status.label}</Badge>
-                      </td>
-                      <td className="px-5 py-3 text-right">
-                        <div className="flex justify-end gap-2">
-                          <Button variant="outline" size="sm" onClick={() => setDetail(request)}>
-                            <Eye className="size-4" /> Détail
-                          </Button>
-                          {canDecide && (
-                            <>
-                              <Button
-                                variant="success"
-                                size="sm"
-                                disabled={decisionMutation.isPending}
-                                onClick={() => decide(request.id, "approve")}
-                              >
-                                <Check className="size-4" /> Valider
-                              </Button>
-                              <Button
-                                variant="danger"
-                                size="sm"
-                                disabled={decisionMutation.isPending}
-                                onClick={() => openDecisionDialog(request, "reject")}
-                              >
-                                <X className="size-4" /> Refuser
-                              </Button>
-                            </>
-                          )}
-                        </div>
-                      </td>
+            {requestsQuery.isLoading ? (
+              <div className="px-5 py-10 text-center text-sm text-muted-foreground">
+                Chargement des demandes manager...
+              </div>
+            ) : requestsQuery.isError ? (
+              <div className="px-5 py-10 text-center text-sm text-destructive">
+                Impossible de charger les demandes manager.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/40 text-xs text-muted-foreground">
+                    <tr className="text-left">
+                      <th className="px-5 py-3">Référence</th>
+                      <th className="px-5 py-3">Employé</th>
+                      <th className="px-5 py-3">N+1</th>
+                      <th className="px-5 py-3">Département</th>
+                      <th className="px-5 py-3">Type de congé</th>
+                      <th className="px-5 py-3">Période</th>
+                      <th className="px-5 py-3">Jours</th>
+                      <th className="px-5 py-3">Statut</th>
+                      <th className="px-5 py-3 text-right">Actions</th>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
+                  </thead>
+                  <tbody className="divide-y">
+                    {filtered.filter((row) => row.status === "pending").length === 0 && (
+                      <tr>
+                        <td colSpan={9} className="px-5 py-10 text-center text-muted-foreground">
+                          Aucune demande en attente d'action N+1 pour ces filtres.
+                        </td>
+                      </tr>
+                    )}
+                    {filtered
+                      .filter((row) => row.status === "pending")
+                      .map((request) => {
+                        const status = statusMap[request.status];
+                        const canDecide = request.canDecide && request.status === "pending";
+                        return (
+                          <tr key={request.id} className="hover:bg-muted/30">
+                            <td className="px-5 py-3 font-medium">{request.reference}</td>
+                            <td className="px-5 py-3">
+                              <div className="flex items-center gap-2">
+                                <div className="size-7 rounded-full bg-gradient-to-br from-stat-blue-fg to-stat-purple-fg" />
+                                <div>
+                                  <div className="font-medium">{request.emp}</div>
+                                  <div className="text-[11px] text-muted-foreground">
+                                    {request.matricule} · {request.dept}
+                                  </div>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-5 py-3">{session?.name ?? "Manager"}</td>
+                            <td className="px-5 py-3">{request.departmentName}</td>
+                            <td className="px-5 py-3">{request.type}</td>
+                            <td className="px-5 py-3 text-muted-foreground">
+                              {request.debut} → {request.fin}
+                            </td>
+                            <td className="px-5 py-3">{request.jours} j</td>
+                            <td className="px-5 py-3">
+                              <Badge tone={status.tone}>
+                                {request.statusLabel ?? status.label}
+                              </Badge>
+                            </td>
+                            <td className="px-5 py-3 text-right">
+                              <div className="flex justify-end gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => setDetail(request)}
+                                >
+                                  <Eye className="size-4" /> Détail
+                                </Button>
+                                {canDecide && (
+                                  <>
+                                    <Button
+                                      variant="success"
+                                      size="sm"
+                                      disabled={decisionMutation.isPending}
+                                      onClick={() => decide(request.id, "approve")}
+                                    >
+                                      <Check className="size-4" /> Valider
+                                    </Button>
+                                    <Button
+                                      variant="danger"
+                                      size="sm"
+                                      disabled={decisionMutation.isPending}
+                                      onClick={() => openDecisionDialog(request, "reject")}
+                                    >
+                                      <X className="size-4" /> Refuser
+                                    </Button>
+                                  </>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </Card>
         </TabsContent>
 
@@ -656,7 +691,9 @@ export function ManagerDemandes() {
                         </td>
                         <td className="px-5 py-3">{formatNumber(row.days)}</td>
                         <td className="px-5 py-3">
-                          <Badge tone={planningStatus(row.status).tone}>{planningStatus(row.status).label}</Badge>
+                          <Badge tone={planningStatus(row.status).tone}>
+                            {planningStatus(row.status).label}
+                          </Badge>
                         </td>
                         <td className="px-5 py-3 text-right">
                           <Button variant="ghost" size="sm" asChild>
@@ -712,7 +749,9 @@ export function ManagerDemandes() {
                         <td className="px-5 py-3">{row.emp}</td>
                         <td className="px-5 py-3">{row.departmentName}</td>
                         <td className="px-5 py-3">{row.type}</td>
-                        <td className="px-5 py-3 text-muted-foreground">{row.debut} → {row.fin}</td>
+                        <td className="px-5 py-3 text-muted-foreground">
+                          {row.debut} → {row.fin}
+                        </td>
                         <td className="px-5 py-3">{row.jours}</td>
                         <td className="px-5 py-3">
                           <Badge tone={statusMap[row.status].tone}>{row.statusLabel}</Badge>
@@ -722,7 +761,11 @@ export function ManagerDemandes() {
                             <Button variant="ghost" size="sm" asChild>
                               <Link to="/manager/historique">Ouvrir</Link>
                             </Button>
-                            <Button variant="outline" size="sm" onClick={() => exportHistoryRowCsv(row)}>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => exportHistoryRowCsv(row)}
+                            >
                               <Download className="size-4" /> Exporter
                             </Button>
                           </div>

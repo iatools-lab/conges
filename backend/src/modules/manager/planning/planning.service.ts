@@ -414,7 +414,17 @@ export class ManagerPlanningService {
   private toPlanificationStatus(status: LeaveRequestStatus) {
     const mapping: Record<
       LeaveRequestStatus,
-      { tone: 'planned' | 'pending' | 'review' | 'valid' | 'rejected' | 'neutral' | 'draft'; label: string }
+      {
+        tone:
+          | 'planned'
+          | 'pending'
+          | 'review'
+          | 'valid'
+          | 'rejected'
+          | 'neutral'
+          | 'draft';
+        label: string;
+      }
     > = {
       [LeaveRequestStatus.DRAFT]: { tone: 'planned', label: 'Planifié' },
       [LeaveRequestStatus.PENDING]: { tone: 'pending', label: 'Soumis' },

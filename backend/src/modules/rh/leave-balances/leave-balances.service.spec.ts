@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
 import { BadRequestException } from '@nestjs/common';
 import { LeaveCategory, Sexe, UserStatus } from '@prisma/client';
 import { RhLeaveBalancesService } from './leave-balances.service';

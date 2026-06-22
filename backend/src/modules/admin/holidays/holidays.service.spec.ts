@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-argument */
 import { AdminHolidaysService } from './holidays.service';
 
 describe('AdminHolidaysService', () => {

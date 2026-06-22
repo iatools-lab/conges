@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Parametres } from "@/modules/admin/settings/settings.page";
+import { RhParametres } from "@/modules/rh/settings/settings.page";
 
 export const Route = createFileRoute("/admin/parametres")({
-  component: Parametres,
+  component: RhParametres,
   head: () => ({ meta: [{ title: "Paramètres RH · Conges upOwa" }] }),
 });

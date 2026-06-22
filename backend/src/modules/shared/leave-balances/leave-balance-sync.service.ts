@@ -101,6 +101,10 @@ export class LeaveBalanceSyncService {
   private async syncForKey(key: BalanceKey, client: PrismaClientLike) {
     const yearStart = new Date(Date.UTC(key.year, 0, 1));
     const nextYearStart = new Date(Date.UTC(key.year + 1, 0, 1));
+    const now = new Date();
+    const today = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+    );
     const [approved, scheduled] = await Promise.all([
       client.leaveRequest.aggregate({
         where: {
@@ -108,6 +112,7 @@ export class LeaveBalanceSyncService {
           leaveTypeId: key.leaveTypeId,
           startDate: { gte: yearStart, lt: nextYearStart },
           status: LeaveRequestStatus.APPROVED,
+          endDate: { lt: today },
         },
         _sum: { days: true },
       }),
@@ -117,6 +122,10 @@ export class LeaveBalanceSyncService {
           leaveTypeId: key.leaveTypeId,
           startDate: { gte: yearStart, lt: nextYearStart },
           OR: [
+            {
+              status: LeaveRequestStatus.APPROVED,
+              endDate: { gte: today },
+            },
             {
               status: {
                 in: [LeaveRequestStatus.PENDING, LeaveRequestStatus.IN_REVIEW],

@@ -23,7 +23,15 @@ import {
 } from "@/components/ui/dialog";
 import { apiFetch } from "@/lib/api";
 import { useAuthSession } from "@/modules/auth/session";
-import { AlertCircle, Download, FileUp, RefreshCw, Search, Trash2, UploadCloud } from "lucide-react";
+import {
+  AlertCircle,
+  Download,
+  FileUp,
+  RefreshCw,
+  Search,
+  Trash2,
+  UploadCloud,
+} from "lucide-react";
 
 type BadgeTone =
   | "valid"
@@ -132,10 +140,32 @@ function cellToNumber(value: ExcelCell, rowNumber: number) {
 function cellToCategory(value: ExcelCell, rowNumber: number): HistoryImportCategory {
   const normalized = normalizeHeader(value);
 
-  if (["pris", "prix", "prise", "prises", "taken", "consomme", "consommes", "congepris", "congespris"].includes(normalized)) {
+  if (
+    [
+      "pris",
+      "prix",
+      "prise",
+      "prises",
+      "taken",
+      "consomme",
+      "consommes",
+      "congepris",
+      "congespris",
+    ].includes(normalized)
+  ) {
     return "pris";
   }
-  if (["planifier", "planifie", "planifies", "planifiee", "planifiees", "planification", "planned"].includes(normalized)) {
+  if (
+    [
+      "planifier",
+      "planifie",
+      "planifies",
+      "planifiee",
+      "planifiees",
+      "planification",
+      "planned",
+    ].includes(normalized)
+  ) {
     return "planifier";
   }
 
@@ -198,9 +228,7 @@ function parseCsvText(text: string): ExcelCell[][] {
     .split(/\r?\n/)
     .filter((line) => line.trim())
     .map((line) =>
-      line
-        .split(delimiter)
-        .map((cell) => cell.trim().replace(/^"|"$/g, "").replace(/""/g, '"')),
+      line.split(delimiter).map((cell) => cell.trim().replace(/^"|"$/g, "").replace(/""/g, '"')),
     );
 }
 
@@ -226,15 +254,9 @@ function parseHistoryImportRows(result: ExcelReadResult): HistoryImportRow[] {
     if (["datedebut", "debut", "startdate"].includes(normalized)) return "startDate";
     if (["datefin", "fin", "enddate"].includes(normalized)) return "endDate";
     if (
-      [
-        "nombredejours",
-        "nbjours",
-        "jours",
-        "jour",
-        "days",
-        "duree",
-        "dureejours",
-      ].includes(normalized)
+      ["nombredejours", "nbjours", "jours", "jour", "days", "duree", "dureejours"].includes(
+        normalized,
+      )
     ) {
       return "days";
     }
@@ -244,7 +266,9 @@ function parseHistoryImportRows(result: ExcelReadResult): HistoryImportRow[] {
   const required = ["reference", "matricule", "category", "type", "startDate", "endDate", "days"];
   const missing = required.filter((column) => !columns.includes(column));
   if (missing.length) {
-    throw new Error("Colonnes requises: reference, matricule, categorie, type, date debut, date fin, nombre de jours");
+    throw new Error(
+      "Colonnes requises: reference, matricule, categorie, type, date debut, date fin, nombre de jours",
+    );
   }
 
   const rows = bodyRows.map((row, rowIndex) => {
@@ -330,7 +354,9 @@ function exportRowCsv(row: PlanificationRow) {
     row.type,
     row.label,
   ];
-  const csv = [headers, values].map((line) => line.map((cell) => escapeCsvValue(cell)).join(";")).join("\n");
+  const csv = [headers, values]
+    .map((line) => line.map((cell) => escapeCsvValue(cell)).join(";"))
+    .join("\n");
   const blob = new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -400,14 +426,17 @@ export function RhDemandesConges() {
     },
     onSuccess: () => {
       toast.success("Remarque RH enregistrée", {
-        description: "La remarque sera visible dans le détail de la demande pour le demandeur et le N+1.",
+        description:
+          "La remarque sera visible dans le détail de la demande pour le demandeur et le N+1.",
       });
       setRemarkDialog(null);
       setRemark("");
       void queryClient.invalidateQueries({ queryKey });
     },
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Impossible d'enregistrer la remarque RH");
+      toast.error(
+        error instanceof Error ? error.message : "Impossible d'enregistrer la remarque RH",
+      );
     },
   });
 
@@ -449,9 +478,10 @@ export function RhDemandesConges() {
     },
   });
 
-  const planifications = data?.planifications ?? [];
+  const planifications = useMemo(() => data?.planifications ?? [], [data?.planifications]);
   const typeOptions = useMemo(
-    () => Array.from(new Set(planifications.map((row) => row.type))).sort((a, b) => a.localeCompare(b)),
+    () =>
+      Array.from(new Set(planifications.map((row) => row.type))).sort((a, b) => a.localeCompare(b)),
     [planifications],
   );
 
@@ -476,9 +506,14 @@ export function RhDemandesConges() {
   });
   const historyPreviewTotalDays = historyPreviewRows.reduce((sum, row) => sum + row.days, 0);
   const historyPreviewTakenRows = historyPreviewRows.filter((row) => row.category === "pris");
-  const historyPreviewPlannedRows = historyPreviewRows.filter((row) => row.category === "planifier");
+  const historyPreviewPlannedRows = historyPreviewRows.filter(
+    (row) => row.category === "planifier",
+  );
   const historyPreviewTakenDays = historyPreviewTakenRows.reduce((sum, row) => sum + row.days, 0);
-  const historyPreviewPlannedDays = historyPreviewPlannedRows.reduce((sum, row) => sum + row.days, 0);
+  const historyPreviewPlannedDays = historyPreviewPlannedRows.reduce(
+    (sum, row) => sum + row.days,
+    0,
+  );
   const canImportHistory = historyPreviewRows.length > 0 && !importHistoryMutation.isPending;
 
   const handleHistoryFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -566,10 +601,26 @@ export function RhDemandesConges() {
       </div>
 
       <div className="mt-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard label="Attente action N+1" value={isLoading ? "..." : managerPendingRows.length} tone="orange" />
-        <StatCard label="Attente validation RH" value={isLoading ? "..." : rhPendingRows.length} tone="yellow" />
-        <StatCard label="Congés planifiés" value={isLoading ? "..." : plannedRows.length} tone="blue" />
-        <StatCard label="Total filtré" value={isLoading ? "..." : baseFiltered.length} tone="blue" />
+        <StatCard
+          label="Attente action N+1"
+          value={isLoading ? "..." : managerPendingRows.length}
+          tone="orange"
+        />
+        <StatCard
+          label="Attente validation RH"
+          value={isLoading ? "..." : rhPendingRows.length}
+          tone="yellow"
+        />
+        <StatCard
+          label="Congés planifiés"
+          value={isLoading ? "..." : plannedRows.length}
+          tone="blue"
+        />
+        <StatCard
+          label="Total filtré"
+          value={isLoading ? "..." : baseFiltered.length}
+          tone="blue"
+        />
       </div>
 
       {isError && (
@@ -589,7 +640,9 @@ export function RhDemandesConges() {
 
       <Tabs defaultValue="n1" className="mt-6">
         <TabsList className="bg-muted">
-          <TabsTrigger value="n1">En attente d'action N+1 ({managerPendingRows.length})</TabsTrigger>
+          <TabsTrigger value="n1">
+            En attente d'action N+1 ({managerPendingRows.length})
+          </TabsTrigger>
           <TabsTrigger value="rh">En attente validation RH ({rhPendingRows.length})</TabsTrigger>
           <TabsTrigger value="planned">Congés planifiés ({plannedRows.length})</TabsTrigger>
           <TabsTrigger value="history">Historique traité ({processedRows.length})</TabsTrigger>
@@ -624,7 +677,9 @@ export function RhDemandesConges() {
                       <td className="px-5 py-3">{row.manager}</td>
                       <td className="px-5 py-3">{row.departmentName}</td>
                       <td className="px-5 py-3">{row.type}</td>
-                      <td className="px-5 py-3">{row.startDate} - {row.endDate}</td>
+                      <td className="px-5 py-3">
+                        {row.startDate} - {row.endDate}
+                      </td>
                       <td className="px-5 py-3">{formatNumber(row.days)}</td>
                       <td className="px-5 py-3">
                         <Badge tone={row.status}>{row.label}</Badge>
@@ -682,7 +737,9 @@ export function RhDemandesConges() {
                       <td className="px-5 py-3">{row.employee}</td>
                       <td className="px-5 py-3">{row.departmentName}</td>
                       <td className="px-5 py-3">{row.type}</td>
-                      <td className="px-5 py-3">{row.startDate} - {row.endDate}</td>
+                      <td className="px-5 py-3">
+                        {row.startDate} - {row.endDate}
+                      </td>
                       <td className="px-5 py-3">{formatNumber(row.days)}</td>
                       <td className="px-5 py-3">
                         <Badge tone={row.status}>{row.label}</Badge>
@@ -693,7 +750,9 @@ export function RhDemandesConges() {
                             variant="success"
                             size="sm"
                             disabled={rhDecisionMutation.isPending}
-                            onClick={() => rhDecisionMutation.mutate({ id: row.id, decision: "approve" })}
+                            onClick={() =>
+                              rhDecisionMutation.mutate({ id: row.id, decision: "approve" })
+                            }
                           >
                             Valider
                           </Button>
@@ -701,7 +760,9 @@ export function RhDemandesConges() {
                             variant="danger"
                             size="sm"
                             disabled={rhDecisionMutation.isPending}
-                            onClick={() => rhDecisionMutation.mutate({ id: row.id, decision: "reject" })}
+                            onClick={() =>
+                              rhDecisionMutation.mutate({ id: row.id, decision: "reject" })
+                            }
                           >
                             Rejeter
                           </Button>
@@ -748,7 +809,9 @@ export function RhDemandesConges() {
                       <td className="px-5 py-3">{row.manager}</td>
                       <td className="px-5 py-3">{row.departmentName}</td>
                       <td className="px-5 py-3">{row.type}</td>
-                      <td className="px-5 py-3">{row.startDate} - {row.endDate}</td>
+                      <td className="px-5 py-3">
+                        {row.startDate} - {row.endDate}
+                      </td>
                       <td className="px-5 py-3">{formatNumber(row.days)}</td>
                       <td className="px-5 py-3">
                         <Badge tone={row.status}>{row.label}</Badge>
@@ -827,10 +890,12 @@ export function RhDemandesConges() {
                   <Badge tone="pending">{historyPreviewRows.length} ligne(s) prête(s)</Badge>
                   <Badge tone="info">{formatNumber(historyPreviewTotalDays)} jour(s)</Badge>
                   <Badge tone="valid">
-                    {historyPreviewTakenRows.length} pris - {formatNumber(historyPreviewTakenDays)} jour(s)
+                    {historyPreviewTakenRows.length} pris - {formatNumber(historyPreviewTakenDays)}{" "}
+                    jour(s)
                   </Badge>
                   <Badge tone="planned">
-                    {historyPreviewPlannedRows.length} planifie(s) - {formatNumber(historyPreviewPlannedDays)} jour(s)
+                    {historyPreviewPlannedRows.length} planifie(s) -{" "}
+                    {formatNumber(historyPreviewPlannedDays)} jour(s)
                   </Badge>
                 </div>
                 <div className="overflow-x-auto rounded-md border bg-background">
@@ -875,8 +940,8 @@ export function RhDemandesConges() {
             {lastHistoryImport && !historyPreviewRows.length && (
               <div className="border-b bg-muted/20 px-5 py-3 text-sm text-muted-foreground">
                 Dernier import: {lastHistoryImport.imported} ligne(s) (
-                {lastHistoryImport.importedTaken} pris, {lastHistoryImport.importedPlanned} planifie(s)),{" "}
-                {formatNumber(lastHistoryImport.totals.days)} jour(s) dont{" "}
+                {lastHistoryImport.importedTaken} pris, {lastHistoryImport.importedPlanned}{" "}
+                planifie(s)), {formatNumber(lastHistoryImport.totals.days)} jour(s) dont{" "}
                 {formatNumber(lastHistoryImport.totals.takenDays)} pris et{" "}
                 {formatNumber(lastHistoryImport.totals.plannedDays)} planifie(s)
                 {lastHistoryImport.skipped
@@ -906,7 +971,9 @@ export function RhDemandesConges() {
                       <td className="px-5 py-3">{row.employee}</td>
                       <td className="px-5 py-3">{row.departmentName}</td>
                       <td className="px-5 py-3">{row.type}</td>
-                      <td className="px-5 py-3">{row.startDate} - {row.endDate}</td>
+                      <td className="px-5 py-3">
+                        {row.startDate} - {row.endDate}
+                      </td>
                       <td className="px-5 py-3">{formatNumber(row.days)}</td>
                       <td className="px-5 py-3">
                         <Badge tone={row.status}>{row.label}</Badge>

@@ -277,7 +277,9 @@ export function HistoriquePage() {
         </div>
         <div className="flex items-center justify-between px-5 py-3 border-t text-xs text-muted-foreground">
           <span>{filtered.length} demande(s) affichée(s)</span>
-          <span>{dateRange.dateFrom || "Tout"} - {dateRange.dateTo || "Tout"}</span>
+          <span>
+            {dateRange.dateFrom || "Tout"} - {dateRange.dateTo || "Tout"}
+          </span>
         </div>
       </Card>
 

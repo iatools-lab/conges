@@ -18,7 +18,10 @@ export class RhAuditController {
     const limit = this.normalizeLimit(limitRaw);
     const normalizedSearch = search?.trim();
     const normalizedAction = this.normalizeAction(action);
-    const range = resolveDateRange({ dateFrom, dateTo }, { defaultMode: 'all' });
+    const range = resolveDateRange(
+      { dateFrom, dateTo },
+      { defaultMode: 'all' },
+    );
     const createdAt = fieldDateWhere(range);
 
     const where: Prisma.AuditLogWhereInput = {

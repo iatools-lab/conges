@@ -96,11 +96,13 @@ export class RhSpecialLeavesService {
     private readonly emailService: EmailService,
   ) {}
 
-  async findAll(filters: {
-    year?: string;
-    dateFrom?: string;
-    dateTo?: string;
-  } = {}) {
+  async findAll(
+    filters: {
+      year?: string;
+      dateFrom?: string;
+      dateTo?: string;
+    } = {},
+  ) {
     const range = resolveDateRange(filters, { defaultMode: 'year' });
     const year = range.year;
     const eventDate = fieldDateWhere(range);
@@ -325,7 +327,7 @@ export class RhSpecialLeavesService {
           : Promise.resolve(),
       ]);
 
-      return this.toResponse(request) as ReturnType<typeof this.toResponse>;
+      return this.toResponse(request);
     });
 
     // Notify employee if status was explicitly changed

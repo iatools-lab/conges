@@ -80,7 +80,12 @@ export function isDateInRange(date: string, range: DateRangeValue) {
   return (!range.dateFrom || date >= range.dateFrom) && (!range.dateTo || date <= range.dateTo);
 }
 
-export function DateRangeFilter({ value, onChange, className = "", compact = false }: DateRangeFilterProps) {
+export function DateRangeFilter({
+  value,
+  onChange,
+  className = "",
+  compact = false,
+}: DateRangeFilterProps) {
   const invalid = isInvalidDateRange(value);
 
   return (
@@ -108,17 +113,37 @@ export function DateRangeFilter({ value, onChange, className = "", compact = fal
         />
       </label>
       <div className="flex flex-wrap gap-2">
-        <Button type="button" variant="outline" className="px-3 py-1.5" onClick={() => onChange(currentMonthRange())}>
+        <Button
+          type="button"
+          variant="outline"
+          className="px-3 py-1.5"
+          onClick={() => onChange(currentMonthRange())}
+        >
           <CalendarDays className="size-4" />
           {compact ? "Mois" : "Mois courant"}
         </Button>
-        <Button type="button" variant="outline" className="px-3 py-1.5" onClick={() => onChange(currentYearRange())}>
+        <Button
+          type="button"
+          variant="outline"
+          className="px-3 py-1.5"
+          onClick={() => onChange(currentYearRange())}
+        >
           {compact ? "Annee" : "Annee courante"}
         </Button>
-        <Button type="button" variant="outline" className="px-3 py-1.5" onClick={() => onChange(previousYearRange())}>
+        <Button
+          type="button"
+          variant="outline"
+          className="px-3 py-1.5"
+          onClick={() => onChange(previousYearRange())}
+        >
           N-1
         </Button>
-        <Button type="button" variant="outline" className="px-3 py-1.5" onClick={() => onChange(allDateRange())}>
+        <Button
+          type="button"
+          variant="outline"
+          className="px-3 py-1.5"
+          onClick={() => onChange(allDateRange())}
+        >
           <RotateCcw className="size-4" />
           Tout
         </Button>

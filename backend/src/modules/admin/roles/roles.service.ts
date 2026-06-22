@@ -2,13 +2,14 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CreateRoleDto } from './dto/create-role.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
+import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class AdminRolesService {
   constructor(private readonly prisma: PrismaService) {}
 
   async findMany(userId?: string) {
-    const where: any = {};
+    const where: Prisma.UserRoleWhereInput = {};
     if (userId) where.userId = userId;
     const rows = await this.prisma.userRole.findMany({
       where,

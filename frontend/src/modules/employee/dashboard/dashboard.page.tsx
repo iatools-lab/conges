@@ -110,15 +110,18 @@ export function EmployeeDashboard() {
   const stats = data?.stats;
   const loading = !session || isLoading;
   const requestsQuery = useQuery({
-    queryKey: ["employee-dashboard-requests", session?.id, session?.email, ...dateRangeQueryKey(dateRange)],
+    queryKey: [
+      "employee-dashboard-requests",
+      session?.id,
+      session?.email,
+      ...dateRangeQueryKey(dateRange),
+    ],
     queryFn: () => apiFetch<EmployeeLeaveRequestsResponse>(buildRequestsPath(session!, dateRange)),
     enabled: Boolean(session?.id && session?.email),
   });
   const availableDays = formatNumber(stats?.availableDays ?? 0);
   const totalLeaveDays = formatNumber(
-    (stats?.availableDays ?? 0) +
-      (stats?.takenDays ?? 0) +
-      (stats?.scheduledDays ?? 0),
+    (stats?.availableDays ?? 0) + (stats?.takenDays ?? 0) + (stats?.scheduledDays ?? 0),
   );
   const pendingRequests = stats?.pendingRequests ?? 0;
   const nextAbsence = data?.nextAbsence;

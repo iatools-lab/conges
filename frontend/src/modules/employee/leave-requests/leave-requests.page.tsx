@@ -84,7 +84,10 @@ const STATUS_FILTERS: Array<{ status: CalendarStatus; label: string }> = [
   { status: "draft", label: "Brouillon" },
 ];
 
-function buildDepartmentPlanningPath(session: { id: string; email: string }, range: DateRangeValue) {
+function buildDepartmentPlanningPath(
+  session: { id: string; email: string },
+  range: DateRangeValue,
+) {
   const params = new URLSearchParams({
     userId: session.id,
     userEmail: session.email,
@@ -182,7 +185,15 @@ function MonthCalendar({
   );
 }
 
-function MonthMini({ year, month, plans }: { year: number; month: number; plans: DepartmentPlan[] }) {
+function MonthMini({
+  year,
+  month,
+  plans,
+}: {
+  year: number;
+  month: number;
+  plans: DepartmentPlan[];
+}) {
   const total = daysInMonth(year, month);
   const offset = firstWeekday(year, month);
   const cells: (number | null)[] = [
@@ -267,8 +278,14 @@ export function Demandes() {
   );
 
   const calendarQuery = useQuery({
-    queryKey: ["employee-department-calendar", session?.id, session?.email, ...dateRangeQueryKey(dateRange)],
-    queryFn: () => apiFetch<DepartmentPlanningResponse>(buildDepartmentPlanningPath(session!, dateRange)),
+    queryKey: [
+      "employee-department-calendar",
+      session?.id,
+      session?.email,
+      ...dateRangeQueryKey(dateRange),
+    ],
+    queryFn: () =>
+      apiFetch<DepartmentPlanningResponse>(buildDepartmentPlanningPath(session!, dateRange)),
     enabled: Boolean(session?.id && session?.email),
   });
 
@@ -374,7 +391,12 @@ export function Demandes() {
               title={`${MONTHS_FR[month]} ${year}`}
               action={
                 <div className="flex items-center gap-2">
-                  <Button variant="outline" className="!p-2" onClick={goPrevMonth} aria-label="Mois précédent">
+                  <Button
+                    variant="outline"
+                    className="!p-2"
+                    onClick={goPrevMonth}
+                    aria-label="Mois précédent"
+                  >
                     <ChevronLeft className="size-4" />
                   </Button>
                   <Button
@@ -387,7 +409,12 @@ export function Demandes() {
                   >
                     Aujourd'hui
                   </Button>
-                  <Button variant="outline" className="!p-2" onClick={goNextMonth} aria-label="Mois suivant">
+                  <Button
+                    variant="outline"
+                    className="!p-2"
+                    onClick={goNextMonth}
+                    aria-label="Mois suivant"
+                  >
                     <ChevronRight className="size-4" />
                   </Button>
                 </div>
@@ -395,7 +422,9 @@ export function Demandes() {
             />
             <div className="p-5">
               {calendarQuery.isLoading ? (
-                <div className="py-12 text-center text-sm text-muted-foreground">Chargement du calendrier...</div>
+                <div className="py-12 text-center text-sm text-muted-foreground">
+                  Chargement du calendrier...
+                </div>
               ) : (
                 <MonthCalendar year={year} month={month} plans={filteredPlans} />
               )}

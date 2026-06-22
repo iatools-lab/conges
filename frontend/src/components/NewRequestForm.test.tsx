@@ -177,6 +177,11 @@ describe("NewRequestForm", () => {
     expect(screen.getByLabelText(/date de fin/i)).toBeDisabled();
     expect(screen.getByDisplayValue("90 jour(s) ouvré(s)")).toBeInTheDocument();
 
+    const proof = new File(["preuve"], "preuve.pdf", {
+      type: "application/pdf",
+    });
+    await user.upload(screen.getByLabelText(/justificatif/i), proof);
+
     await user.click(screen.getByRole("button", { name: /envoyer la demande/i }));
 
     expect(onSubmit).toHaveBeenCalledWith({
@@ -185,6 +190,7 @@ describe("NewRequestForm", () => {
       endDate: "2026-10-02",
       reason: undefined,
       draft: undefined,
+      proof,
     });
   });
 });

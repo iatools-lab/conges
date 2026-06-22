@@ -9,8 +9,8 @@ certificate_key_path="/etc/letsencrypt/live/${domain_name}/privkey.pem"
 
 apply_runtime_substitutions() {
   target_file="$1"
-  sed -i "s/conges\.skynesys\.com/${domain_name}/g" "$target_file"
-  sed -i "s/161\.97\.110\.31/${server_ip}/g" "$target_file"
+  sed -i "s/conges\.upowa\.org/${domain_name}/g" "$target_file"
+  sed -i "s/82\.165\.222\.49/${server_ip}/g" "$target_file"
 }
 
 if [ -f "$certificate_path" ] && [ -f "$certificate_key_path" ]; then

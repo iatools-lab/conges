@@ -4,22 +4,26 @@ import {
   IsArray,
   ValidateNested,
   IsInt,
+  IsBoolean,
+  IsEnum,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { RoleType } from '@prisma/client';
 
 class UpdateStepDto {
   @IsOptional()
   @IsInt()
   order?: number;
 
-  @IsOptional()
-  @IsString()
-  validator?: string;
+  @IsEnum(RoleType)
+  validator!: RoleType;
 
   @IsOptional()
+  @IsInt()
   slaHours?: number;
 
   @IsOptional()
+  @IsBoolean()
   required?: boolean;
 }
 

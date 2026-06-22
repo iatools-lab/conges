@@ -8,7 +8,10 @@ import {
   Post,
   Query,
   Req,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import {
   requireAuthSession,
   type AuthenticatedRequest,
@@ -19,7 +22,12 @@ import {
   FindEmployeeLeaveRequestsQueryDto,
   UpdateEmployeeLeaveRequestDto,
 } from './dto/employee-leave-request.dto';
-import { EmployeeLeaveRequestsService } from './leave-requests.service';
+import {
+  EmployeeLeaveRequestsService,
+  type UploadedLeaveProof,
+} from './leave-requests.service';
+
+const LEAVE_PROOF_MAX_BYTES = 5 * 1024 * 1024;
 
 @Controller('employee/leave-requests')
 export class EmployeeLeaveRequestsController {
@@ -43,12 +51,17 @@ export class EmployeeLeaveRequestsController {
   }
 
   @Post()
+  @UseInterceptors(
+    FileInterceptor('proof', { limits: { fileSize: LEAVE_PROOF_MAX_BYTES } }),
+  )
   create(
     @Body() dto: CreateEmployeeLeaveRequestDto,
     @Req() req: AuthenticatedRequest,
+    @UploadedFile() proof?: UploadedLeaveProof,
   ) {
     return this.leaveRequestsService.create(
       withAuthenticatedUser(dto, requireAuthSession(req)),
+      proof,
     );
   }
 
@@ -65,14 +78,19 @@ export class EmployeeLeaveRequestsController {
   }
 
   @Patch(':id')
+  @UseInterceptors(
+    FileInterceptor('proof', { limits: { fileSize: LEAVE_PROOF_MAX_BYTES } }),
+  )
   update(
     @Param('id') id: string,
     @Body() dto: UpdateEmployeeLeaveRequestDto,
     @Req() req: AuthenticatedRequest,
+    @UploadedFile() proof?: UploadedLeaveProof,
   ) {
     return this.leaveRequestsService.update(
       id,
       withAuthenticatedUser(dto, requireAuthSession(req)),
+      proof,
     );
   }
 

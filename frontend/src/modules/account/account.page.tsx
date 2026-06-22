@@ -91,7 +91,9 @@ export function AccountProfilePage({ title, subtitle, roleScope }: AccountPagePr
   const departmentHead = profileData?.departmentHead;
   const canSwitchManager = session.roles.includes("manager") && session.roles.includes("employee");
   const switchTarget = pathname.startsWith("/manager") ? "/" : "/manager";
-  const switchLabel = pathname.startsWith("/manager") ? "Basculer vers mon espace personnel" : "Basculer vers mon espace manager";
+  const switchLabel = pathname.startsWith("/manager")
+    ? "Basculer vers mon espace personnel"
+    : "Basculer vers mon espace manager";
 
   return (
     <AppShell title={title} subtitle={subtitle}>
@@ -161,15 +163,21 @@ export function AccountProfilePage({ title, subtitle, roleScope }: AccountPagePr
             </div>
             <div className="mt-5 grid gap-4 md:grid-cols-2">
               <div className="rounded-xl border bg-muted/20 p-4">
-                <div className="text-xs uppercase tracking-wide text-muted-foreground">Nom complet</div>
+                <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Nom complet
+                </div>
                 <div className="mt-2 font-medium">{profileData?.name ?? session.name}</div>
               </div>
               <div className="rounded-xl border bg-muted/20 p-4">
                 <div className="text-xs uppercase tracking-wide text-muted-foreground">Email</div>
-                <div className="mt-2 font-medium break-all">{profileData?.email ?? session.email}</div>
+                <div className="mt-2 font-medium break-all">
+                  {profileData?.email ?? session.email}
+                </div>
               </div>
               <div className="rounded-xl border bg-muted/20 p-4">
-                <div className="text-xs uppercase tracking-wide text-muted-foreground">Rôle principal</div>
+                <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Rôle principal
+                </div>
                 <div className="mt-2 font-medium">{getRoleLabel(session.primaryRole)}</div>
               </div>
               <div className="rounded-xl border bg-muted/20 p-4">
@@ -261,7 +269,9 @@ export function AccountSettingsPage({ title, subtitle }: AccountPageProps) {
 
   const canSwitchManager = session.roles.includes("manager") && session.roles.includes("employee");
   const switchTarget = pathname.startsWith("/manager") ? "/" : "/manager";
-  const switchLabel = pathname.startsWith("/manager") ? "Basculer vers mon espace personnel" : "Basculer vers mon espace manager";
+  const switchLabel = pathname.startsWith("/manager")
+    ? "Basculer vers mon espace personnel"
+    : "Basculer vers mon espace manager";
 
   return (
     <AppShell title={title} subtitle={subtitle}>

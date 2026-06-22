@@ -144,7 +144,12 @@ const STATUS_FILTERS: Array<{ status: BadgeTone; label: string }> = [
   { status: "draft", label: "Brouillon" },
 ];
 
-function buildPlanningPath(managerId: string, managerEmail: string, range: DateRangeValue, department: string) {
+function buildPlanningPath(
+  managerId: string,
+  managerEmail: string,
+  range: DateRangeValue,
+  department: string,
+) {
   const params = new URLSearchParams({ managerId, managerEmail });
   appendDateRange(params, range);
   if (department !== "ALL") params.set("department", department);
@@ -386,10 +391,18 @@ export function ManagerPlanning() {
 
   const enabled = Boolean(session?.id && session?.email);
   const { data, isError, isFetching, isLoading, refetch } = useQuery({
-    queryKey: ["manager-planning", session?.id, session?.email, department, ...dateRangeQueryKey(dateRange)],
+    queryKey: [
+      "manager-planning",
+      session?.id,
+      session?.email,
+      department,
+      ...dateRangeQueryKey(dateRange),
+    ],
     enabled,
     queryFn: () =>
-      apiFetch<ManagerPlanningResponse>(buildPlanningPath(session!.id, session!.email, dateRange, department)),
+      apiFetch<ManagerPlanningResponse>(
+        buildPlanningPath(session!.id, session!.email, dateRange, department),
+      ),
   });
 
   const applyDateRange = (nextRange: DateRangeValue) => {

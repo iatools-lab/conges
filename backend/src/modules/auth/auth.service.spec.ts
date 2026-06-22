@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment */
 import {
   BadRequestException,
   ForbiddenException,
@@ -57,7 +56,7 @@ describe('AuthService', () => {
     const { service } = createService({ AUTH_SESSION_SECRET: secret });
 
     await expect(
-      service.login({ email: 'ia.tools@upowa.org' }),
+      service.login({ email: 'ia.tools@upowa.org', password: '' }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 

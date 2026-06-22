@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument */
 import { BadRequestException } from '@nestjs/common';
 import { RoleType, Sexe, UserStatus } from '@prisma/client';
 import { AdminUsersService } from './users.service';
@@ -64,7 +63,9 @@ function createHarness(existing = userRecord()) {
     if (select?.n1Id) return Promise.resolve({ n1Id: null });
     if (where.id === employeeId) return Promise.resolve(existing);
     if (where.id === 'non-manager') {
-      return Promise.resolve(managerRecord('non-manager', [role(RoleType.EMPLOYE)]));
+      return Promise.resolve(
+        managerRecord('non-manager', [role(RoleType.EMPLOYE)]),
+      );
     }
     return Promise.resolve(managerRecord(where.id));
   });

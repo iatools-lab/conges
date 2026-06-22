@@ -116,7 +116,12 @@ export function ManagerConflits() {
   const [reportDate, setReportDate] = useState("");
   const [ignoreTarget, setIgnoreTarget] = useState<Conflict | null>(null);
 
-  const queryKey = ["manager-conflicts", session?.id, session?.email, ...dateRangeQueryKey(dateRange)];
+  const queryKey = [
+    "manager-conflicts",
+    session?.id,
+    session?.email,
+    ...dateRangeQueryKey(dateRange),
+  ];
   const conflictsQuery = useQuery({
     queryKey,
     queryFn: () => apiFetch<ManagerConflictsResponse>(buildConflictsPath(session!, dateRange)),

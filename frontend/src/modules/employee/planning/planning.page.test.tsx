@@ -185,7 +185,9 @@ describe("Planifier", () => {
         );
 
       expect(patchCall).toBeDefined();
-      expect(JSON.parse(String(patchCall?.[1]?.body))).toMatchObject({
+      const body = patchCall?.[1]?.body;
+      expect(body).toBeInstanceOf(FormData);
+      expect(Object.fromEntries((body as FormData).entries())).toMatchObject({
         userId: session.id,
         userEmail: session.email,
         leaveTypeCode: "CP",

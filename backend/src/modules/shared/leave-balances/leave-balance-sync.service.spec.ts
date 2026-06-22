@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
 import { LeaveRequestStatus } from '@prisma/client';
 import { LeaveBalanceSyncService } from './leave-balance-sync.service';
 
@@ -18,7 +17,7 @@ function createHarness() {
 }
 
 describe('LeaveBalanceSyncService', () => {
-  it('counts approved as taken and pending/RH review/unsubmitted drafts as scheduled', async () => {
+  it('counts past approvals as taken and future or pending requests as scheduled', async () => {
     const { prisma, service } = createHarness();
     prisma.leaveRequest.findUnique.mockResolvedValue({
       ownerId: 'employee-1',
@@ -38,6 +37,10 @@ describe('LeaveBalanceSyncService', () => {
     expect(prisma.leaveRequest.aggregate).toHaveBeenNthCalledWith(2, {
       where: expect.objectContaining({
         OR: [
+          {
+            status: LeaveRequestStatus.APPROVED,
+            endDate: { gte: expect.any(Date) },
+          },
           {
             status: {
               in: [LeaveRequestStatus.PENDING, LeaveRequestStatus.IN_REVIEW],

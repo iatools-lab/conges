@@ -82,7 +82,9 @@ describe('EmailService', () => {
       responseCode: 421,
     });
     mockTransports[0].sendMail.mockRejectedValueOnce(smtpError);
-    mockTransports[1].sendMail.mockResolvedValueOnce({ accepted: ['n1@upowa.org'] });
+    mockTransports[1].sendMail.mockResolvedValueOnce({
+      accepted: ['n1@upowa.org'],
+    });
 
     await service.send({
       to: 'n1@upowa.org',

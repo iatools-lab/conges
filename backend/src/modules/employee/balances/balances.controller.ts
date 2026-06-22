@@ -10,7 +10,10 @@ export class EmployeeBalancesController {
   constructor(private readonly balancesService: EmployeeBalancesService) {}
 
   @Get(':userId')
-  findBalances(@Query('year') year: string | undefined, @Req() req: AuthenticatedRequest) {
+  findBalances(
+    @Query('year') year: string | undefined,
+    @Req() req: AuthenticatedRequest,
+  ) {
     return this.balancesService.findBalances(requireAuthSession(req).sub, year);
   }
 }

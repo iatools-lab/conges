@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { readSheet } from "read-excel-file/browser";
 import { AppShell } from "@/components/AppShell";
@@ -760,11 +760,13 @@ export function RhEmployes() {
     queryFn: () => apiFetch<Employee[]>("/rh/employees"),
   });
 
-  const employees = employeesQuery.data ?? [];
+  const employees = useMemo(() => employeesQuery.data ?? [], [employeesQuery.data]);
   const refreshEmployees = () => queryClient.invalidateQueries({ queryKey: ["rh-employees"] });
 
   useEffect(() => {
-    setSelectedIds((current) => current.filter((id) => employees.some((employee) => employee.id === id)));
+    setSelectedIds((current) =>
+      current.filter((id) => employees.some((employee) => employee.id === id)),
+    );
   }, [employees]);
 
   const createEmployee = useMutation({
@@ -869,9 +871,7 @@ export function RhEmployes() {
 
   const toggleSelected = (id: string) => {
     setSelectedIds((current) =>
-      current.includes(id)
-        ? current.filter((selectedId) => selectedId !== id)
-        : [...current, id],
+      current.includes(id) ? current.filter((selectedId) => selectedId !== id) : [...current, id],
     );
   };
 

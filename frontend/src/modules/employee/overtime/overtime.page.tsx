@@ -81,7 +81,8 @@ export function EmployeeOvertimePage() {
   const totals = query.data?.totals ?? emptyTotals;
 
   const mutableRows = useMemo(
-    () => rows.filter((row) => row.statusCode === "PENDING_MANAGER" || row.statusCode === "REJECTED"),
+    () =>
+      rows.filter((row) => row.statusCode === "PENDING_MANAGER" || row.statusCode === "REJECTED"),
     [rows],
   );
 
@@ -135,10 +136,14 @@ export function EmployeeOvertimePage() {
     },
   });
 
-  const isMutating = createMutation.isPending || updateMutation.isPending || cancelMutation.isPending;
+  const isMutating =
+    createMutation.isPending || updateMutation.isPending || cancelMutation.isPending;
 
   return (
-    <AppShell title="Heures supplémentaires" subtitle="Déclaration employé puis validation N+1 et RH.">
+    <AppShell
+      title="Heures supplémentaires"
+      subtitle="Déclaration employé puis validation N+1 et RH."
+    >
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3 xl:grid-cols-6">
         <StatCard label="Déclarations" value={totals.total} tone="blue" />
         <StatCard label="En attente N+1" value={totals.pendingManager} tone="yellow" />
@@ -157,7 +162,9 @@ export function EmployeeOvertimePage() {
               type="date"
               className="rounded-md border bg-card px-3 py-2"
               value={draft.workDate}
-              onChange={(event) => setDraft((current) => ({ ...current, workDate: event.target.value }))}
+              onChange={(event) =>
+                setDraft((current) => ({ ...current, workDate: event.target.value }))
+              }
             />
           </label>
           <label className="grid gap-1 text-sm">
@@ -179,13 +186,18 @@ export function EmployeeOvertimePage() {
             <input
               className="rounded-md border bg-card px-3 py-2"
               value={draft.reason}
-              onChange={(event) => setDraft((current) => ({ ...current, reason: event.target.value }))}
+              onChange={(event) =>
+                setDraft((current) => ({ ...current, reason: event.target.value }))
+              }
               placeholder="Intervention, incident, livraison tardive..."
             />
           </label>
         </div>
         <div className="flex justify-end border-t px-5 py-3">
-          <Button disabled={isMutating || !draft.workDate || draft.hours <= 0} onClick={() => createMutation.mutate(draft)}>
+          <Button
+            disabled={isMutating || !draft.workDate || draft.hours <= 0}
+            onClick={() => createMutation.mutate(draft)}
+          >
             Déclarer
           </Button>
         </div>
@@ -202,7 +214,9 @@ export function EmployeeOvertimePage() {
                 min="2000"
                 max="2100"
                 value={year}
-                onChange={(event) => setYear(Number(event.target.value) || new Date().getFullYear())}
+                onChange={(event) =>
+                  setYear(Number(event.target.value) || new Date().getFullYear())
+                }
               />
               <Button variant="outline" onClick={refresh} disabled={query.isFetching}>
                 <RefreshCw className="size-4" /> Actualiser
@@ -226,9 +240,12 @@ export function EmployeeOvertimePage() {
             </thead>
             <tbody className="divide-y">
               {rows.map((row) => {
-                const editable = row.statusCode === "PENDING_MANAGER" || row.statusCode === "REJECTED";
+                const editable =
+                  row.statusCode === "PENDING_MANAGER" || row.statusCode === "REJECTED";
                 const isEditing = editingId === row.id;
-                const localDraft = isEditing ? draft : { workDate: row.workDate, hours: row.hours, reason: row.reason };
+                const localDraft = isEditing
+                  ? draft
+                  : { workDate: row.workDate, hours: row.hours, reason: row.reason };
 
                 return (
                   <tr key={row.id}>
@@ -257,7 +274,10 @@ export function EmployeeOvertimePage() {
                           className="w-24 rounded-md border bg-card px-2 py-1"
                           value={localDraft.hours}
                           onChange={(event) =>
-                            setDraft((current) => ({ ...current, hours: Number(event.target.value) || 0 }))
+                            setDraft((current) => ({
+                              ...current,
+                              hours: Number(event.target.value) || 0,
+                            }))
                           }
                         />
                       ) : (
@@ -294,7 +314,11 @@ export function EmployeeOvertimePage() {
                                 disabled={isMutating}
                                 onClick={() => {
                                   setEditingId(row.id);
-                                  setDraft({ workDate: row.workDate, hours: row.hours, reason: row.reason });
+                                  setDraft({
+                                    workDate: row.workDate,
+                                    hours: row.hours,
+                                    reason: row.reason,
+                                  });
                                 }}
                               >
                                 Modifier
@@ -313,7 +337,9 @@ export function EmployeeOvertimePage() {
                               <Button
                                 className="px-2 py-1"
                                 disabled={isMutating}
-                                onClick={() => updateMutation.mutate({ id: row.id, payload: draft })}
+                                onClick={() =>
+                                  updateMutation.mutate({ id: row.id, payload: draft })
+                                }
                               >
                                 Enregistrer
                               </Button>

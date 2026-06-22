@@ -59,75 +59,81 @@ export class EmployeeDashboardService {
     const year = range.year;
     const today = new Date();
 
-    const [user, specialLeaves, paidTaken, paidScheduled, nextAbsence, pendingRequests] =
-      await Promise.all([
-        this.prisma.user.findUnique({
-          where: { id: userId },
-          select: dashboardUserSelect,
-        }),
-        this.prisma.leaveRequest.aggregate({
-          where: {
-            ownerId: userId,
-            status: LeaveRequestStatus.APPROVED,
-            ...overlapDateWhere(range),
-            leaveType: { category: LeaveCategory.CONGE_SPECIAL },
-          },
-          _sum: { days: true },
-        }),
-        this.prisma.leaveRequest.aggregate({
-          where: {
-            ownerId: userId,
-            status: LeaveRequestStatus.APPROVED,
-            ...overlapDateWhere(range),
-            leaveType: { code: { in: Array.from(PAID_POOL_CODES) } },
-          },
-          _sum: { days: true },
-        }),
-        this.prisma.leaveRequest.aggregate({
-          where: {
-            ownerId: userId,
-            ...overlapDateWhere(range),
-            leaveType: { code: { in: Array.from(PAID_POOL_CODES) } },
-            OR: [
-              {
-                status: {
-                  in: [LeaveRequestStatus.PENDING, LeaveRequestStatus.IN_REVIEW],
-                },
+    const [
+      user,
+      specialLeaves,
+      paidTaken,
+      paidScheduled,
+      nextAbsence,
+      pendingRequests,
+    ] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { id: userId },
+        select: dashboardUserSelect,
+      }),
+      this.prisma.leaveRequest.aggregate({
+        where: {
+          ownerId: userId,
+          status: LeaveRequestStatus.APPROVED,
+          ...overlapDateWhere(range),
+          leaveType: { category: LeaveCategory.CONGE_SPECIAL },
+        },
+        _sum: { days: true },
+      }),
+      this.prisma.leaveRequest.aggregate({
+        where: {
+          ownerId: userId,
+          status: LeaveRequestStatus.APPROVED,
+          ...overlapDateWhere(range),
+          leaveType: { code: { in: Array.from(PAID_POOL_CODES) } },
+        },
+        _sum: { days: true },
+      }),
+      this.prisma.leaveRequest.aggregate({
+        where: {
+          ownerId: userId,
+          ...overlapDateWhere(range),
+          leaveType: { code: { in: Array.from(PAID_POOL_CODES) } },
+          OR: [
+            {
+              status: {
+                in: [LeaveRequestStatus.PENDING, LeaveRequestStatus.IN_REVIEW],
               },
-              {
-                status: LeaveRequestStatus.DRAFT,
-                submittedAt: null,
-              },
-            ],
-          },
-          _sum: { days: true },
-        }),
-        this.prisma.leaveRequest.findFirst({
-          where: {
-            ownerId: userId,
-            status: LeaveRequestStatus.APPROVED,
-            AND: [{ startDate: { gte: today } }, overlapDateWhere(range)],
-          },
-          orderBy: [{ startDate: 'asc' }, { reference: 'asc' }],
-          select: {
-            id: true,
-            reference: true,
-            startDate: true,
-            endDate: true,
-            days: true,
-            status: true,
-            leaveType: { select: { code: true, name: true } },
-          },
-        }),
-        this.prisma.leaveRequest.count({
-          where: {
-            ownerId: userId,
-            status: {
-              in: [LeaveRequestStatus.PENDING, LeaveRequestStatus.IN_REVIEW],
             },
+            {
+              status: LeaveRequestStatus.DRAFT,
+              submittedAt: null,
+            },
+          ],
+        },
+        _sum: { days: true },
+      }),
+      this.prisma.leaveRequest.findFirst({
+        where: {
+          ownerId: userId,
+          status: LeaveRequestStatus.APPROVED,
+          AND: [{ startDate: { gte: today } }, overlapDateWhere(range)],
+        },
+        orderBy: [{ startDate: 'asc' }, { reference: 'asc' }],
+        select: {
+          id: true,
+          reference: true,
+          startDate: true,
+          endDate: true,
+          days: true,
+          status: true,
+          leaveType: { select: { code: true, name: true } },
+        },
+      }),
+      this.prisma.leaveRequest.count({
+        where: {
+          ownerId: userId,
+          status: {
+            in: [LeaveRequestStatus.PENDING, LeaveRequestStatus.IN_REVIEW],
           },
-        }),
-      ]);
+        },
+      }),
+    ]);
 
     if (!user || user.status === UserStatus.INACTIVE) {
       throw new NotFoundException('Employé introuvable');
@@ -259,10 +265,7 @@ export class EmployeeDashboardService {
     };
   }
 
-  private async ensureActiveBalances(
-    user: DashboardUser,
-    year: number,
-  ) {
+  private async ensureActiveBalances(user: DashboardUser, year: number) {
     const activeLeaveTypes = await this.prisma.leaveType.findMany({
       where: { active: true },
       select: {

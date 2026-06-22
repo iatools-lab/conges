@@ -103,6 +103,8 @@ type LeaveRequestRow = {
   reviewComment?: string;
   canEdit?: boolean;
   canCancel?: boolean;
+  hasProof?: boolean;
+  proofFilename?: string | null;
 };
 
 type EmployeeLeaveRequestsResponse = {
@@ -161,6 +163,25 @@ function buildRequestsPath(session: { id: string; email: string }, range: DateRa
 
 function requestOwner(session: { id: string; email: string }) {
   return { userId: session.id, userEmail: session.email };
+}
+
+function requestFormData(
+  session: { id: string; email: string },
+  payload: NewRequestPayload,
+  draft?: boolean,
+) {
+  const body = new FormData();
+  const owner = requestOwner(session);
+  body.set("userId", owner.userId);
+  body.set("userEmail", owner.userEmail);
+  body.set("leaveTypeCode", payload.leaveTypeCode);
+  if (payload.leaveSubtypeCode) body.set("leaveSubtypeCode", payload.leaveSubtypeCode);
+  body.set("startDate", payload.startDate);
+  body.set("endDate", payload.endDate);
+  if (payload.reason) body.set("reason", payload.reason);
+  if (draft) body.set("draft", "true");
+  if (payload.proof) body.set("proof", payload.proof);
+  return body;
 }
 
 function daysInMonth(year: number, month: number) {
@@ -283,9 +304,15 @@ export function Planifier() {
   const [editStartDate, setEditStartDate] = useState("");
   const [editEndDate, setEditEndDate] = useState("");
   const [editReason, setEditReason] = useState("");
+  const [editProof, setEditProof] = useState<File | undefined>();
   const [fType, setFType] = useState("all");
   const [fYear, setFYear] = useState("all");
-  const queryKey = ["employee-planning", session?.id, session?.email, ...dateRangeQueryKey(dateRange)];
+  const queryKey = [
+    "employee-planning",
+    session?.id,
+    session?.email,
+    ...dateRangeQueryKey(dateRange),
+  ];
   const requestQueryKey = [
     "employee-leave-requests",
     session?.id,
@@ -307,7 +334,8 @@ export function Planifier() {
 
   const plans = planningQuery.data?.plans ?? emptyPlans;
   const requestRows = requestsQuery.data?.rows ?? emptyRequestRows;
-  const leaveTypes = planningQuery.data?.leaveTypes ?? requestsQuery.data?.leaveTypes ?? emptyLeaveTypes;
+  const leaveTypes =
+    planningQuery.data?.leaveTypes ?? requestsQuery.data?.leaveTypes ?? emptyLeaveTypes;
   const user = planningQuery.data?.user;
   const stats = planningQuery.data?.stats;
   const selectedEditLeaveType = useMemo(
@@ -315,12 +343,15 @@ export function Planifier() {
     [editLeaveTypeCode, leaveTypes],
   );
   const editSubtypeOptions = selectedEditLeaveType?.children ?? [];
+  const selectedEditSubtype = editSubtypeOptions.find((type) => type.code === editLeaveSubtypeCode);
+  const editProofRequired =
+    selectedEditSubtype?.requiresProof ?? selectedEditLeaveType?.requiresProof ?? false;
 
   const createDirectRequest = useMutation({
     mutationFn: (payload: NewRequestPayload) =>
       apiFetch<LeaveRequestRow>("/employee/leave-requests", {
         method: "POST",
-        body: JSON.stringify({ ...requestOwner(session!), ...payload, draft: false }),
+        body: requestFormData(session!, payload, false),
       }),
     onSuccess: (row) => {
       queryClient.invalidateQueries({ queryKey: requestQueryKey });
@@ -335,7 +366,7 @@ export function Planifier() {
     mutationFn: (payload: NewRequestPayload) =>
       apiFetch<Plan>("/employee/leave-requests", {
         method: "POST",
-        body: JSON.stringify({ ...requestOwner(session!), ...payload, draft: true }),
+        body: requestFormData(session!, payload, true),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey });
@@ -365,7 +396,7 @@ export function Planifier() {
     mutationFn: ({ id, payload }: { id: string; payload: NewRequestPayload }) =>
       apiFetch<LeaveRequestRow>(`/employee/leave-requests/${id}`, {
         method: "PATCH",
-        body: JSON.stringify({ ...requestOwner(session!), ...payload }),
+        body: requestFormData(session!, payload),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: requestQueryKey });
@@ -423,7 +454,8 @@ export function Planifier() {
   });
 
   const requestTypeOptions = useMemo(
-    () => Array.from(new Set(requestRows.map((row) => row.type))).sort((a, b) => a.localeCompare(b)),
+    () =>
+      Array.from(new Set(requestRows.map((row) => row.type))).sort((a, b) => a.localeCompare(b)),
     [requestRows],
   );
 
@@ -446,10 +478,7 @@ export function Planifier() {
       });
   }, [requestRows, requestSearch, requestStatus, requestType]);
 
-  const plannedRows = useMemo(
-    () => plans.filter((plan) => plan.status === "planned"),
-    [plans],
-  );
+  const plannedRows = useMemo(() => plans.filter((plan) => plan.status === "planned"), [plans]);
 
   const filteredPlans = useMemo(() => {
     return plannedRows.filter((plan) => {
@@ -470,7 +499,9 @@ export function Planifier() {
     });
   }, [fType, fYear, plannedRows, q]);
 
-  const yearsAvailable = Array.from(new Set([year, ...plannedRows.map(planYear)])).sort((a, b) => b - a);
+  const yearsAvailable = Array.from(new Set([year, ...plannedRows.map(planYear)])).sort(
+    (a, b) => b - a,
+  );
   const hasPlanFilters = q || fType !== "all" || fYear !== "all";
   const hasRequestFilters = requestSearch || requestType !== "all" || requestStatus !== "all";
 
@@ -495,6 +526,7 @@ export function Planifier() {
     setEditStartDate(row.startDate ?? "");
     setEditEndDate(row.endDate ?? "");
     setEditReason(row.reason ?? "");
+    setEditProof(undefined);
   };
 
   return (
@@ -674,7 +706,7 @@ export function Planifier() {
                   </option>
                 ))}
               </select>
-                  {hasPlanFilters && (
+              {hasPlanFilters && (
                 <button
                   onClick={resetFilters}
                   className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground px-2 py-1.5"
@@ -830,6 +862,7 @@ export function Planifier() {
                   startDate: editStartDate,
                   endDate: editEndDate,
                   reason: editReason.trim() || undefined,
+                  proof: editProof,
                 },
               });
             }}
@@ -899,6 +932,24 @@ export function Planifier() {
             </div>
 
             <label className="grid gap-1.5 text-sm">
+              <span className="text-xs font-medium text-muted-foreground">
+                Justificatif {editingRequest?.hasProof ? "(remplacer, optionnel)" : ""}
+              </span>
+              <input
+                type="file"
+                required={editProofRequired && !editingRequest?.hasProof}
+                accept="application/pdf,image/jpeg,image/png,image/webp"
+                onChange={(event) => setEditProof(event.target.files?.[0])}
+                className="w-full rounded-md border px-3 py-2 text-sm bg-background"
+              />
+              {editingRequest?.proofFilename && (
+                <span className="text-xs text-muted-foreground">
+                  Fichier actuel : {editingRequest.proofFilename}
+                </span>
+              )}
+            </label>
+
+            <label className="grid gap-1.5 text-sm">
               <span className="text-xs font-medium text-muted-foreground">Commentaire</span>
               <textarea
                 rows={4}
@@ -913,7 +964,13 @@ export function Planifier() {
               <Button type="button" variant="outline" onClick={() => setEditingRequest(null)}>
                 Annuler
               </Button>
-              <Button type="submit" disabled={updateRequest.isPending}>
+              <Button
+                type="submit"
+                disabled={
+                  updateRequest.isPending ||
+                  (editProofRequired && !editingRequest?.hasProof && !editProof)
+                }
+              >
                 {updateRequest.isPending ? "Envoi..." : "Renvoyer la demande"}
               </Button>
             </DialogFooter>
@@ -995,9 +1052,7 @@ function LeaveRequestsSummaryTable({
                   <Badge tone={row.status}>{row.stext}</Badge>
                 </td>
                 <td className="px-5 py-3 text-muted-foreground">{row.last}</td>
-                <td className="px-5 py-3 text-muted-foreground">
-                  {row.reviewComment || "—"}
-                </td>
+                <td className="px-5 py-3 text-muted-foreground">{row.reviewComment || "—"}</td>
                 <td className="px-5 py-3 text-right">
                   {(row.canEdit || row.canCancel) && (
                     <div className="flex justify-end gap-2">

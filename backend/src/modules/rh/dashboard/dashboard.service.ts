@@ -373,7 +373,10 @@ export class RhDashboardService {
       [LeaveRequestStatus.DRAFT]: { tone: 'draft', label: 'À revoir' },
       [LeaveRequestStatus.PENDING]: { tone: 'pending', label: 'Demandé' },
       [LeaveRequestStatus.IN_REVIEW]: { tone: 'review', label: 'En revue RH' },
-      [LeaveRequestStatus.APPROVED]: { tone: 'valid', label: 'Pris / confirmé' },
+      [LeaveRequestStatus.APPROVED]: {
+        tone: 'valid',
+        label: 'Pris / confirmé',
+      },
       [LeaveRequestStatus.REJECTED]: { tone: 'rejected', label: 'Refusé' },
       [LeaveRequestStatus.CANCELLED]: { tone: 'neutral', label: 'Annulé' },
     };

@@ -1,7 +1,6 @@
 import {
   IsEmail,
   IsNotEmpty,
-  IsOptional,
   IsString,
   Matches,
   MaxLength,
@@ -15,11 +14,10 @@ export class LoginDto {
   @IsEmail()
   email!: string;
 
-  @IsOptional()
   @IsString()
   @IsNotEmpty()
   @MaxLength(128)
-  password?: string;
+  password!: string;
 }
 
 export class GoogleLoginDto {

@@ -376,7 +376,10 @@ export class RhLeaveLiabilitiesService {
   }
 
   private clampPassiveDays(value: number) {
-    return Math.min(this.roundDays(Math.max(Number(value ?? 0), 0)), MAX_PASSIVE_LEAVE_DAYS);
+    return Math.min(
+      this.roundDays(Math.max(Number(value ?? 0), 0)),
+      MAX_PASSIVE_LEAVE_DAYS,
+    );
   }
 
   private roundDays(value: number) {

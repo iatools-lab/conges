@@ -18,10 +18,6 @@ const paidLeaveTypeSelect = {
   defaultDays: true,
 } satisfies Prisma.LeaveTypeSelect;
 
-type PaidLeaveType = Prisma.LeaveTypeGetPayload<{
-  select: typeof paidLeaveTypeSelect;
-}>;
-
 type ImportResultRow = {
   matricule: string;
   employeeId: string;
@@ -229,7 +225,7 @@ export class RhLeaveBalancesService {
       );
     }
 
-    return leaveType as PaidLeaveType;
+    return leaveType;
   }
 
   private roundDays(value: number) {

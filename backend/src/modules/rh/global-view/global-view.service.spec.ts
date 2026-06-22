@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/require-await */
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import {
   AuditAction,
@@ -49,9 +48,11 @@ function createHarness() {
       findUnique: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
     },
     validation: {
       create: jest.fn(),
+      findFirst: jest.fn(),
     },
     notification: {
       createMany: jest.fn(),
@@ -87,6 +88,8 @@ function createHarness() {
   ]);
   prisma.leaveRequest.findMany.mockResolvedValue([]);
   prisma.leaveRequest.findUnique.mockResolvedValue(request);
+  prisma.leaveRequest.updateMany.mockResolvedValue({ count: 1 });
+  prisma.validation.findFirst.mockResolvedValue(null);
   prisma.leaveRequest.create.mockImplementation(({ data }) =>
     Promise.resolve({
       id: 'imported-request-1',
@@ -159,13 +162,18 @@ describe('RhGlobalViewService', () => {
         decision: ValidationDecision.APPROVED,
       }),
     });
-    expect(prisma.leaveRequest.update).toHaveBeenCalledWith({
-      where: { id: 'request-1' },
-      data: expect.objectContaining({
-        status: LeaveRequestStatus.APPROVED,
-        cancelledAt: null,
+    expect(prisma.leaveRequest.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'request-1',
+          status: LeaveRequestStatus.IN_REVIEW,
+        },
+        data: expect.objectContaining({
+          status: LeaveRequestStatus.APPROVED,
+          cancelledAt: null,
+        }),
       }),
-    });
+    );
     expect(prisma.notification.createMany).toHaveBeenCalledWith({
       data: expect.arrayContaining([
         expect.objectContaining({

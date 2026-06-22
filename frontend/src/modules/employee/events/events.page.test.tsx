@@ -74,8 +74,12 @@ describe("Declarer", () => {
     await user.upload(screen.getByLabelText(/choisir un justificatif/i), proof);
     await user.click(screen.getByRole("button", { name: /soumettre à la rh/i }));
 
-    await waitFor(() => expect(apiFetch).toHaveBeenCalledWith("/employee/events", expect.anything()));
-    const [path, options] = vi.mocked(apiFetch).mock.calls.find(([calledPath]) => calledPath === "/employee/events")!;
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith("/employee/events", expect.anything()),
+    );
+    const [path, options] = vi
+      .mocked(apiFetch)
+      .mock.calls.find(([calledPath]) => calledPath === "/employee/events")!;
     const body = options?.body as FormData;
 
     expect(path).toBe("/employee/events");
@@ -104,8 +108,12 @@ describe("Declarer", () => {
     await user.type(comment, "Nouveau domicile");
     await user.click(screen.getByRole("button", { name: /soumettre/i }));
 
-    await waitFor(() => expect(apiFetch).toHaveBeenCalledWith("/employee/events", expect.anything()));
-    const [, options] = vi.mocked(apiFetch).mock.calls.find(([calledPath]) => calledPath === "/employee/events")!;
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith("/employee/events", expect.anything()),
+    );
+    const [, options] = vi
+      .mocked(apiFetch)
+      .mock.calls.find(([calledPath]) => calledPath === "/employee/events")!;
     const body = options?.body as FormData;
 
     expect(body.get("type")).toBe("OTHER");

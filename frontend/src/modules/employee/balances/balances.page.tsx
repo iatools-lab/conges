@@ -94,10 +94,10 @@ export function Solde() {
     queryFn: () => apiFetch<EmployeeBalances>(`/employee/balances/${session?.id}`),
     enabled: Boolean(session?.id),
   });
-  const paidRows = data?.paidDetails?.length ? data.paidDetails : data?.paidRows ?? [];
+  const paidRows = data?.paidDetails?.length ? data.paidDetails : (data?.paidRows ?? []);
   const specialRows = data?.specialDetails?.length
     ? data.specialDetails
-    : data?.specialRows ?? [];
+    : (data?.specialRows ?? []);
   const maternityRows = data?.maternityRows ?? [];
   const totals = data?.totals ?? emptyTotals;
   const specialTotals = data?.specialTotals ?? emptyTotals;
@@ -140,8 +140,8 @@ export function Solde() {
             <BalanceTable rows={specialRows} totals={specialTotals} />
           )}
           <div className="px-5 py-3 text-xs text-muted-foreground flex items-center gap-2 border-t">
-            <Info className="size-4" /> Affichage regroupé en 2 catégories: PAYE et SPECIAL.
-            Le pool SPECIAL est plafonné à 12 jours sur l'année.
+            <Info className="size-4" /> Affichage regroupé en 2 catégories: PAYE et SPECIAL. Le pool
+            SPECIAL est plafonné à 12 jours sur l'année.
           </div>
         </Card>
       </div>

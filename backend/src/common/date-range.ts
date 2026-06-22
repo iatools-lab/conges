@@ -36,9 +36,7 @@ export function resolveDateRange(
   let month: number | null = null;
 
   if (hasDateRange) {
-    dateFrom = input.dateFrom
-      ? parseIsoDate(input.dateFrom, 'dateFrom')
-      : null;
+    dateFrom = input.dateFrom ? parseIsoDate(input.dateFrom, 'dateFrom') : null;
     dateTo = input.dateTo ? parseIsoDate(input.dateTo, 'dateTo') : null;
   } else if (input.year || input.month) {
     const year = parseYear(input.year, now.getUTCFullYear());
@@ -134,7 +132,10 @@ function parseIsoDate(value: string, field: string) {
   return date;
 }
 
-function parseYear(value: number | string | null | undefined, fallback: number) {
+function parseYear(
+  value: number | string | null | undefined,
+  fallback: number,
+) {
   if (value === null || value === undefined || value === '') return fallback;
   const year = Number(value);
   if (!Number.isInteger(year) || year < 1900 || year > 2200) {

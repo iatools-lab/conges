@@ -272,9 +272,7 @@ export class AdminUsersService {
       hierarchy.n1Id?.trim() || null,
       hierarchy.n2Id?.trim() || null,
       hierarchy.n3Id?.trim() || null,
-    ].filter((supervisorId): supervisorId is string =>
-      Boolean(supervisorId),
-    );
+    ].filter((supervisorId): supervisorId is string => Boolean(supervisorId));
 
     if (supervisorIds.includes(userId)) {
       throw new BadRequestException(
@@ -283,9 +281,7 @@ export class AdminUsersService {
     }
 
     if (new Set(supervisorIds).size !== supervisorIds.length) {
-      throw new BadRequestException(
-        'N+1, N+2 et N+3 doivent Ãªtre différents',
-      );
+      throw new BadRequestException('N+1, N+2 et N+3 doivent Ãªtre différents');
     }
 
     await this.validateManagerAssignment(userId, hierarchy.n1Id);
@@ -312,9 +308,7 @@ export class AdminUsersService {
       (role) => role.role === RoleType.MANAGER,
     );
     if (!canManage) {
-      throw new BadRequestException(
-        `${level} doit avoir le rÃ´le MANAGER`,
-      );
+      throw new BadRequestException(`${level} doit avoir le rÃ´le MANAGER`);
     }
   }
 

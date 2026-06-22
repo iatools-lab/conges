@@ -3,7 +3,12 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { EventType, LeaveCategory, LeaveRequestStatus, UserStatus } from '@prisma/client';
+import {
+  EventType,
+  LeaveCategory,
+  LeaveRequestStatus,
+  UserStatus,
+} from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { LeaveEntitlementsService } from '../../shared/leave-entitlements/leave-entitlements.service';
 import { LeaveBalanceSyncService } from '../../shared/leave-balances/leave-balance-sync.service';
@@ -53,7 +58,13 @@ export class EmployeeBalancesService {
     // existing ones without touching taken/scheduled which syncUserYear owns).
     const activeLeaveTypes = await this.prisma.leaveType.findMany({
       where: { active: true },
-      select: { id: true, code: true, name: true, category: true, defaultDays: true },
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        category: true,
+        defaultDays: true,
+      },
     });
 
     const yearStart = new Date(Date.UTC(year, 0, 1));
@@ -61,7 +72,11 @@ export class EmployeeBalancesService {
 
     await Promise.all(
       activeLeaveTypes.map(async (leaveType) => {
-        const acquired = this.leaveEntitlements.getAcquiredDays({ leaveType, user, year });
+        const acquired = this.leaveEntitlements.getAcquiredDays({
+          leaveType,
+          user,
+          year,
+        });
 
         const [approvedAgg, scheduledAgg] = await Promise.all([
           this.prisma.leaveRequest.aggregate({
@@ -87,7 +102,13 @@ export class EmployeeBalancesService {
         ]);
 
         await this.prisma.leaveBalance.upsert({
-          where: { userId_leaveTypeId_year: { userId, leaveTypeId: leaveType.id, year } },
+          where: {
+            userId_leaveTypeId_year: {
+              userId,
+              leaveTypeId: leaveType.id,
+              year,
+            },
+          },
           create: {
             userId,
             leaveTypeId: leaveType.id,

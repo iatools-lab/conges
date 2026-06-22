@@ -43,7 +43,10 @@ export class LeaveEntitlementsService {
       return this.getPaidLeaveDays(
         params.user.dateEmbauche,
         params.year,
-        this.configuredDays(params.leaveType.defaultDays, ANNUAL_PAID_LEAVE_DAYS),
+        this.configuredDays(
+          params.leaveType.defaultDays,
+          ANNUAL_PAID_LEAVE_DAYS,
+        ),
       );
     }
     if (code === 'ANC')
@@ -101,11 +104,15 @@ export class LeaveEntitlementsService {
     const cycleStart = this.getCycleStart(hireDate, year);
     const cycleEnd = this.addUtcYears(cycleStart, 1);
     const referenceDate = year === today.getUTCFullYear() ? today : cycleEnd;
-    const cappedReference = referenceDate < cycleStart ? cycleStart : referenceDate;
+    const cappedReference =
+      referenceDate < cycleStart ? cycleStart : referenceDate;
 
     if (cappedReference <= cycleStart) return 0;
 
-    const completedMonths = this.getCompletedMonths(cycleStart, cappedReference);
+    const completedMonths = this.getCompletedMonths(
+      cycleStart,
+      cappedReference,
+    );
     const maxDays = Math.max(annualDays, 0);
 
     return this.roundDays(
@@ -134,7 +141,9 @@ export class LeaveEntitlementsService {
         this.isYoungerThan(event.eventDate, CHILD_BONUS_MAX_AGE, referenceDate),
     ).length;
 
-    return Math.min(eligibleChildren, validatedBirthEvents) * daysPerEligibleChild;
+    return (
+      Math.min(eligibleChildren, validatedBirthEvents) * daysPerEligibleChild
+    );
   }
 
   getMaternityDays(

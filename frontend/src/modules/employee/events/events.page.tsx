@@ -6,7 +6,14 @@ import {
   dateRangeQueryKey,
   type DateRangeValue,
 } from "@/components/DateRangeFilter";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Badge, Button, Card, CardHeader, StatCard } from "@/components/ui-kit";
 import { apiFetch } from "@/lib/api";
 import { useAuthSession } from "@/modules/auth/session";
@@ -59,7 +66,12 @@ export function Declarer() {
   const [file, setFile] = useState<File | null>(null);
   const [fileInputKey, setFileInputKey] = useState(0);
   const [dateRange, setDateRange] = useState<DateRangeValue>(() => allDateRange());
-  const queryKey = ["employee-events", session?.id, session?.email, ...dateRangeQueryKey(dateRange)];
+  const queryKey = [
+    "employee-events",
+    session?.id,
+    session?.email,
+    ...dateRangeQueryKey(dateRange),
+  ];
 
   const eventsQuery = useQuery({
     queryKey,
@@ -84,7 +96,8 @@ export function Declarer() {
 
   const createEvent = useMutation({
     mutationFn: async () => {
-      if (!session) throw new Error("Session utilisateur introuvable. Reconnectez-vous puis réessayez.");
+      if (!session)
+        throw new Error("Session utilisateur introuvable. Reconnectez-vous puis réessayez.");
       const trimmedOtherEventType = otherEventType.trim();
       if (type === "OTHER" && !trimmedOtherEventType) {
         throw new Error("Précisez le type d'événement.");
@@ -129,7 +142,11 @@ export function Declarer() {
         <StatCard label="Déclarations" value={rows.length} tone="blue" />
         <StatCard label="En attente RH" value={pendingCount} tone="orange" />
         <StatCard label="Traitées" value={processedCount} tone="green" />
-        <StatCard label="Taux de traitement" value={rows.length ? `${Math.round((processedCount / rows.length) * 100)}%` : "0%"} tone="purple" />
+        <StatCard
+          label="Taux de traitement"
+          value={rows.length ? `${Math.round((processedCount / rows.length) * 100)}%` : "0%"}
+          tone="purple"
+        />
       </div>
 
       <Card className="mt-6 overflow-hidden">
@@ -286,7 +303,11 @@ export function Declarer() {
                   onChange={(event) => setFile(event.target.files?.[0] ?? null)}
                   className="sr-only"
                 />
-                {file ? <span className="min-w-0 truncate">{file.name}</span> : <span>Aucun fichier</span>}
+                {file ? (
+                  <span className="min-w-0 truncate">{file.name}</span>
+                ) : (
+                  <span>Aucun fichier</span>
+                )}
               </label>
             </Field>
             <DialogFooter className="gap-2">
@@ -294,7 +315,8 @@ export function Declarer() {
                 Annuler
               </Button>
               <Button type="submit" disabled={createEvent.isPending || !ready || !session}>
-                <FileText className="size-4" /> {createEvent.isPending ? "Envoi..." : "Soumettre à la RH"}
+                <FileText className="size-4" />{" "}
+                {createEvent.isPending ? "Envoi..." : "Soumettre à la RH"}
               </Button>
             </DialogFooter>
           </form>

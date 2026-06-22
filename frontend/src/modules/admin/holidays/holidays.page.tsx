@@ -4,7 +4,14 @@ import { Card, Button } from "@/components/ui-kit";
 import { Plus } from "lucide-react";
 import { RowActions, autoFields } from "@/components/RowActions";
 import { apiFetch } from "@/lib/api";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { toast } from "sonner";
 
 const FERIES_LABELS = { date: "Date", name: "Nom", country: "Pays", recurring: "Récurent" };
@@ -150,25 +157,27 @@ export function Feries({
                 </td>
               </tr>
             )}
-            {!loading && !error && items.map((r) => (
-              <tr key={r.id}>
-                <td className="px-5 py-3">
-                  {new Date(r.date).toLocaleDateString("fr-FR", { timeZone: "UTC" })}
-                </td>
-                <td className="px-5 py-3 font-medium">{r.name}</td>
-                <td className="px-5 py-3">{r.country}</td>
-                <td className="px-5 py-3">{r.recurring ? 'Oui' : 'Non'}</td>
-                <td className="px-5 py-3 text-right">
-                  <RowActions
-                    label={`le jour férié ${r.name}`}
-                    item={r as Record<string, unknown>}
-                    fields={autoFields(r as Record<string, unknown>, FERIES_LABELS)}
-                    onEdit={() => openEdit(r.id)}
-                    onRemove={() => handleRemove(r.id)}
-                  />
-                </td>
-              </tr>
-            ))}
+            {!loading &&
+              !error &&
+              items.map((r) => (
+                <tr key={r.id}>
+                  <td className="px-5 py-3">
+                    {new Date(r.date).toLocaleDateString("fr-FR", { timeZone: "UTC" })}
+                  </td>
+                  <td className="px-5 py-3 font-medium">{r.name}</td>
+                  <td className="px-5 py-3">{r.country}</td>
+                  <td className="px-5 py-3">{r.recurring ? "Oui" : "Non"}</td>
+                  <td className="px-5 py-3 text-right">
+                    <RowActions
+                      label={`le jour férié ${r.name}`}
+                      item={r as Record<string, unknown>}
+                      fields={autoFields(r as Record<string, unknown>, FERIES_LABELS)}
+                      onEdit={() => openEdit(r.id)}
+                      onRemove={() => handleRemove(r.id)}
+                    />
+                  </td>
+                </tr>
+              ))}
             {!loading && !error && !items.length && (
               <tr>
                 <td colSpan={5} className="px-5 py-8 text-center text-muted-foreground">
@@ -181,30 +190,58 @@ export function Feries({
         <Dialog open={dlgOpen} onOpenChange={setDlgOpen}>
           <DialogContent className="sm:max-w-[560px]">
             <DialogHeader>
-              <DialogTitle>{editingId ? 'Modifier jour férié' : 'Créer jour férié'}</DialogTitle>
+              <DialogTitle>{editingId ? "Modifier jour férié" : "Créer jour férié"}</DialogTitle>
               <DialogDescription>Renseignez les détails puis enregistrez.</DialogDescription>
             </DialogHeader>
-            <form className="grid gap-3" onSubmit={(e) => { e.preventDefault(); void submitForm(); }}>
+            <form
+              className="grid gap-3"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void submitForm();
+              }}
+            >
               <div className="grid grid-cols-2 gap-3">
                 <label className="grid gap-1.5 text-sm">
                   <span className="text-xs text-muted-foreground">Date</span>
-                  <input required type="date" className="w-full rounded-md border px-3 py-2 text-sm" value={form.date} onChange={e=>setForm({...form, date: e.target.value})} />
+                  <input
+                    required
+                    type="date"
+                    className="w-full rounded-md border px-3 py-2 text-sm"
+                    value={form.date}
+                    onChange={(e) => setForm({ ...form, date: e.target.value })}
+                  />
                 </label>
                 <label className="grid gap-1.5 text-sm">
                   <span className="text-xs text-muted-foreground">Nom</span>
-                  <input required className="w-full rounded-md border px-3 py-2 text-sm" value={form.name} onChange={e=>setForm({...form, name: e.target.value})} />
+                  <input
+                    required
+                    className="w-full rounded-md border px-3 py-2 text-sm"
+                    value={form.name}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  />
                 </label>
                 <label className="grid gap-1.5 text-sm">
                   <span className="text-xs text-muted-foreground">Pays</span>
-                  <input className="w-full rounded-md border px-3 py-2 text-sm" value={form.country} onChange={e=>setForm({...form, country: e.target.value})} />
+                  <input
+                    className="w-full rounded-md border px-3 py-2 text-sm"
+                    value={form.country}
+                    onChange={(e) => setForm({ ...form, country: e.target.value })}
+                  />
                 </label>
                 <label className="grid gap-1.5 text-sm">
                   <span className="text-xs text-muted-foreground">Récurrent</span>
-                  <input type="checkbox" className="mt-2" checked={form.recurring} onChange={e=>setForm({...form, recurring: e.target.checked})} />
+                  <input
+                    type="checkbox"
+                    className="mt-2"
+                    checked={form.recurring}
+                    onChange={(e) => setForm({ ...form, recurring: e.target.checked })}
+                  />
                 </label>
               </div>
               <DialogFooter className="flex justify-end gap-2">
-                <Button type="button" variant="outline" onClick={()=>setDlgOpen(false)}>Annuler</Button>
+                <Button type="button" variant="outline" onClick={() => setDlgOpen(false)}>
+                  Annuler
+                </Button>
                 <Button type="submit" disabled={saving}>
                   {saving ? "Enregistrement..." : "Enregistrer"}
                 </Button>

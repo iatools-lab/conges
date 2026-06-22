@@ -35,7 +35,16 @@ const employeeLeaveRequestSelect = {
   status: true,
   submittedAt: true,
   createdAt: true,
-  leaveType: { select: { id: true, code: true, name: true, category: true } },
+  leaveType: {
+    select: {
+      id: true,
+      code: true,
+      name: true,
+      category: true,
+      requiresProof: true,
+    },
+  },
+  attachments: { select: { id: true, filename: true, mimeType: true } },
   validations: {
     orderBy: { decidedAt: 'desc' },
     take: 1,
@@ -73,6 +82,19 @@ const MATERNITY_REQUIRED_DAYS = 90;
 const SPECIAL_POOL_CAP_DAYS = 12;
 const PAID_SOURCE_CODES = new Set(['CP', 'ANC', 'ENF']);
 const EXCLUDED_SPECIAL_CODES = new Set(['PASSIF', 'MAT', 'SS']);
+const ALLOWED_PROOF_MIME_TYPES = new Set([
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+]);
+
+export type UploadedLeaveProof = {
+  originalname: string;
+  mimetype: string;
+  size: number;
+  buffer: Buffer;
+};
 
 @Injectable()
 export class EmployeeLeaveRequestsService {
@@ -135,7 +157,7 @@ export class EmployeeLeaveRequestsService {
     };
   }
 
-  async create(dto: CreateEmployeeLeaveRequestDto) {
+  async create(dto: CreateEmployeeLeaveRequestDto, proof?: UploadedLeaveProof) {
     const user = await this.resolveUser(dto.userId, dto.userEmail);
     const startDate = this.parseDate(dto.startDate);
     const endDate = this.parseDate(dto.endDate);
@@ -150,6 +172,11 @@ export class EmployeeLeaveRequestsService {
       year: startDate.getUTCFullYear(),
       requestedDays: days,
     });
+    const attachment = this.toAttachment(proof);
+    this.assertRequiredProof(
+      leaveSelection.leaveType.requiresProof,
+      Boolean(attachment),
+    );
 
     await this.ensureSufficientBalance({
       userId: user.id,
@@ -183,6 +210,7 @@ export class EmployeeLeaveRequestsService {
               ? LeaveRequestStatus.DRAFT
               : LeaveRequestStatus.PENDING,
             submittedAt: isDraft ? null : new Date(),
+            ...(attachment ? { attachments: { create: attachment } } : {}),
           },
           select: employeeLeaveRequestSelect,
         });
@@ -223,7 +251,11 @@ export class EmployeeLeaveRequestsService {
     return this.toResponse(request);
   }
 
-  async update(id: string, dto: UpdateEmployeeLeaveRequestDto) {
+  async update(
+    id: string,
+    dto: UpdateEmployeeLeaveRequestDto,
+    proof?: UploadedLeaveProof,
+  ) {
     const user = await this.resolveUser(dto.userId, dto.userEmail);
     const existing = await this.findOwnedRequest(id, user.id);
     if (!this.isEditable(existing)) {
@@ -265,6 +297,14 @@ export class EmployeeLeaveRequestsService {
 
     const effectiveLeaveTypeId =
       leaveSelection?.leaveType.id ?? existing.leaveTypeId;
+    const attachment = this.toAttachment(proof);
+    const proofRequired =
+      leaveSelection?.leaveType.requiresProof ??
+      existing.leaveType.requiresProof;
+    this.assertRequiredProof(
+      proofRequired,
+      Boolean(attachment) || (existing.attachments?.length ?? 0) > 0,
+    );
     const effectiveYear = startYear;
     const balanceCredit =
       this.reservesBalance(existing) &&
@@ -315,6 +355,14 @@ export class EmployeeLeaveRequestsService {
                   cancelledAt: null,
                 }
               : {}),
+            ...(attachment
+              ? {
+                  attachments: {
+                    deleteMany: {},
+                    create: attachment,
+                  },
+                }
+              : {}),
           },
           select: employeeLeaveRequestSelect,
         });
@@ -358,6 +406,10 @@ export class EmployeeLeaveRequestsService {
         'Cette planification ne peut pas être soumise',
       );
     }
+    this.assertRequiredProof(
+      existing.leaveType.requiresProof,
+      (existing.attachments?.length ?? 0) > 0,
+    );
 
     await this.ensureSufficientBalance({
       userId: user.id,
@@ -513,7 +565,15 @@ export class EmployeeLeaveRequestsService {
         status: true,
         submittedAt: true,
         leaveTypeId: true,
-        leaveType: { select: { code: true, name: true, category: true } },
+        leaveType: {
+          select: {
+            code: true,
+            name: true,
+            category: true,
+            requiresProof: true,
+          },
+        },
+        attachments: { select: { id: true } },
         days: true,
         validations: {
           orderBy: { decidedAt: 'desc' },
@@ -531,7 +591,7 @@ export class EmployeeLeaveRequestsService {
   private async resolveLeaveType(code: string) {
     const leaveType = await this.prisma.leaveType.findFirst({
       where: { code: code.trim(), active: true },
-      select: { id: true, code: true, name: true },
+      select: { id: true, code: true, name: true, requiresProof: true },
     });
 
     if (!leaveType) throw new NotFoundException('Type de congé introuvable');
@@ -574,6 +634,7 @@ export class EmployeeLeaveRequestsService {
         code: true,
         name: true,
         category: true,
+        requiresProof: true,
       },
     });
 
@@ -697,6 +758,7 @@ export class EmployeeLeaveRequestsService {
         id: selected.id,
         code: selected.code,
         name: selected.name,
+        requiresProof: selected.requiresProof,
       },
       poolCode: poolKind,
       displayName:
@@ -916,6 +978,8 @@ export class EmployeeLeaveRequestsService {
       canEdit: this.isEditable(request),
       canCancel: cancellableStatuses.includes(request.status),
       leaveSubtypeCode: this.toLeaveSubtypeCodeForSelection(request.leaveType),
+      hasProof: (request.attachments?.length ?? 0) > 0,
+      proofFilename: request.attachments?.[0]?.filename ?? null,
     };
   }
 
@@ -1132,6 +1196,32 @@ export class EmployeeLeaveRequestsService {
 
   private roundDays(value: number) {
     return Math.round(value * 10) / 10;
+  }
+
+  private assertRequiredProof(required: boolean, hasProof: boolean) {
+    if (required && !hasProof) {
+      throw new BadRequestException(
+        'Un justificatif est obligatoire pour ce type de congé',
+      );
+    }
+  }
+
+  private toAttachment(file?: UploadedLeaveProof) {
+    if (!file) return undefined;
+    if (!ALLOWED_PROOF_MIME_TYPES.has(file.mimetype)) {
+      throw new BadRequestException(
+        'Le justificatif doit être un PDF ou une image JPEG, PNG ou WebP',
+      );
+    }
+    if (!file.buffer?.length) {
+      throw new BadRequestException('Le justificatif est vide');
+    }
+
+    return {
+      filename: file.originalname.slice(0, 255),
+      mimeType: file.mimetype,
+      url: `data:${file.mimetype};base64,${file.buffer.toString('base64')}`,
+    };
   }
 
   private isTypeInPool(

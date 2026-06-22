@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: conges_test
+          POSTGRES_USER: conges_test
+          POSTGRES_PASSWORD: conges_test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U conges_test -d conges_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgresql://conges_test:conges_test_password@127.0.0.1:5432/conges_test?schema=public
+      AUTH_SESSION_SECRET: ci-session-secret-with-more-than-32-characters
+      AUTH_ADMIN_PASSWORD_HASH: ci-admin-password-hash
+      CORS_ORIGINS: http://localhost:5173
+      EMAIL_MODE: off
+      RUN_DATABASE_E2E: "true"
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Install backend
+        working-directory: backend
+        run: npm ci
+      - name: Prepare PostgreSQL schema
+        working-directory: backend
+        run: |
+          npx prisma generate
+          npx prisma migrate deploy
+      - name: Check backend
+        working-directory: backend
+        run: |
+          npm run lint
+          npm test -- --runInBand
+          npm run test:e2e -- --runInBand
+          npm run build
+
+      - name: Install frontend
+        working-directory: frontend
+        run: npm ci
+      - name: Check frontend
+        working-directory: frontend
+        run: |
+          npm run lint
+          npm test
+          npm run build
+
+      - name: Validate Compose
+        env:
+          POSTGRES_PASSWORD: ci-postgres-password
+          AUTH_SESSION_SECRET: ci-session-secret-with-more-than-32-characters
+          AUTH_ADMIN_PASSWORD_HASH: ci-admin-password-hash
+        run: docker compose config --quiet

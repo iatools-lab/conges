@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -145,17 +146,81 @@ export class ManagerRequestsService {
     if (!this.canDecideRequest(manager, existing)) {
       throw new ForbiddenException('Demande hors périmètre manager');
     }
+    const now = new Date();
+    const transition = this.getTransition(dto.decision);
+
     if (existing.status !== LeaveRequestStatus.PENDING) {
+      const previousDecision = await this.prisma.validation.findFirst({
+        where: {
+          requestId: existing.id,
+          validatorId: manager.id,
+          level: 1,
+          decision: transition.validationDecision,
+          ...(existing.submittedAt
+            ? { decidedAt: { gte: existing.submittedAt } }
+            : {}),
+        },
+        orderBy: { decidedAt: 'desc' },
+      });
+      if (previousDecision) {
+        const balanceByKey = await this.findBalances(
+          [existing],
+          existing.startDate.getUTCFullYear(),
+        );
+        return this.toResponse(
+          existing,
+          balanceByKey.get(this.balanceKey(existing)),
+        );
+      }
       throw new BadRequestException(
         'Cette demande doit être soumise avant décision',
       );
     }
 
-    const now = new Date();
-    const transition = this.getTransition(dto.decision);
-
-    const { updated, rhEmails } = await this.prisma.$transaction(
+    const { updated, rhEmails, applied } = await this.prisma.$transaction(
       async (transaction) => {
+        const claimed = await transaction.leaveRequest.updateMany({
+          where: { id: existing.id, status: LeaveRequestStatus.PENDING },
+          data: {
+            status: transition.status,
+            decidedAt: transition.final ? now : null,
+            cancelledAt: null,
+          },
+        });
+
+        if (claimed.count === 0) {
+          const [current, previousDecision] = await Promise.all([
+            transaction.leaveRequest.findUnique({
+              where: { id: existing.id },
+              select: managerRequestSelect,
+            }),
+            transaction.validation.findFirst({
+              where: {
+                requestId: existing.id,
+                validatorId: manager.id,
+                level: 1,
+                decision: transition.validationDecision,
+                ...(existing.submittedAt
+                  ? { decidedAt: { gte: existing.submittedAt } }
+                  : {}),
+              },
+              orderBy: { decidedAt: 'desc' },
+            }),
+          ]);
+
+          if (current && previousDecision) {
+            return {
+              updated: current,
+              rhEmails: [] as string[],
+              applied: false,
+            };
+          }
+
+          throw new ConflictException(
+            'Cette demande a déjà été traitée par un autre processus',
+          );
+        }
+
         await transaction.validation.create({
           data: {
             requestId: existing.id,
@@ -167,13 +232,8 @@ export class ManagerRequestsService {
           },
         });
 
-        const request = await transaction.leaveRequest.update({
+        const request = await transaction.leaveRequest.findUniqueOrThrow({
           where: { id: existing.id },
-          data: {
-            status: transition.status,
-            decidedAt: transition.final ? now : null,
-            cancelledAt: null,
-          },
           select: managerRequestSelect,
         });
 
@@ -223,7 +283,7 @@ export class ManagerRequestsService {
             .filter((email): email is string => Boolean(email));
         }
 
-        return { updated: request, rhEmails };
+        return { updated: request, rhEmails, applied: true };
       },
     );
 
@@ -232,7 +292,7 @@ export class ManagerRequestsService {
       updated.startDate.getUTCFullYear(),
     );
 
-    if (existing.owner.email) {
+    if (applied && existing.owner.email) {
       await this.emailService.send({
         to: existing.owner.email,
         subject: this.toEmailSubject(transition.status),
@@ -243,6 +303,7 @@ export class ManagerRequestsService {
     }
 
     if (
+      applied &&
       transition.status === LeaveRequestStatus.IN_REVIEW &&
       rhEmails.length > 0
     ) {

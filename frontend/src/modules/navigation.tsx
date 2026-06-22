@@ -21,7 +21,6 @@ import {
   UserCog,
   Users,
   Wallet,
-  Workflow,
 } from "lucide-react";
 import { adminModule, employeeModule, managerModule, rhModule } from "./index";
 import type { FrontendModule, FrontendSubmodule } from "./module.types";
@@ -50,7 +49,11 @@ function item(module: FrontendModule, id: string, icon: ReactNode): NavigationIt
 const employeeDashboard = item(employeeModule, "dashboard", <LayoutDashboard className="size-4" />);
 const employeeBalances = item(employeeModule, "balances", <Wallet className="size-4" />);
 const employeePlanning = item(employeeModule, "planning", <CalendarDays className="size-4" />);
-const employeeRequests = item(employeeModule, "leave-requests", <CalendarRange className="size-4" />);
+const employeeRequests = item(
+  employeeModule,
+  "leave-requests",
+  <CalendarRange className="size-4" />,
+);
 const employeeEvents = item(employeeModule, "events", <AlertCircle className="size-4" />);
 const employeeHistory = item(employeeModule, "history", <History className="size-4" />);
 
@@ -123,7 +126,6 @@ const adminGroups: NavigationGroup[] = [
     icon: <UserCog className="size-4" />,
     items: [
       item(adminModule, "users", <Users className="size-4" />),
-      item(adminModule, "roles", <ShieldAlert className="size-4" />),
       item(adminModule, "departments", <Building2 className="size-4" />),
     ],
   },
@@ -132,7 +134,6 @@ const adminGroups: NavigationGroup[] = [
     label: "Configuration",
     icon: <SlidersHorizontal className="size-4" />,
     items: [
-      item(adminModule, "workflows", <Workflow className="size-4" />),
       item(adminModule, "holidays", <CalendarOff className="size-4" />),
       item(adminModule, "settings", <SlidersHorizontal className="size-4" />),
     ],

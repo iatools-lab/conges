@@ -47,7 +47,17 @@ const FIELD_LABELS = {
   ipAddress: "IP",
 };
 
-const ACTION_FILTERS = ["", "CREATE", "UPDATE", "DELETE", "LOGIN", "LOGOUT", "APPROVE", "REJECT", "EXPORT"];
+const ACTION_FILTERS = [
+  "",
+  "CREATE",
+  "UPDATE",
+  "DELETE",
+  "LOGIN",
+  "LOGOUT",
+  "APPROVE",
+  "REJECT",
+  "EXPORT",
+];
 
 function buildUserLabel(row: AuditRow) {
   const nom = row.user?.nom?.trim() ?? "";
@@ -103,7 +113,11 @@ export function RhAudit() {
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard label="Événements (24h)" value={String(last24hCount)} tone="blue" />
-        <StatCard label="Utilisateurs actifs" value={String(new Set(logs.map((row) => row.userId).filter(Boolean)).size)} tone="green" />
+        <StatCard
+          label="Utilisateurs actifs"
+          value={String(new Set(logs.map((row) => row.userId).filter(Boolean)).size)}
+          tone="green"
+        />
         <StatCard label="Modifications" value={String(modificationsCount)} tone="orange" />
         <StatCard label="Rétention" value="36" suffix="mois" tone="purple" />
       </div>
@@ -170,38 +184,50 @@ export function RhAudit() {
                   </td>
                 </tr>
               )}
-              {!loading && logs.map((l) => (
-                <tr key={l.id} className="border-b last:border-0 hover:bg-muted/30">
-                  <td className="px-5 py-3 text-muted-foreground font-mono text-xs">{new Date(l.createdAt).toLocaleString()}</td>
-                  <td className="px-3 py-3 font-medium">{buildUserLabel(l)}</td>
-                  <td className="px-3 py-3">
-                    <Badge tone={actionTone[l.action] ?? "neutral"}>{l.action}</Badge>
-                  </td>
-                  <td className="px-3 py-3">{l.entity}{l.entityId ? ` #${l.entityId}` : ""}</td>
-                  <td className="px-3 py-3 text-xs text-muted-foreground">{buildDetail(l.metadata)}</td>
-                  <td className="px-3 py-3 text-muted-foreground font-mono text-xs">{l.ipAddress ?? "-"}</td>
-                  <td className="px-5 py-3 text-right">
-                    <RowActions
-                      label={`l'événement ${l.action}`}
-                      item={{
-                        ...l,
-                        detail: buildDetail(l.metadata),
-                        user: buildUserLabel(l),
-                      } as Record<string, unknown>}
-                      fields={autoFields(
-                        {
-                          ...l,
-                          detail: buildDetail(l.metadata),
-                          user: buildUserLabel(l),
-                        } as Record<string, unknown>,
-                        FIELD_LABELS,
-                      )}
-                      onSave={() => {}}
-                      onRemove={() => {}}
-                    />
-                  </td>
-                </tr>
-              ))}
+              {!loading &&
+                logs.map((l) => (
+                  <tr key={l.id} className="border-b last:border-0 hover:bg-muted/30">
+                    <td className="px-5 py-3 text-muted-foreground font-mono text-xs">
+                      {new Date(l.createdAt).toLocaleString()}
+                    </td>
+                    <td className="px-3 py-3 font-medium">{buildUserLabel(l)}</td>
+                    <td className="px-3 py-3">
+                      <Badge tone={actionTone[l.action] ?? "neutral"}>{l.action}</Badge>
+                    </td>
+                    <td className="px-3 py-3">
+                      {l.entity}
+                      {l.entityId ? ` #${l.entityId}` : ""}
+                    </td>
+                    <td className="px-3 py-3 text-xs text-muted-foreground">
+                      {buildDetail(l.metadata)}
+                    </td>
+                    <td className="px-3 py-3 text-muted-foreground font-mono text-xs">
+                      {l.ipAddress ?? "-"}
+                    </td>
+                    <td className="px-5 py-3 text-right">
+                      <RowActions
+                        label={`l'événement ${l.action}`}
+                        item={
+                          {
+                            ...l,
+                            detail: buildDetail(l.metadata),
+                            user: buildUserLabel(l),
+                          } as Record<string, unknown>
+                        }
+                        fields={autoFields(
+                          {
+                            ...l,
+                            detail: buildDetail(l.metadata),
+                            user: buildUserLabel(l),
+                          } as Record<string, unknown>,
+                          FIELD_LABELS,
+                        )}
+                        onSave={() => {}}
+                        onRemove={() => {}}
+                      />
+                    </td>
+                  </tr>
+                ))}
               {!loading && logs.length === 0 && (
                 <tr>
                   <td className="px-5 py-6 text-center text-muted-foreground" colSpan={7}>
@@ -213,7 +239,9 @@ export function RhAudit() {
           </table>
         </div>
         <div className="flex items-center justify-between px-5 py-3 border-t text-xs text-muted-foreground">
-          <span>Affichage 1-{logs.length} sur {logs.length}</span>
+          <span>
+            Affichage 1-{logs.length} sur {logs.length}
+          </span>
           <div className="flex gap-1">
             <Button variant="outline">Précédent</Button>
             <Button variant="outline">Suivant</Button>

@@ -80,17 +80,22 @@ export function RhOvertimePage() {
   const byDepartment = query.data?.byDepartment ?? [];
   const monthlyApproved = query.data?.monthlyApproved ?? new Array<number>(12).fill(0);
 
-  const actionable = useMemo(
-    () => rows.filter((row) => row.statusCode === "IN_REVIEW_RH"),
-    [rows],
-  );
+  const actionable = useMemo(() => rows.filter((row) => row.statusCode === "IN_REVIEW_RH"), [rows]);
 
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: ["rh-overtime"] });
   };
 
   const decisionMutation = useMutation({
-    mutationFn: ({ id, decision, comment }: { id: string; decision: "approve" | "reject"; comment?: string }) =>
+    mutationFn: ({
+      id,
+      decision,
+      comment,
+    }: {
+      id: string;
+      decision: "approve" | "reject";
+      comment?: string;
+    }) =>
       apiFetch<RhOvertimeRow>(`/rh/overtime/${id}/decision`, {
         method: "PATCH",
         body: JSON.stringify({
@@ -101,7 +106,11 @@ export function RhOvertimePage() {
         }),
       }),
     onSuccess: (_, variables) => {
-      toast.success(variables.decision === "approve" ? "Heure supplémentaire comptabilisée" : "Heure supplémentaire rejetée");
+      toast.success(
+        variables.decision === "approve"
+          ? "Heure supplémentaire comptabilisée"
+          : "Heure supplémentaire rejetée",
+      );
       setCommentById((current) => ({ ...current, [variables.id]: "" }));
       refresh();
     },
@@ -113,14 +122,22 @@ export function RhOvertimePage() {
   });
 
   return (
-    <AppShell title="Heures supplémentaires" subtitle="Validation RH finale et vue globale des heures comptabilisées.">
+    <AppShell
+      title="Heures supplémentaires"
+      subtitle="Validation RH finale et vue globale des heures comptabilisées."
+    >
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3 xl:grid-cols-6">
         <StatCard label="Déclarations" value={totals.total} tone="blue" />
         <StatCard label="Attente N+1" value={totals.pendingManager} tone="yellow" />
         <StatCard label="Attente RH" value={totals.pendingRh} tone="orange" />
         <StatCard label="Approuvées" value={totals.approved} tone="green" />
         <StatCard label="Refusées" value={totals.rejected} tone="red" />
-        <StatCard label="Heures comptabilisées" value={totals.approvedHours} suffix="h" tone="purple" />
+        <StatCard
+          label="Heures comptabilisées"
+          value={totals.approvedHours}
+          suffix="h"
+          tone="purple"
+        />
       </div>
 
       <Card className="mt-6">
@@ -146,7 +163,9 @@ export function RhOvertimePage() {
                 min="2000"
                 max="2100"
                 value={year}
-                onChange={(event) => setYear(Number(event.target.value) || new Date().getFullYear())}
+                onChange={(event) =>
+                  setYear(Number(event.target.value) || new Date().getFullYear())
+                }
               />
               <Button variant="outline" onClick={refresh} disabled={query.isFetching}>
                 <RefreshCw className="size-4" /> Actualiser
@@ -190,7 +209,10 @@ export function RhOvertimePage() {
                           className="w-full rounded-md border bg-card px-2 py-1"
                           value={commentById[row.id] ?? ""}
                           onChange={(event) =>
-                            setCommentById((current) => ({ ...current, [row.id]: event.target.value }))
+                            setCommentById((current) => ({
+                              ...current,
+                              [row.id]: event.target.value,
+                            }))
                           }
                           placeholder="Optionnel pour validation, requis pour refus"
                         />
@@ -285,7 +307,11 @@ export function RhOvertimePage() {
           <div className="grid grid-cols-2 gap-2 p-5 md:grid-cols-3">
             {monthlyApproved.map((value, index) => (
               <div key={index} className="rounded-md border bg-muted/20 p-3 text-sm">
-                <div className="text-xs text-muted-foreground">{new Intl.DateTimeFormat("fr-FR", { month: "long" }).format(new Date(Date.UTC(2020, index, 1)))}</div>
+                <div className="text-xs text-muted-foreground">
+                  {new Intl.DateTimeFormat("fr-FR", { month: "long" }).format(
+                    new Date(Date.UTC(2020, index, 1)),
+                  )}
+                </div>
                 <div className="mt-1 text-lg font-semibold">{value} h</div>
               </div>
             ))}

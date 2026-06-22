@@ -87,7 +87,15 @@ export function ManagerOvertimePage() {
   };
 
   const decisionMutation = useMutation({
-    mutationFn: ({ id, decision, comment }: { id: string; decision: "approve" | "reject"; comment?: string }) =>
+    mutationFn: ({
+      id,
+      decision,
+      comment,
+    }: {
+      id: string;
+      decision: "approve" | "reject";
+      comment?: string;
+    }) =>
       apiFetch<ManagerOvertimeRow>(`/manager/overtime/${id}/decision`, {
         method: "PATCH",
         body: JSON.stringify({
@@ -98,7 +106,9 @@ export function ManagerOvertimePage() {
         }),
       }),
     onSuccess: (_, variables) => {
-      toast.success(variables.decision === "approve" ? "Déclaration transmise RH" : "Déclaration refusée");
+      toast.success(
+        variables.decision === "approve" ? "Déclaration transmise RH" : "Déclaration refusée",
+      );
       setCommentById((current) => ({ ...current, [variables.id]: "" }));
       refresh();
     },
@@ -133,7 +143,9 @@ export function ManagerOvertimePage() {
                 min="2000"
                 max="2100"
                 value={year}
-                onChange={(event) => setYear(Number(event.target.value) || new Date().getFullYear())}
+                onChange={(event) =>
+                  setYear(Number(event.target.value) || new Date().getFullYear())
+                }
               />
               <Button variant="outline" onClick={refresh} disabled={query.isFetching}>
                 <RefreshCw className="size-4" /> Actualiser
@@ -175,12 +187,17 @@ export function ManagerOvertimePage() {
                         className="w-full rounded-md border bg-card px-2 py-1"
                         value={commentById[row.id] ?? ""}
                         onChange={(event) =>
-                          setCommentById((current) => ({ ...current, [row.id]: event.target.value }))
+                          setCommentById((current) => ({
+                            ...current,
+                            [row.id]: event.target.value,
+                          }))
                         }
                         placeholder="Optionnel pour validation, requis pour refus"
                       />
                     ) : (
-                      <span className="text-xs text-muted-foreground">{row.managerComment || row.rhComment || "-"}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {row.managerComment || row.rhComment || "-"}
+                      </span>
                     )}
                   </td>
                   <td className="px-5 py-3 text-right">

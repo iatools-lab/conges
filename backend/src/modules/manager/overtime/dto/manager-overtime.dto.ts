@@ -29,7 +29,8 @@ export class FindManagerOvertimeQueryDto {
 
 export const MANAGER_OVERTIME_DECISIONS = ['approve', 'reject'] as const;
 
-export type ManagerOvertimeDecision = (typeof MANAGER_OVERTIME_DECISIONS)[number];
+export type ManagerOvertimeDecision =
+  (typeof MANAGER_OVERTIME_DECISIONS)[number];
 
 export class DecideManagerOvertimeDto {
   @IsOptional()

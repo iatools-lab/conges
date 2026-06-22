@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-argument */
 import { ExecutionContext, HttpException, HttpStatus } from '@nestjs/common';
 import { AuthRateLimitGuard } from './auth-rate-limit.guard';
 

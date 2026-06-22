@@ -125,7 +125,7 @@ export class AuthService {
   async login(dto: LoginDto, req?: Request) {
     this.assertPasswordAuthenticationEnabled();
     const email = dto.email.trim().toLowerCase();
-    const password = dto.password?.trim();
+    const password = dto.password.trim();
 
     try {
       const session = await this.createSessionForEmail(
@@ -674,18 +674,14 @@ export class AuthService {
     }
 
     if (authenticationMethod === 'password') {
-      if (user.passwordHash) {
-        if (!password) {
-          throw new UnauthorizedException('Mot de passe requis');
-        }
-
-        if (!this.verifyPassword(password, user.passwordHash)) {
-          throw new UnauthorizedException('Mot de passe invalide');
-        }
-      } else if (password) {
+      if (!user.passwordHash) {
         throw new UnauthorizedException(
           'Mot de passe non défini. Veuillez créer votre mot de passe avant de vous connecter.',
         );
+      }
+
+      if (!password || !this.verifyPassword(password, user.passwordHash)) {
+        throw new UnauthorizedException('Mot de passe invalide');
       }
     }
 

@@ -18,7 +18,7 @@ async function bootstrap() {
   if (shouldExposeSwagger) {
     const swaggerConfig = new DocumentBuilder()
       .setTitle('Conges upOwa API')
-      .setDescription('Documentation de l\'API Conges upOwa')
+      .setDescription("Documentation de l'API Conges upOwa")
       .setVersion('1.0')
       .addBearerAuth()
       .build();
@@ -29,4 +29,4 @@ async function bootstrap() {
 
   await app.listen(configService.get<number>('PORT') ?? 3000);
 }
-bootstrap();
+void bootstrap();
