@@ -761,7 +761,7 @@ export class RhGlobalViewService {
       cpBalances.reduce((sum, balance) => sum + balance.scheduled, 0),
     );
     const remaining = this.roundDays(total - taken - planned);
-    const liability = Math.max(remaining, 0);
+    const liability = remaining;
 
     return {
       id: user.id,

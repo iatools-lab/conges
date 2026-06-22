@@ -117,8 +117,8 @@ function cellToText(value: ExcelCell) {
 function cellToNumber(value: ExcelCell, rowNumber: number) {
   const numberValue =
     typeof value === "number" ? value : Number(String(value ?? "").replace(",", "."));
-  if (!Number.isFinite(numberValue) || numberValue < 0) {
-    throw new Error(`Passif initial invalide à la ligne ${rowNumber}`);
+  if (!Number.isFinite(numberValue)) {
+    throw new Error(`Ligne ${rowNumber}: passif initial invalide`);
   }
 
   return Math.round(numberValue * 10) / 10;

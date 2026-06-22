@@ -255,7 +255,7 @@ function exportEmployeesCsv(employees: Employee[]) {
     statusLabel[employee.status],
   ]);
   const csv = [headers, ...rows]
-    .map((row) => row.map((value) => escapeCsvValue(value)).join(";"))
+    .map((row) => row.map((value) => escapeCsvValue(String(value))).join(";"))
     .join("\n");
   const blob = new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -371,7 +371,7 @@ function cellToNumber(value: ExcelCell, rowNumber: number, label: string) {
   if (!raw) return 0;
 
   const parsed = Number(raw.replace(",", "."));
-  if (!Number.isFinite(parsed) || parsed < 0) {
+  if (!Number.isFinite(parsed)) {
     throw new Error(`Ligne ${rowNumber}: ${label} invalide`);
   }
 
