@@ -4,13 +4,11 @@ import {
   IsNumber,
   IsOptional,
   IsString,
-  Min,
   ValidateNested,
 } from 'class-validator';
 
 export class UpdateRhLeaveLiabilityDto {
   @IsNumber()
-  @Min(0)
   passifInitial!: number;
 }
 
@@ -24,7 +22,6 @@ export class ImportRhLeaveLiabilityRowDto {
   matricule?: string;
 
   @IsNumber()
-  @Min(0)
   passifInitial!: number;
 }
 

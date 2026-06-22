@@ -368,7 +368,7 @@ export class RhLeaveLiabilitiesService {
 
   private normalizePassiveDays(value: number) {
     const passiveDays = Number(value);
-    if (!Number.isFinite(passiveDays) || passiveDays < 0) {
+    if (!Number.isFinite(passiveDays)) {
       throw new BadRequestException('Passif initial invalide');
     }
 
@@ -377,7 +377,7 @@ export class RhLeaveLiabilitiesService {
 
   private clampPassiveDays(value: number) {
     return Math.min(
-      this.roundDays(Math.max(Number(value ?? 0), 0)),
+      this.roundDays(Math.max(Number(value ?? 0), -MAX_PASSIVE_LEAVE_DAYS)),
       MAX_PASSIVE_LEAVE_DAYS,
     );
   }

@@ -247,7 +247,7 @@ export class LeaveEntitlementsService {
     if (yearIndex === -1) return 0;
 
     const totalDays = Math.min(
-      Math.max(Math.round(totalPassiveDays), 0),
+      Math.round(totalPassiveDays),
       MAX_PASSIVE_LEAVE_DAYS,
     );
     const baseDays = Math.floor(totalDays / PASSIVE_LEAVE_YEARS.length);

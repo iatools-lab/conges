@@ -135,7 +135,7 @@ const FIELD_HINTS = {
   dateNaissance: { type: "date" as const },
   sexe: { type: "select" as const, options: ["M", "F"] },
   embauche: { type: "date" as const },
-  passifInitial: { type: "number" as const },
+  passifInitial: { type: "number" as const, min: undefined },
   dept: { type: "select" as const, options: DEPARTMENTS },
   roles: {
     type: "multiselect" as const,
@@ -590,7 +590,6 @@ function NewEmployeeDialog({
             <input
               type="number"
               step="0.1"
-              min="0"
               max="72"
               className={input}
               value={draft.passifInitial}

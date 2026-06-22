@@ -227,7 +227,6 @@ function LiabilityForm({
         <span className="text-xs font-medium text-muted-foreground">Passif initial *</span>
         <input
           type="number"
-          min="0"
           max="72"
           step="0.5"
           className={inputClass}
