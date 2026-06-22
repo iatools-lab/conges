@@ -9,6 +9,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import {
   AuditAction,
+  LeaveCategory,
   LeaveRequestStatus,
   NotificationType,
   Prisma,
@@ -27,7 +28,6 @@ import { EmailService } from '../../shared/notifications/email.service';
 import { LeaveBalanceSyncService } from '../../shared/leave-balances/leave-balance-sync.service';
 import { LeaveBalanceInitializerService } from '../../shared/leave-balances/leave-balance-initializer.service';
 import { overlapDateWhere, resolveDateRange } from '../../../common/date-range';
-
 type BadgeTone =
   | 'valid'
   | 'pending'
@@ -665,6 +665,7 @@ export class RhGlobalViewService {
               carryover: true,
               taken: true,
               scheduled: true,
+              leaveType: { select: { code: true, category: true } },
             },
           },
         },
@@ -738,22 +739,26 @@ export class RhGlobalViewService {
             carryover: true;
             taken: true;
             scheduled: true;
+            leaveType: { select: { code: true, category: true } };
           };
         };
       };
     }>,
   ) {
+    const cpBalances = user.balances.filter(
+      (balance) => balance.leaveType?.category === LeaveCategory.CONGE_PAYE,
+    );
     const total = this.roundDays(
-      user.balances.reduce(
+      cpBalances.reduce(
         (sum, balance) => sum + balance.acquired + balance.carryover,
         0,
       ),
     );
     const taken = this.roundDays(
-      user.balances.reduce((sum, balance) => sum + balance.taken, 0),
+      cpBalances.reduce((sum, balance) => sum + balance.taken, 0),
     );
     const planned = this.roundDays(
-      user.balances.reduce((sum, balance) => sum + balance.scheduled, 0),
+      cpBalances.reduce((sum, balance) => sum + balance.scheduled, 0),
     );
     const remaining = this.roundDays(total - taken - planned);
     const liability = Math.max(remaining, 0);
