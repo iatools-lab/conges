@@ -20,6 +20,10 @@ const SPECIAL_POOL_CAP_DAYS = 12;
 const PAID_SOURCE_CODES = new Set(['CP', 'ANC', 'ENF', 'PASSIF']);
 const EXCLUDED_SPECIAL_CODES = new Set(['PASSIF', 'MAT', 'SS']);
 
+function isPaidSourceCode(code: string): boolean {
+  return PAID_SOURCE_CODES.has(code.trim().toUpperCase());
+}
+
 @Injectable()
 export class EmployeeBalancesService {
   constructor(
@@ -150,8 +154,39 @@ export class EmployeeBalancesService {
       },
     });
 
+    // Compute previous year's remaining balance for carryover
+    // For paid sources (CP/ANC/ENF), carryover = previous year's remaining balance
+    // This allows negative balances to be carried forward automatically.
+    const prevYearBalances = await this.prisma.leaveBalance.findMany({
+      where: {
+        userId,
+        year: year - 1,
+        leaveType: { code: { in: ['CP', 'ANC', 'ENF'] } },
+      },
+      select: {
+        acquired: true,
+        taken: true,
+        scheduled: true,
+        carryover: true,
+        leaveType: { select: { code: true } },
+      },
+    });
+    const prevYearRemainingByCode = new Map<string, number>();
+    for (const pb of prevYearBalances) {
+      const rem = this.roundDays(
+        pb.acquired + pb.carryover - pb.taken - pb.scheduled,
+      );
+      prevYearRemainingByCode.set(pb.leaveType.code, rem);
+    }
+
     const rows = balances.map((balance) => {
-      const acquired = this.roundDays(balance.acquired + balance.carryover);
+      const code = balance.leaveType.code;
+      // For paid sources (CP/ANC/ENF), use previous year's remaining as effective carryover
+      let effectiveCarryover = balance.carryover;
+      if (isPaidSourceCode(code)) {
+        effectiveCarryover = prevYearRemainingByCode.get(code) ?? 0;
+      }
+      const acquired = this.roundDays(balance.acquired + effectiveCarryover);
       const taken = this.roundDays(balance.taken);
       const scheduled = this.roundDays(balance.scheduled);
       const remaining = this.roundDays(acquired - taken - scheduled);
@@ -159,7 +194,7 @@ export class EmployeeBalancesService {
       return {
         id: balance.id,
         source: this.leaveEntitlements.getBalanceLabel(balance.leaveType, year),
-        code: balance.leaveType.code,
+        code,
         category: balance.leaveType.category,
         acquired,
         taken,
@@ -167,11 +202,13 @@ export class EmployeeBalancesService {
         remaining,
       };
     });
+
     const paidDetails = rows.filter((row) => this.isPaidPoolRow(row));
     const specialDetails = rows.filter((row) => this.isSpecialPoolRow(row));
     const maternityRows = rows.filter((row) => this.isMaternityRow(row));
 
-    const paidTotals = this.sumRows(paidDetails);
+    // Use sumRowsRaw (no Math.max) for paid totals to allow negative balances
+    const paidTotals = this.sumRowsRaw(paidDetails);
     const rawSpecialTotals = this.sumRows(specialDetails);
     const specialTotals = {
       ...rawSpecialTotals,
@@ -215,6 +252,26 @@ export class EmployeeBalancesService {
       specialTotals,
       maternityTotals: this.sumRows(maternityRows),
     };
+  }
+
+  /** Sum rows keeping negative values (no Math.max clamping). */
+  private sumRowsRaw(
+    rows: {
+      acquired: number;
+      taken: number;
+      scheduled: number;
+      remaining: number;
+    }[],
+  ) {
+    return rows.reduce(
+      (total, row) => ({
+        acquired: this.roundDays(total.acquired + row.acquired),
+        taken: this.roundDays(total.taken + row.taken),
+        scheduled: this.roundDays(total.scheduled + row.scheduled),
+        remaining: this.roundDays(total.remaining + row.remaining),
+      }),
+      { acquired: 0, taken: 0, scheduled: 0, remaining: 0 },
+    );
   }
 
   private sumRows(

@@ -43,7 +43,7 @@ const POOL_SPECIAL_CODE = "SPECIAL";
 const MATERNITY_CODE = "MAT";
 const MATERNITY_REQUIRED_DAYS = 90;
 const SPECIAL_POOL_CAP_DAYS = 12;
-const PAID_SOURCE_CODES = new Set(["CP", "ANC", "ENF"]);
+const PAID_SOURCE_CODES = new Set(["CP", "ANC", "ENF", "PASSIF"]);
 const EXCLUDED_SPECIAL_CODES = new Set(["PASSIF", "MAT", "SS"]);
 
 type BalancesResponse = {
@@ -89,6 +89,7 @@ export function NewRequestForm({
     [startDate],
   );
   const isMaternitySelection = normalizeCode(leaveTypeCode) === MATERNITY_CODE;
+  const isPayeSelection = normalizeCode(leaveTypeCode) === POOL_PAYE_CODE;
   const selectedLeaveType = useMemo(
     () => leaveTypes.find((type) => type.code === leaveTypeCode),
     [leaveTypeCode, leaveTypes],
@@ -115,6 +116,11 @@ export function NewRequestForm({
     isMaternitySelection && requestedDays > 0 && requestedDays !== MATERNITY_REQUIRED_DAYS;
   const hasInvalidWorkingPeriod = Boolean(startDate && endDate && requestedDays <= 0);
 
+  const futureBalanceAfterRequest =
+    typeof availableDays === "number" && requestedDays > 0
+      ? roundDays(availableDays) - requestedDays
+      : null;
+
   const inlineError = holidayError
     ? holidayError
     : hasInvalidWorkingPeriod
@@ -125,7 +131,7 @@ export function NewRequestForm({
           : invalidMaternityDuration
             ? `Le congé maternité doit être pris en totalité (${MATERNITY_REQUIRED_DAYS} jours ouvrés).`
             : ""
-        : exceedsBalance && typeof availableDays === "number"
+        : exceedsBalance && typeof availableDays === "number" && !isPayeSelection
           ? `Le nombre de jours de congés demandé (${requestedDays}) excède le solde disponible (${roundDays(availableDays)}).`
           : "";
   const isPlanning = mode === "planning";
@@ -353,6 +359,12 @@ export function NewRequestForm({
                   Solde disponible: {roundDays(availableDays)} jour(s)
                 </p>
               )}
+              {isPayeSelection && futureBalanceAfterRequest !== null && (
+                <p className="text-xs text-amber-600 dark:text-amber-400">
+                  Après validation de cette demande, votre solde sera de {futureBalanceAfterRequest}{" "}
+                  jour(s).
+                </p>
+              )}
               {isMaternitySelection && (
                 <p className="text-xs text-muted-foreground">
                   Le congé maternité doit être pris en totalité ({MATERNITY_REQUIRED_DAYS} jours
@@ -401,7 +413,7 @@ export function NewRequestForm({
                 holidaysLoading ||
                 leaveTypes.length === 0 ||
                 requestedDays <= 0 ||
-                Boolean(inlineError)
+                (Boolean(inlineError) && !isPayeSelection)
               }
             >
               {isPlanning ? "Enregistrer la planification" : "Envoyer la demande"}
@@ -440,7 +452,7 @@ function getAvailableDaysForSelection(
     return roundDays(
       Object.entries(balanceByCode)
         .filter(([code]) => isPaidSourceCode(code))
-        .reduce((sum, [, remaining]) => sum + Math.max(remaining, 0), 0),
+        .reduce((sum, [, remaining]) => sum + remaining, 0),
     );
   }
 

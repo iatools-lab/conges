@@ -739,7 +739,7 @@ export class RhGlobalViewService {
             carryover: true;
             taken: true;
             scheduled: true;
-            leaveType: { select: { code: true, category: true } };
+            leaveType: { select: { code: true; category: true } };
           };
         };
       };

@@ -80,7 +80,7 @@ const SPECIAL_POOL_CODE = 'SPECIAL';
 const MATERNITY_CODE = 'MAT';
 const MATERNITY_REQUIRED_DAYS = 90;
 const SPECIAL_POOL_CAP_DAYS = 12;
-const PAID_SOURCE_CODES = new Set(['CP', 'ANC', 'ENF']);
+const PAID_SOURCE_CODES = new Set(['CP', 'ANC', 'ENF', 'PASSIF']);
 const EXCLUDED_SPECIAL_CODES = new Set(['PASSIF', 'MAT', 'SS']);
 const ALLOWED_PROOF_MIME_TYPES = new Set([
   'application/pdf',
@@ -693,8 +693,7 @@ export class EmployeeLeaveRequestsService {
     );
 
     const pooledRemainingRaw = candidates.reduce(
-      (sum, leaveType) =>
-        sum + Math.max(balanceByTypeId.get(leaveType.id) ?? 0, 0),
+      (sum, leaveType) => sum + (balanceByTypeId.get(leaveType.id) ?? 0),
       0,
     );
     const pooledRemaining = this.roundDays(
@@ -704,11 +703,14 @@ export class EmployeeLeaveRequestsService {
     );
 
     if (params.requestedDays > pooledRemaining) {
-      throw new BadRequestException(
-        poolKind === SPECIAL_POOL_CODE
-          ? `Le nombre de jours demandé (${this.roundDays(params.requestedDays)}) excède le plafond disponible de congés spéciaux (${pooledRemaining}).`
-          : `Le nombre de jours demandé (${this.roundDays(params.requestedDays)}) excède votre total de congés payés disponible (${pooledRemaining}).`,
-      );
+      if (poolKind === SPECIAL_POOL_CODE) {
+        throw new BadRequestException(
+          `Le nombre de jours demandé (${this.roundDays(params.requestedDays)}) excède le plafond disponible de congés spéciaux (${pooledRemaining}).`,
+        );
+      }
+      // For PAID pool (CP/ANC/ENF), we allow the request even if the balance is insufficient.
+      // The excess is tracked as a debt (negative remaining balance) and will be
+      // automatically reduced as CP days accrue over time.
     }
 
     const existingCandidate = params.existingLeaveTypeId
