@@ -210,6 +210,7 @@ describe('RhSpecialLeavesService', () => {
         rows: [
           expect.objectContaining({
             leaveTypeCode: 'PAT',
+            eventDate: null,
             days: 3,
             imported: true,
           }),
@@ -246,6 +247,54 @@ describe('RhSpecialLeavesService', () => {
       expect.objectContaining({
         imported: false,
         skippedReason: 'Deja importe',
+      }),
+    );
+  });
+
+  it('keeps a missing imported start date as null and does not create a fake leave request', async () => {
+    const { prisma, service } = createHarness();
+
+    const result = await service.importRows({
+      rows: [
+        {
+          matricule: 'EMP001',
+          eventLabel: 'Mariage',
+          eventDate: '2026-07-10',
+          status: LeaveRequestStatus.APPROVED,
+        },
+      ],
+    });
+
+    expect(prisma.leaveRequest.create).not.toHaveBeenCalled();
+    expect(result).toEqual(
+      expect.objectContaining({
+        imported: 0,
+        skipped: 1,
+        rows: [
+          expect.objectContaining({
+            eventDate: '2026-07-10',
+            startDate: null,
+            endDate: null,
+            days: 0,
+            imported: false,
+            skippedReason: 'Date debut absente',
+          }),
+        ],
+      }),
+    );
+    expect(prisma.auditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          metadata: expect.objectContaining({
+            rows: [
+              expect.objectContaining({
+                eventDate: '2026-07-10',
+                startDate: null,
+                imported: false,
+              }),
+            ],
+          }),
+        }),
       }),
     );
   });

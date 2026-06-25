@@ -263,8 +263,9 @@ export class RhSpecialLeavesService {
         employeeName: string;
         eventLabel: string;
         leaveTypeCode: string;
-        startDate: string;
-        endDate: string;
+        eventDate: string | null;
+        startDate: string | null;
+        endDate: string | null;
         days: number;
         status: LeaveRequestStatus;
         imported: boolean;
@@ -296,6 +297,26 @@ export class RhSpecialLeavesService {
           row.eventLabel,
           employee.sexe,
         );
+
+        if (!row.startDate || !row.startDateInput) {
+          results.push({
+            rowNumber: row.rowNumber,
+            matricule: employee.matricule,
+            employeeId: employee.id,
+            employeeName: this.fullName(employee),
+            eventLabel: row.eventLabel,
+            leaveTypeCode: leaveType.code,
+            eventDate: row.eventDate,
+            startDate: null,
+            endDate: null,
+            days: 0,
+            status: row.status,
+            imported: false,
+            skippedReason: 'Date debut absente',
+          });
+          continue;
+        }
+
         const schedule = await this.computeEventSchedule(transaction, {
           eventLabel: row.eventLabel,
           leaveType,
@@ -316,6 +337,7 @@ export class RhSpecialLeavesService {
             employeeName: this.fullName(employee),
             eventLabel: row.eventLabel,
             leaveTypeCode: existing.leaveType.code,
+            eventDate: row.eventDate,
             startDate: existing.startDate.toISOString().slice(0, 10),
             endDate: existing.endDate.toISOString().slice(0, 10),
             days: this.roundDays(existing.days),
@@ -347,6 +369,7 @@ export class RhSpecialLeavesService {
           employeeName: created.employeeName,
           eventLabel: created.eventLabel,
           leaveTypeCode: created.leaveTypeCode,
+          eventDate: row.eventDate,
           startDate: created.startDate,
           endDate: created.endDate,
           days: created.days,
@@ -364,6 +387,15 @@ export class RhSpecialLeavesService {
             source: 'rh_special_leaves_import',
             imported: results.filter((row) => row.imported).length,
             skipped: results.filter((row) => !row.imported).length,
+            rows: results.map((row) => ({
+              rowNumber: row.rowNumber,
+              matricule: row.matricule,
+              eventLabel: row.eventLabel,
+              eventDate: row.eventDate,
+              startDate: row.startDate,
+              imported: row.imported,
+              skippedReason: row.skippedReason ?? null,
+            })),
           },
         },
       });
@@ -601,11 +633,20 @@ export class RhSpecialLeavesService {
     const rowNumber = index + 2;
     const matricule = row.matricule.trim();
     const eventLabel = row.eventLabel.trim();
-    const startDateInput = row.startDate.trim();
-    const startDate = this.parseDate(
-      startDateInput,
-      `Date de debut invalide a la ligne ${rowNumber}`,
-    );
+    const eventDate = row.eventDate?.trim() || null;
+    if (eventDate) {
+      this.parseDate(
+        eventDate,
+        `Date evenement invalide a la ligne ${rowNumber}`,
+      );
+    }
+    const startDateInput = row.startDate?.trim() || null;
+    const startDate = startDateInput
+      ? this.parseDate(
+          startDateInput,
+          `Date de debut invalide a la ligne ${rowNumber}`,
+        )
+      : null;
 
     if (!matricule) {
       throw new BadRequestException(
@@ -622,7 +663,7 @@ export class RhSpecialLeavesService {
       rowNumber,
       matricule,
       eventLabel,
-      eventDate: row.eventDate?.trim() || undefined,
+      eventDate,
       startDate,
       startDateInput,
       status: row.status ?? LeaveRequestStatus.APPROVED,
@@ -640,11 +681,12 @@ export class RhSpecialLeavesService {
       const key = [
         row.matricule.toUpperCase(),
         this.normalizeImportToken(row.eventLabel),
-        row.startDate.toISOString().slice(0, 10),
+        row.eventDate ?? 'NULL_EVENT_DATE',
+        row.startDateInput ?? 'NULL_START_DATE',
       ].join(':');
       if (seen.has(key)) {
         throw new BadRequestException(
-          `Ligne en double dans le fichier: ${row.matricule} / ${row.eventLabel} / ${row.startDateInput}`,
+          `Ligne en double dans le fichier: ${row.matricule} / ${row.eventLabel} / ${row.eventDate ?? 'Date evenement vide'} / ${row.startDateInput ?? 'Date debut vide'}`,
         );
       }
       seen.add(key);

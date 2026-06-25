@@ -107,8 +107,9 @@ export class ImportRhSpecialLeaveRowDto {
   @IsString()
   eventDate?: string;
 
+  @IsOptional()
   @IsString()
-  startDate!: string;
+  startDate?: string;
 
   @IsOptional()
   @IsEnum(LeaveRequestStatus)

@@ -121,8 +121,8 @@ type SpecialLeavePayload = {
 type SpecialLeaveImportRow = {
   matricule: string;
   eventLabel: string;
-  eventDate?: string;
-  startDate: string;
+  eventDate?: string | null;
+  startDate?: string | null;
   status?: SpecialLeaveStatusCode;
   reason?: string;
   proofUrl?: string;
@@ -134,7 +134,9 @@ type SpecialLeaveImportResultRow = SpecialLeaveImportRow & {
   employeeId: string;
   employeeName: string;
   leaveTypeCode: string;
-  endDate: string;
+  eventDate: string | null;
+  startDate: string | null;
+  endDate: string | null;
   days: number;
   status: SpecialLeaveStatusCode;
   imported: boolean;
@@ -195,7 +197,7 @@ function formatEmployeeLabel(employee: RhEmployee) {
   return `${employee.matricule} - ${employee.prenom} ${employee.nom}`;
 }
 
-function formatDate(value: string) {
+function formatDate(value?: string | null) {
   if (!value) return "-";
   return new Intl.DateTimeFormat("fr-FR").format(new Date(`${value}T00:00:00.000Z`));
 }
@@ -301,12 +303,8 @@ function parseImportRows(result: ExcelReadResult): SpecialLeaveImportRow[] {
     return "";
   });
 
-  if (
-    !columns.includes("matricule") ||
-    !columns.includes("eventLabel") ||
-    !columns.includes("startDate")
-  ) {
-    throw new Error("Colonnes requises: Matricule, Evenement et Date debut");
+  if (!columns.includes("matricule") || !columns.includes("eventLabel")) {
+    throw new Error("Colonnes requises: Matricule et Evenement");
   }
 
   const rows = bodyRows.map((row, rowIndex) => {
@@ -320,7 +318,7 @@ function parseImportRows(result: ExcelReadResult): SpecialLeaveImportRow[] {
       if (column === "eventDate" && cellToText(row[columnIndex])) {
         values.eventDate = cellToDateInput(row[columnIndex], rowNumber, "Date evenement");
       }
-      if (column === "startDate") {
+      if (column === "startDate" && cellToText(row[columnIndex])) {
         values.startDate = cellToDateInput(row[columnIndex], rowNumber, "Date debut");
       }
       if (column === "status") values.status = parseImportStatus(row[columnIndex], rowNumber);
@@ -333,21 +331,20 @@ function parseImportRows(result: ExcelReadResult): SpecialLeaveImportRow[] {
 
     if (!values.matricule) throw new Error(`Matricule manquant a la ligne ${rowNumber}`);
     if (!values.eventLabel) throw new Error(`Evenement manquant a la ligne ${rowNumber}`);
-    if (!values.startDate) throw new Error(`Date debut manquante a la ligne ${rowNumber}`);
 
     return values as SpecialLeaveImportRow;
   });
 
   const seen = new Set<string>();
   const duplicate = rows.find((row) => {
-    const key = `${row.matricule.trim().toUpperCase()}:${row.eventLabel.trim().toLowerCase()}:${row.startDate}`;
+    const key = `${row.matricule.trim().toUpperCase()}:${row.eventLabel.trim().toLowerCase()}:${row.eventDate ?? "NULL_EVENT_DATE"}:${row.startDate ?? "NULL_START_DATE"}`;
     if (seen.has(key)) return true;
     seen.add(key);
     return false;
   });
   if (duplicate) {
     throw new Error(
-      `Ligne en double dans le fichier: ${duplicate.matricule} / ${duplicate.eventLabel} / ${duplicate.startDate}`,
+      `Ligne en double dans le fichier: ${duplicate.matricule} / ${duplicate.eventLabel} / ${duplicate.eventDate ?? "Date evenement vide"} / ${duplicate.startDate ?? "Date debut vide"}`,
     );
   }
 
@@ -358,7 +355,8 @@ function downloadImportTemplate() {
   const csv = [
     "Matricule;Evenement;Date evenement;Date debut;Statut;Motif;Lien justificatif",
     "EMP001;Mariage;2026-07-10;2026-07-10;APPROVED;Mariage civil;https://...",
-    "EMP002;Naissance;2026-08-05;2026-08-05;PENDING;Naissance enfant;",
+    "EMP002;Naissance;;2026-08-05;PENDING;Date evenement optionnelle;",
+    "EMP003;Deces;2026-09-02;;PENDING;Date debut optionnelle;",
   ].join("\n");
   const blob = new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -1057,7 +1055,7 @@ export function Speciaux() {
                 </h4>
                 <p className="text-xs text-muted-foreground">
                   {importRows.length
-                    ? `${importPreviewTotals.rows} ligne(s), ${importPreviewTotals.approved} validee(s) par defaut. Les jours seront calcules au moment de l'import.`
+                    ? `${importPreviewTotals.rows} ligne(s), ${importPreviewTotals.approved} validee(s) par defaut. Les jours seront calcules seulement si Date debut est renseignee.`
                     : `${lastImport?.imported ?? 0} importee(s), ${lastImport?.skipped ?? 0} ignoree(s).`}
                 </p>
               </div>
@@ -1069,6 +1067,7 @@ export function Speciaux() {
                   <tr>
                     <th className="px-4 py-2">Matricule</th>
                     <th className="px-4 py-2">Evenement</th>
+                    <th className="px-4 py-2">Date evenement</th>
                     <th className="px-4 py-2">Date debut</th>
                     <th className="px-4 py-2">Statut</th>
                     <th className="px-4 py-2">Jours calcules</th>
@@ -1078,25 +1077,37 @@ export function Speciaux() {
                 <tbody className="divide-y">
                   {importRows.length
                     ? importRows.slice(0, 8).map((row) => (
-                        <tr key={`${row.matricule}-${row.eventLabel}-${row.startDate}`}>
+                        <tr
+                          key={`${row.matricule}-${row.eventLabel}-${row.eventDate ?? "no-event-date"}-${row.startDate ?? "no-start-date"}`}
+                        >
                           <td className="px-4 py-2 font-medium">{row.matricule}</td>
                           <td className="px-4 py-2">{row.eventLabel}</td>
+                          <td className="px-4 py-2">{formatDate(row.eventDate)}</td>
                           <td className="px-4 py-2">{formatDate(row.startDate)}</td>
                           <td className="px-4 py-2">{row.status ?? "APPROVED"}</td>
-                          <td className="px-4 py-2 text-muted-foreground">Calcul serveur</td>
+                          <td className="px-4 py-2 text-muted-foreground">
+                            {row.startDate ? "Calcul serveur" : "Non calculé"}
+                          </td>
                           <td className="px-4 py-2">
-                            <Badge tone="pending">Pret</Badge>
+                            <Badge tone={row.startDate ? "pending" : "neutral"}>
+                              {row.startDate ? "Pret" : "Date debut absente"}
+                            </Badge>
                           </td>
                         </tr>
                       ))
                     : lastImportRows.slice(0, 8).map((row) => (
-                        <tr key={`${row.rowNumber}-${row.matricule}-${row.startDate}`}>
+                        <tr
+                          key={`${row.rowNumber}-${row.matricule}-${row.eventDate ?? "no-event-date"}-${row.startDate ?? "no-start-date"}`}
+                        >
                           <td className="px-4 py-2 font-medium">{row.matricule}</td>
                           <td className="px-4 py-2">{row.eventLabel}</td>
+                          <td className="px-4 py-2">{formatDate(row.eventDate)}</td>
                           <td className="px-4 py-2">{formatDate(row.startDate)}</td>
                           <td className="px-4 py-2">{row.status}</td>
                           <td className="px-4 py-2">
-                            {formatNumber(row.days)} j, fin {formatDate(row.endDate)}
+                            {row.endDate
+                              ? `${formatNumber(row.days)} j, fin ${formatDate(row.endDate)}`
+                              : "Non calculé"}
                           </td>
                           <td className="px-4 py-2">
                             <Badge tone={row.imported ? "valid" : "neutral"}>
