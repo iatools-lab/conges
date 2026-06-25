@@ -430,6 +430,51 @@ export function Passif() {
 
   return (
     <AppShell title="Gestion du passif">
+      <Card className="mb-6 p-5">
+        <div className="grid gap-3 xl:grid-cols-[minmax(240px,1fr)_auto_auto_auto] xl:items-end">
+          <label className="grid gap-1.5 text-sm">
+            <span className="text-xs font-medium text-muted-foreground">Recherche</span>
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <input
+                className="w-full rounded-md border bg-background py-2 pl-9 pr-3 text-sm"
+                placeholder="Employé, matricule, pôle..."
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+              />
+            </div>
+          </label>
+          <label className="grid gap-1.5 text-sm">
+            <span className="text-xs font-medium text-muted-foreground">Statut</span>
+            <select
+              className="rounded-md border bg-background px-3 py-2 text-sm"
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value as "" | LiabilityTone)}
+            >
+              <option value="">Tous statuts</option>
+              <option value="rejected">À apurer</option>
+              <option value="pending">En apurement</option>
+              <option value="valid">Soldé</option>
+              <option value="neutral">Sans passif</option>
+            </select>
+          </label>
+          <label className="grid gap-1.5 text-sm">
+            <span className="text-xs font-medium text-muted-foreground">Année</span>
+            <input
+              className="w-28 rounded-md border bg-background px-3 py-2 text-sm"
+              type="number"
+              min="2000"
+              max="2100"
+              value={year}
+              onChange={(event) => setYear(event.target.value)}
+            />
+          </label>
+          <Button variant="outline" onClick={refresh} disabled={liabilitiesQuery.isFetching}>
+            <RefreshCw className="size-4" /> Actualiser
+          </Button>
+        </div>
+      </Card>
+
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label="Passif initial"
@@ -452,69 +497,38 @@ export function Passif() {
         <StatCard label="Employés concernés" value={totals.employeesWithLiability} tone="yellow" />
       </div>
 
+      <Card className="mt-4 p-5">
+        <div className="flex flex-wrap gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx,.xls"
+            className="hidden"
+            onChange={handleImportFile}
+          />
+          <Button
+            variant="outline"
+            disabled={isMutating}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <FileUp className="size-4" /> Importer
+          </Button>
+        </div>
+      </Card>
+
       <Card className="mt-4 overflow-hidden">
-        <div className="border-b px-4 py-4 sm:px-5">
+        <div className="flex flex-col gap-3 border-b px-4 py-4 sm:px-5 xl:flex-row xl:items-center xl:justify-between">
           <div className="min-w-0">
             <h3 className="font-semibold">Passif régularisé</h3>
             <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
               Répartition automatique sur 2025, 2026 et 2027, avec suivi du consommé.
             </p>
           </div>
-
-          <div className="mt-4 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-            <div className="relative w-full xl:max-w-xs">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <input
-                className="w-full rounded-md border bg-background py-2 pl-9 pr-3 text-sm"
-                placeholder="Employé, matricule, pôle..."
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-              />
-            </div>
-            <div className="flex flex-wrap items-center gap-2 xl:justify-end">
-              <select
-                className="rounded-md border bg-background px-3 py-2 text-sm"
-                value={statusFilter}
-                onChange={(event) => setStatusFilter(event.target.value as "" | LiabilityTone)}
-              >
-                <option value="">Tous statuts</option>
-                <option value="rejected">À apurer</option>
-                <option value="pending">En apurement</option>
-                <option value="valid">Soldé</option>
-                <option value="neutral">Sans passif</option>
-              </select>
-              <input
-                className="w-28 rounded-md border bg-background px-3 py-2 text-sm"
-                type="number"
-                min="2000"
-                max="2100"
-                value={year}
-                onChange={(event) => setYear(event.target.value)}
-              />
-              <Button variant="outline" onClick={refresh} disabled={liabilitiesQuery.isFetching}>
-                <RefreshCw className="size-4" /> Actualiser
-              </Button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".xlsx,.xls"
-                className="hidden"
-                onChange={handleImportFile}
-              />
-              <Button
-                variant="outline"
-                disabled={isMutating}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <FileUp className="size-4" /> Importer
-              </Button>
-              <LiabilityDialog
-                rows={rows}
-                disabled={isMutating || liabilitiesQuery.isLoading}
-                onSave={(payload) => updateLiability.mutateAsync(payload)}
-              />
-            </div>
-          </div>
+          <LiabilityDialog
+            rows={rows}
+            disabled={isMutating || liabilitiesQuery.isLoading}
+            onSave={(payload) => updateLiability.mutateAsync(payload)}
+          />
         </div>
 
         {liabilitiesQuery.isLoading ? (

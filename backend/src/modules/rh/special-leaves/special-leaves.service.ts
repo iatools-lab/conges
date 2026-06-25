@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  AuditAction,
   EventType,
   LeaveCategory,
   LeaveRequestStatus,
@@ -16,6 +17,8 @@ import { LeaveEntitlementsService } from '../../shared/leave-entitlements/leave-
 import { EmailService } from '../../shared/notifications/email.service';
 import {
   CreateRhSpecialLeaveDto,
+  ImportRhSpecialLeavesDto,
+  ImportRhSpecialLeaveRowDto,
   UpdateRhSpecialLeaveDto,
 } from './dto/rh-special-leave.dto';
 import {
@@ -23,11 +26,50 @@ import {
   overlapDateWhere,
   resolveDateRange,
 } from '../../../common/date-range';
+import { endDateForWorkingDays } from '../../../common/working-days';
 
 type BadgeTone = 'valid' | 'pending' | 'rejected' | 'draft' | 'neutral';
 type PrismaClientLike = PrismaService | Prisma.TransactionClient;
+type SpecialLeaveEventKind =
+  | 'birth'
+  | 'marriage'
+  | 'death'
+  | 'illness'
+  | 'other';
+type EventLeaveType = {
+  id: string;
+  code: string;
+  name: string;
+  category: LeaveCategory;
+  defaultDays: number;
+  active?: boolean;
+};
+type ActiveEmployee = {
+  id: string;
+  matricule: string;
+  nom: string;
+  prenom: string;
+  sexe: Sexe;
+  status: UserStatus;
+};
 const EVENT_STATUS_MARKER =
   /\s*\[RH_STATUS:(APPROVED|REJECTED|CANCELLED)\]\s*$/;
+const BIRTH_LEAVE_FALLBACK_DAYS = {
+  [Sexe.F]: 90,
+  [Sexe.M]: 3,
+} as const;
+const SPECIAL_EVENT_FALLBACK_DAYS = {
+  marriage: 3,
+  death: 3,
+  illness: 1,
+  other: 1,
+} as const;
+const EVENT_LEAVE_CATEGORIES = [
+  LeaveCategory.CONGE_SPECIAL,
+  LeaveCategory.CONGE_PATERNITE,
+  LeaveCategory.CONGE_MATERNITE,
+  LeaveCategory.CONGE_MALADIE,
+] as const;
 
 const specialLeaveSelect = {
   id: true,
@@ -111,15 +153,19 @@ export class RhSpecialLeavesService {
       this.prisma.leaveRequest.findMany({
         where: {
           ...overlapDateWhere(range),
-          leaveType: { category: LeaveCategory.CONGE_SPECIAL },
+          leaveType: { category: { in: [...EVENT_LEAVE_CATEGORIES] } },
         },
         orderBy: [{ startDate: 'desc' }, { reference: 'desc' }],
         select: specialLeaveSelect,
       }),
       this.prisma.leaveBalance.findMany({
-        where: { year, leaveType: { category: LeaveCategory.CONGE_SPECIAL } },
+        where: {
+          year,
+          leaveType: { category: { in: [...EVENT_LEAVE_CATEGORIES] } },
+        },
         select: {
           userId: true,
+          leaveTypeId: true,
           acquired: true,
           carryover: true,
           taken: true,
@@ -144,11 +190,19 @@ export class RhSpecialLeavesService {
       }),
     ]);
     const balanceByUser = new Map(
-      balances.map((balance) => [balance.userId, balance]),
+      balances.map((balance) => [
+        this.balanceMapKey(balance.userId, balance.leaveTypeId),
+        balance,
+      ]),
     );
 
     const requestRows = requests.map((request) =>
-      this.toResponse(request, balanceByUser.get(request.ownerId)),
+      this.toResponse(
+        request,
+        balanceByUser.get(
+          this.balanceMapKey(request.ownerId, request.leaveType.id),
+        ),
+      ),
     );
     const eventRows = events.map((event) => this.toEventRow(event));
     const rows = [...eventRows, ...requestRows].sort(
@@ -167,42 +221,11 @@ export class RhSpecialLeavesService {
 
   async create(dto: CreateRhSpecialLeaveDto) {
     const created = await this.prisma.$transaction(async (transaction) => {
-      await this.ensureActiveEmployee(transaction, dto.employeeId);
-      const leaveType = await this.ensureSpecialLeaveType(
+      const employee = await this.ensureActiveEmployee(
         transaction,
-        dto.leaveTypeId,
+        dto.employeeId,
       );
-      const startDate = this.parseDate(dto.startDate, 'Date de début invalide');
-      const endDate = this.parseDate(dto.endDate, 'Date de fin invalide');
-      this.ensureDateRange(startDate, endDate);
-      const status = dto.status ?? LeaveRequestStatus.APPROVED;
-
-      const request = await transaction.leaveRequest.create({
-        data: {
-          reference: await this.generateReference(transaction, startDate),
-          ownerId: dto.employeeId,
-          leaveTypeId: leaveType.id,
-          startDate,
-          endDate,
-          days: this.roundDays(dto.days),
-          reason: this.buildReason(dto.eventLabel, dto.reason),
-          status,
-          submittedAt: new Date(),
-          decidedAt: this.isFinalStatus(status) ? new Date() : null,
-          ...this.toAttachmentCreateData(dto),
-        },
-        select: specialLeaveSelect,
-      });
-
-      await this.syncSpecialBalance(
-        transaction,
-        request.ownerId,
-        startDate.getUTCFullYear(),
-        leaveType.id,
-      );
-      await this.syncBirthEventDecisionAndBalances(transaction, request);
-
-      return this.toResponse(request);
+      return this.createComputedRequest(transaction, dto, employee);
     });
 
     // Notify employee by email
@@ -222,6 +245,137 @@ export class RhSpecialLeavesService {
     return created;
   }
 
+  async importRows(dto: ImportRhSpecialLeavesDto) {
+    if (!dto.rows.length) {
+      throw new BadRequestException('Aucune ligne de conge special a importer');
+    }
+
+    const normalizedRows = dto.rows.map((row, index) =>
+      this.normalizeImportRow(row, index),
+    );
+    this.ensureUniqueImportRows(normalizedRows);
+
+    return this.prisma.$transaction(async (transaction) => {
+      const results: Array<{
+        rowNumber: number;
+        matricule: string;
+        employeeId: string;
+        employeeName: string;
+        eventLabel: string;
+        leaveTypeCode: string;
+        startDate: string;
+        endDate: string;
+        days: number;
+        status: LeaveRequestStatus;
+        imported: boolean;
+        skippedReason?: string;
+      }> = [];
+
+      for (const row of normalizedRows) {
+        const employee = await transaction.user.findUnique({
+          where: { matricule: row.matricule },
+          select: {
+            id: true,
+            matricule: true,
+            nom: true,
+            prenom: true,
+            sexe: true,
+            status: true,
+          },
+        });
+
+        if (!employee || employee.status === UserStatus.INACTIVE) {
+          throw new NotFoundException(
+            `Employe actif introuvable pour le matricule ${row.matricule}`,
+          );
+        }
+
+        const leaveType = await this.resolveEventLeaveType(
+          transaction,
+          undefined,
+          row.eventLabel,
+          employee.sexe,
+        );
+        const schedule = await this.computeEventSchedule(transaction, {
+          eventLabel: row.eventLabel,
+          leaveType,
+          sexe: employee.sexe,
+          startDate: row.startDate,
+        });
+        const existing = await this.findExistingImportedRequest(transaction, {
+          employeeId: employee.id,
+          eventLabel: row.eventLabel,
+          startDate: schedule.startDate,
+        });
+
+        if (existing) {
+          results.push({
+            rowNumber: row.rowNumber,
+            matricule: employee.matricule,
+            employeeId: employee.id,
+            employeeName: this.fullName(employee),
+            eventLabel: row.eventLabel,
+            leaveTypeCode: existing.leaveType.code,
+            startDate: existing.startDate.toISOString().slice(0, 10),
+            endDate: existing.endDate.toISOString().slice(0, 10),
+            days: this.roundDays(existing.days),
+            status: existing.status,
+            imported: false,
+            skippedReason: 'Deja importe',
+          });
+          continue;
+        }
+
+        const created = await this.createComputedRequest(
+          transaction,
+          {
+            employeeId: employee.id,
+            eventLabel: row.eventLabel,
+            startDate: row.startDateInput,
+            status: row.status,
+            reason: this.buildImportReason(row),
+            proofUrl: row.proofUrl,
+            proofFilename: row.proofFilename,
+          },
+          employee,
+        );
+
+        results.push({
+          rowNumber: row.rowNumber,
+          matricule: created.matricule,
+          employeeId: created.employeeId,
+          employeeName: created.employeeName,
+          eventLabel: created.eventLabel,
+          leaveTypeCode: created.leaveTypeCode,
+          startDate: created.startDate,
+          endDate: created.endDate,
+          days: created.days,
+          status: created.statusCode,
+          imported: true,
+        });
+      }
+
+      await transaction.auditLog.create({
+        data: {
+          userId: dto.importedById?.trim() || null,
+          action: AuditAction.CREATE,
+          entity: 'LeaveRequest',
+          metadata: {
+            source: 'rh_special_leaves_import',
+            imported: results.filter((row) => row.imported).length,
+            skipped: results.filter((row) => !row.imported).length,
+          },
+        },
+      });
+
+      return {
+        imported: results.filter((row) => row.imported).length,
+        skipped: results.filter((row) => !row.imported).length,
+        rows: results,
+      };
+    });
+  }
+
   async update(id: string, dto: UpdateRhSpecialLeaveDto) {
     if (this.isEventRowId(id)) {
       return this.reviewEventFromSpecialLeaves(id, dto);
@@ -234,13 +388,29 @@ export class RhSpecialLeavesService {
         ownerId: true,
         startDate: true,
         leaveTypeId: true,
-        leaveType: { select: { category: true } },
+        reason: true,
+        leaveType: {
+          select: {
+            id: true,
+            code: true,
+            name: true,
+            category: true,
+            defaultDays: true,
+          },
+        },
+        owner: {
+          select: {
+            id: true,
+            matricule: true,
+            nom: true,
+            prenom: true,
+            sexe: true,
+            status: true,
+          },
+        },
       },
     });
-    if (
-      !existing ||
-      existing.leaveType.category !== LeaveCategory.CONGE_SPECIAL
-    ) {
+    if (!existing || !this.isEventLeaveCategory(existing.leaveType.category)) {
       throw new NotFoundException('Congé spécial introuvable');
     }
 
@@ -249,31 +419,37 @@ export class RhSpecialLeavesService {
 
     const updated = await this.prisma.$transaction(async (transaction) => {
       const data: Prisma.LeaveRequestUpdateInput = {};
-      let leaveTypeId = existing.leaveTypeId;
+      const employee =
+        dto.employeeId !== undefined
+          ? await this.ensureActiveEmployee(transaction, dto.employeeId)
+          : existing.owner;
+      const eventLabel =
+        dto.eventLabel ?? this.extractEventLabel(existing.reason);
+      const startDate =
+        dto.startDate ?? existing.startDate.toISOString().slice(0, 10);
+      const leaveType = await this.resolveEventLeaveType(
+        transaction,
+        dto.leaveTypeId ?? existing.leaveTypeId,
+        eventLabel,
+        employee.sexe,
+      );
+      const schedule = await this.computeEventSchedule(transaction, {
+        eventLabel,
+        leaveType,
+        sexe: employee.sexe,
+        startDate,
+      });
 
       if (dto.employeeId !== undefined) {
-        await this.ensureActiveEmployee(transaction, dto.employeeId);
-        data.owner = { connect: { id: dto.employeeId } };
+        data.owner = { connect: { id: employee.id } };
       }
-      if (dto.leaveTypeId !== undefined) {
-        const leaveType = await this.ensureSpecialLeaveType(
-          transaction,
-          dto.leaveTypeId,
-        );
-        data.leaveType = { connect: { id: leaveType.id } };
-        leaveTypeId = leaveType.id;
-      }
-      if (dto.startDate !== undefined)
-        data.startDate = this.parseDate(
-          dto.startDate,
-          'Date de début invalide',
-        );
-      if (dto.endDate !== undefined)
-        data.endDate = this.parseDate(dto.endDate, 'Date de fin invalide');
-      if (dto.days !== undefined) data.days = this.roundDays(dto.days);
+      data.leaveType = { connect: { id: leaveType.id } };
+      data.startDate = schedule.startDate;
+      data.endDate = schedule.endDate;
+      data.days = schedule.days;
       if (dto.eventLabel !== undefined || dto.reason !== undefined) {
         data.reason = this.buildReason(
-          dto.eventLabel ?? 'Congé spécial',
+          eventLabel || 'Conge special',
           dto.reason,
         );
       }
@@ -299,17 +475,17 @@ export class RhSpecialLeavesService {
       this.ensureDateRange(request.startDate, request.endDate);
 
       await Promise.all([
-        this.syncSpecialBalance(
+        this.syncBalanceForLeaveType(
           transaction,
           existing.ownerId,
           existing.startDate.getUTCFullYear(),
-          existing.leaveTypeId,
+          existing.leaveType,
         ),
-        this.syncSpecialBalance(
+        this.syncBalanceForLeaveType(
           transaction,
           request.ownerId,
           request.startDate.getUTCFullYear(),
-          leaveTypeId,
+          request.leaveType,
         ),
       ]);
 
@@ -359,6 +535,128 @@ export class RhSpecialLeavesService {
     }
 
     return this.update(id, { status: LeaveRequestStatus.CANCELLED });
+  }
+
+  private async createComputedRequest(
+    transaction: Prisma.TransactionClient,
+    dto: Pick<
+      CreateRhSpecialLeaveDto,
+      | 'employeeId'
+      | 'eventLabel'
+      | 'startDate'
+      | 'status'
+      | 'reason'
+      | 'proofUrl'
+      | 'proofFilename'
+      | 'leaveTypeId'
+    >,
+    employee: ActiveEmployee,
+  ) {
+    const leaveType = await this.resolveEventLeaveType(
+      transaction,
+      dto.leaveTypeId,
+      dto.eventLabel,
+      employee.sexe,
+    );
+    const schedule = await this.computeEventSchedule(transaction, {
+      eventLabel: dto.eventLabel,
+      leaveType,
+      sexe: employee.sexe,
+      startDate: dto.startDate,
+    });
+    const status = dto.status ?? LeaveRequestStatus.APPROVED;
+
+    const request = await transaction.leaveRequest.create({
+      data: {
+        reference: await this.generateReference(
+          transaction,
+          schedule.startDate,
+        ),
+        ownerId: dto.employeeId,
+        leaveTypeId: leaveType.id,
+        startDate: schedule.startDate,
+        endDate: schedule.endDate,
+        days: schedule.days,
+        reason: this.buildReason(dto.eventLabel, dto.reason),
+        status,
+        submittedAt: new Date(),
+        decidedAt: this.isFinalStatus(status) ? new Date() : null,
+        ...this.toAttachmentCreateData(dto),
+      },
+      select: specialLeaveSelect,
+    });
+
+    await this.syncBalanceForLeaveType(
+      transaction,
+      request.ownerId,
+      schedule.startDate.getUTCFullYear(),
+      request.leaveType,
+    );
+    await this.syncBirthEventDecisionAndBalances(transaction, request);
+
+    return this.toResponse(request);
+  }
+
+  private normalizeImportRow(row: ImportRhSpecialLeaveRowDto, index: number) {
+    const rowNumber = index + 2;
+    const matricule = row.matricule.trim();
+    const eventLabel = row.eventLabel.trim();
+    const startDateInput = row.startDate.trim();
+    const startDate = this.parseDate(
+      startDateInput,
+      `Date de debut invalide a la ligne ${rowNumber}`,
+    );
+
+    if (!matricule) {
+      throw new BadRequestException(
+        `Matricule manquant a la ligne ${rowNumber}`,
+      );
+    }
+    if (!eventLabel) {
+      throw new BadRequestException(
+        `Evenement manquant a la ligne ${rowNumber}`,
+      );
+    }
+
+    return {
+      rowNumber,
+      matricule,
+      eventLabel,
+      eventDate: row.eventDate?.trim() || undefined,
+      startDate,
+      startDateInput,
+      status: row.status ?? LeaveRequestStatus.APPROVED,
+      reason: row.reason?.trim() || undefined,
+      proofUrl: row.proofUrl?.trim() || undefined,
+      proofFilename: row.proofFilename?.trim() || undefined,
+    };
+  }
+
+  private ensureUniqueImportRows(
+    rows: ReturnType<RhSpecialLeavesService['normalizeImportRow']>[],
+  ) {
+    const seen = new Set<string>();
+    for (const row of rows) {
+      const key = [
+        row.matricule.toUpperCase(),
+        this.normalizeImportToken(row.eventLabel),
+        row.startDate.toISOString().slice(0, 10),
+      ].join(':');
+      if (seen.has(key)) {
+        throw new BadRequestException(
+          `Ligne en double dans le fichier: ${row.matricule} / ${row.eventLabel} / ${row.startDateInput}`,
+        );
+      }
+      seen.add(key);
+    }
+  }
+
+  private buildImportReason(
+    row: ReturnType<RhSpecialLeavesService['normalizeImportRow']>,
+  ) {
+    const parts = [row.reason];
+    if (row.eventDate) parts.push(`Date evenement: ${row.eventDate}`);
+    return parts.filter(Boolean).join(' | ') || undefined;
   }
 
   private async reviewEventFromSpecialLeaves(
@@ -474,12 +772,20 @@ export class RhSpecialLeavesService {
   ) {
     const employee = await client.user.findUnique({
       where: { id: employeeId },
-      select: { id: true, status: true },
+      select: {
+        id: true,
+        matricule: true,
+        nom: true,
+        prenom: true,
+        sexe: true,
+        status: true,
+      },
     });
     if (!employee) throw new NotFoundException('Employé introuvable');
     if (employee.status === UserStatus.INACTIVE) {
       throw new BadRequestException('Employé inactif');
     }
+    return employee;
   }
 
   private async ensureSpecialLeaveType(
@@ -520,6 +826,273 @@ export class RhSpecialLeavesService {
     }
 
     return leaveType;
+  }
+
+  private async resolveEventLeaveType(
+    client: PrismaClientLike,
+    leaveTypeId: string | undefined,
+    eventLabel: string,
+    sexe: Sexe,
+  ): Promise<EventLeaveType> {
+    if (leaveTypeId) {
+      const leaveType = await client.leaveType.findUnique({
+        where: { id: leaveTypeId },
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          category: true,
+          defaultDays: true,
+          active: true,
+        },
+      });
+      if (
+        !leaveType ||
+        !leaveType.active ||
+        !this.isEventLeaveCategory(leaveType.category)
+      ) {
+        throw new NotFoundException('Type de conge evenementiel introuvable');
+      }
+      return leaveType;
+    }
+
+    const preferredCode = this.preferredLeaveTypeCodeForEvent(eventLabel, sexe);
+    const preferred = await client.leaveType.findUnique({
+      where: { code: preferredCode },
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        category: true,
+        defaultDays: true,
+        active: true,
+      },
+    });
+
+    if (
+      preferred &&
+      preferred.active &&
+      this.isEventLeaveCategory(preferred.category)
+    ) {
+      return preferred;
+    }
+
+    return this.ensureSpecialLeaveType(client);
+  }
+
+  private preferredLeaveTypeCodeForEvent(eventLabel: string, sexe: Sexe) {
+    const kind = this.resolveEventKind(eventLabel);
+    if (kind === 'birth') return sexe === Sexe.F ? 'MAT' : 'PAT';
+    if (kind === 'illness') return 'MAL';
+    return 'SPE';
+  }
+
+  private async computeEventSchedule(
+    client: PrismaClientLike,
+    params: {
+      eventLabel: string;
+      leaveType: EventLeaveType;
+      sexe: Sexe;
+      startDate: string | Date;
+    },
+  ) {
+    const startDate =
+      params.startDate instanceof Date
+        ? params.startDate
+        : this.parseDate(params.startDate, 'Date de debut invalide');
+    const days = this.resolveEventDays(params);
+    const holidays = await this.findHolidaysForSchedule(
+      client,
+      startDate,
+      days,
+    );
+    const endDate = endDateForWorkingDays(startDate, days, holidays);
+
+    return {
+      startDate,
+      endDate,
+      days: this.roundDays(days),
+    };
+  }
+
+  private resolveEventDays(params: {
+    eventLabel: string;
+    leaveType: EventLeaveType;
+    sexe: Sexe;
+  }) {
+    const kind = this.resolveEventKind(params.eventLabel);
+    const code = params.leaveType.code.trim().toUpperCase();
+    const configuredDays = this.roundDays(params.leaveType.defaultDays);
+
+    if (kind === 'birth') {
+      const fallback = BIRTH_LEAVE_FALLBACK_DAYS[params.sexe];
+      if ((code === 'MAT' || code === 'PAT') && configuredDays > 0) {
+        return configuredDays;
+      }
+      return fallback;
+    }
+
+    if (kind === 'marriage') return SPECIAL_EVENT_FALLBACK_DAYS.marriage;
+    if (kind === 'death') return SPECIAL_EVENT_FALLBACK_DAYS.death;
+    if (kind === 'illness') {
+      return configuredDays > 0
+        ? configuredDays
+        : SPECIAL_EVENT_FALLBACK_DAYS.illness;
+    }
+
+    return SPECIAL_EVENT_FALLBACK_DAYS.other;
+  }
+
+  private async findHolidaysForSchedule(
+    client: PrismaClientLike,
+    startDate: Date,
+    days: number,
+  ) {
+    const maxCalendarDays = Math.max(Math.ceil(days * 2 + 14), 14);
+    const endSearch = new Date(startDate);
+    endSearch.setUTCDate(endSearch.getUTCDate() + maxCalendarDays);
+
+    return client.publicHoliday.findMany({
+      where: {
+        country: 'CM',
+        OR: [{ recurring: true }, { date: { gte: startDate, lte: endSearch } }],
+      },
+      select: { date: true, recurring: true },
+    });
+  }
+
+  private async findExistingImportedRequest(
+    client: PrismaClientLike,
+    params: {
+      employeeId: string;
+      eventLabel: string;
+      startDate: Date;
+    },
+  ) {
+    const eventLabel = params.eventLabel.trim();
+    return client.leaveRequest.findFirst({
+      where: {
+        ownerId: params.employeeId,
+        startDate: params.startDate,
+        status: { not: LeaveRequestStatus.CANCELLED },
+        leaveType: { category: { in: [...EVENT_LEAVE_CATEGORIES] } },
+        ...(eventLabel ? { reason: { startsWith: eventLabel } } : {}),
+      },
+      select: {
+        id: true,
+        startDate: true,
+        endDate: true,
+        days: true,
+        status: true,
+        leaveType: { select: { code: true } },
+      },
+    });
+  }
+
+  private async syncBalanceForLeaveType(
+    client: PrismaClientLike,
+    userId: string,
+    year: number,
+    leaveType: { id: string; code: string; category: LeaveCategory },
+  ) {
+    const code = leaveType.code.trim().toUpperCase();
+    if (leaveType.category === LeaveCategory.CONGE_SPECIAL) {
+      await this.syncSpecialBalance(client, userId, year, leaveType.id);
+      return;
+    }
+
+    if (
+      code === 'MAT' ||
+      code === 'PAT' ||
+      leaveType.category === LeaveCategory.CONGE_MATERNITE ||
+      leaveType.category === LeaveCategory.CONGE_PATERNITE
+    ) {
+      await this.syncBirthLeaveBalances(client, userId, year);
+      return;
+    }
+
+    await this.syncSingleLeaveTypeBalance(client, userId, year, leaveType.id);
+  }
+
+  private async syncSingleLeaveTypeBalance(
+    client: PrismaClientLike,
+    userId: string,
+    year: number,
+    leaveTypeId: string,
+  ) {
+    const yearStart = new Date(Date.UTC(year, 0, 1));
+    const nextYearStart = new Date(Date.UTC(year + 1, 0, 1));
+    const [user, leaveType, approved, scheduled] = await Promise.all([
+      client.user.findUnique({
+        where: { id: userId },
+        select: {
+          id: true,
+          sexe: true,
+          dateEmbauche: true,
+          passifInitial: true,
+          children: { select: { dateNaissance: true } },
+          events: { select: { type: true, eventDate: true, processed: true } },
+        },
+      }),
+      client.leaveType.findUnique({
+        where: { id: leaveTypeId },
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          category: true,
+          defaultDays: true,
+        },
+      }),
+      client.leaveRequest.aggregate({
+        where: {
+          ownerId: userId,
+          leaveTypeId,
+          startDate: { gte: yearStart, lt: nextYearStart },
+          status: LeaveRequestStatus.APPROVED,
+        },
+        _sum: { days: true },
+      }),
+      client.leaveRequest.aggregate({
+        where: {
+          ownerId: userId,
+          leaveTypeId,
+          startDate: { gte: yearStart, lt: nextYearStart },
+          status: {
+            in: [LeaveRequestStatus.PENDING, LeaveRequestStatus.IN_REVIEW],
+          },
+        },
+        _sum: { days: true },
+      }),
+    ]);
+
+    if (!user || !leaveType) return;
+
+    await client.leaveBalance.upsert({
+      where: { userId_leaveTypeId_year: { userId, leaveTypeId, year } },
+      create: {
+        userId,
+        leaveTypeId,
+        year,
+        acquired: this.leaveEntitlements.getAcquiredDays({
+          leaveType,
+          user,
+          year,
+        }),
+        carryover: 0,
+        taken: this.toNumber(approved._sum.days),
+        scheduled: this.toNumber(scheduled._sum.days),
+      },
+      update: {
+        acquired: this.leaveEntitlements.getAcquiredDays({
+          leaveType,
+          user,
+          year,
+        }),
+        taken: this.toNumber(approved._sum.days),
+        scheduled: this.toNumber(scheduled._sum.days),
+      },
+    });
   }
 
   private async syncSpecialBalance(
@@ -606,19 +1179,18 @@ export class RhSpecialLeavesService {
       return;
     }
 
+    const shouldBeProcessed = request.status === LeaveRequestStatus.APPROVED;
     const event = await client.event.findFirst({
       where: {
         userId: request.ownerId,
         type: EventType.BIRTH,
-        processed:
-          request.status === LeaveRequestStatus.APPROVED ? false : undefined,
+        eventDate: request.startDate,
       },
       orderBy: [{ createdAt: 'desc' }],
       select: { id: true, processed: true },
     });
 
     if (event) {
-      const shouldBeProcessed = request.status === LeaveRequestStatus.APPROVED;
       if (event.processed !== shouldBeProcessed) {
         await client.event.update({
           where: { id: event.id },
@@ -626,6 +1198,25 @@ export class RhSpecialLeavesService {
           select: { id: true },
         });
       }
+    } else {
+      await client.event.create({
+        data: {
+          userId: request.ownerId,
+          type: EventType.BIRTH,
+          eventDate: request.startDate,
+          description: `Import RH ${request.reference}`,
+          processed: shouldBeProcessed,
+        },
+        select: { id: true },
+      });
+    }
+
+    if (shouldBeProcessed) {
+      await this.ensureChildFromBirthEvent(
+        client,
+        request.ownerId,
+        request.startDate,
+      );
     }
 
     await this.syncBirthLeaveBalances(
@@ -729,13 +1320,39 @@ export class RhSpecialLeavesService {
   }
 
   private isBirthEventLabel(value: string) {
-    const normalized = value
+    return this.resolveEventKind(value) === 'birth';
+  }
+
+  private resolveEventKind(value: string): SpecialLeaveEventKind {
+    const normalized = this.normalizeImportToken(value);
+
+    if (
+      normalized.includes('naissance') ||
+      normalized.includes('accouchement') ||
+      normalized.includes('paternite') ||
+      normalized.includes('maternite')
+    ) {
+      return 'birth';
+    }
+    if (normalized.includes('mariage')) return 'marriage';
+    if (
+      normalized.includes('deces') ||
+      normalized.includes('deuil') ||
+      normalized.includes('funera')
+    ) {
+      return 'death';
+    }
+    if (normalized.includes('maladie')) return 'illness';
+
+    return 'other';
+  }
+
+  private normalizeImportToken(value: string) {
+    return value
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')
       .toLowerCase()
-      .trim();
-
-    return normalized.includes('naissance');
+      .replace(/[^a-z0-9]+/g, '');
   }
 
   private toResponse(
@@ -1064,6 +1681,16 @@ export class RhSpecialLeavesService {
         'La date de fin doit être après la date de début',
       );
     }
+  }
+
+  private isEventLeaveCategory(category: LeaveCategory) {
+    return (EVENT_LEAVE_CATEGORIES as readonly LeaveCategory[]).includes(
+      category,
+    );
+  }
+
+  private balanceMapKey(userId: string, leaveTypeId: string) {
+    return `${userId}:${leaveTypeId}`;
   }
 
   private fullName(user: { nom: string; prenom: string }) {

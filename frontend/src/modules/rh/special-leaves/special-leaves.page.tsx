@@ -1,5 +1,13 @@
-import { useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import {
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { readSheet } from "read-excel-file/browser";
 import { AppShell } from "@/components/AppShell";
 import {
   DateRangeFilter,
@@ -29,7 +37,19 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { CalendarDays, FileCheck2, Pencil, Plus, RefreshCw, Search, XCircle } from "lucide-react";
+import {
+  CalendarDays,
+  Download,
+  FileCheck2,
+  FileUp,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Search,
+  Trash2,
+  UploadCloud,
+  XCircle,
+} from "lucide-react";
 import { toast } from "sonner";
 
 type BadgeTone = "valid" | "pending" | "rejected" | "draft" | "neutral";
@@ -41,6 +61,8 @@ type SpecialLeaveStatusCode =
   | "REJECTED"
   | "CANCELLED";
 type EmployeeStatus = "active" | "leave" | "inactive";
+type ExcelCell = string | number | boolean | Date | null | undefined;
+type ExcelReadResult = ExcelCell[][] | { rows?: ExcelCell[][] };
 
 type RhEmployee = {
   id: string;
@@ -91,14 +113,42 @@ type SpecialLeavePayload = {
   employeeId: string;
   eventLabel: string;
   startDate: string;
-  endDate: string;
-  days: number;
   reason: string;
   status: SpecialLeaveStatusCode;
   proofUrl: string;
 };
 
+type SpecialLeaveImportRow = {
+  matricule: string;
+  eventLabel: string;
+  eventDate?: string;
+  startDate: string;
+  status?: SpecialLeaveStatusCode;
+  reason?: string;
+  proofUrl?: string;
+  proofFilename?: string;
+};
+
+type SpecialLeaveImportResultRow = SpecialLeaveImportRow & {
+  rowNumber: number;
+  employeeId: string;
+  employeeName: string;
+  leaveTypeCode: string;
+  endDate: string;
+  days: number;
+  status: SpecialLeaveStatusCode;
+  imported: boolean;
+  skippedReason?: string;
+};
+
+type SpecialLeaveImportResponse = {
+  imported: number;
+  skipped: number;
+  rows: SpecialLeaveImportResultRow[];
+};
+
 const emptyRows: SpecialLeaveRow[] = [];
+const emptyImportRows: SpecialLeaveImportRow[] = [];
 const emptyEmployees: RhEmployee[] = [];
 const emptyTotals: SpecialLeavesResponse["totals"] = {
   total: 0,
@@ -128,8 +178,6 @@ const emptyDraft: SpecialLeavePayload = {
   employeeId: "",
   eventLabel: "Mariage",
   startDate: "",
-  endDate: "",
-  days: 1,
   reason: "",
   status: "APPROVED",
   proofUrl: "",
@@ -158,8 +206,167 @@ function normalizePayload(payload: SpecialLeavePayload): SpecialLeavePayload {
     eventLabel: payload.eventLabel.trim(),
     reason: payload.reason.trim(),
     proofUrl: payload.proofUrl.trim(),
-    days: Number(payload.days),
   };
+}
+
+function formatNumber(value: number) {
+  return new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 }).format(value);
+}
+
+function normalizeHeader(value: ExcelCell) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function cellToText(value: ExcelCell) {
+  return String(value ?? "").trim();
+}
+
+function cellToDateInput(value: ExcelCell, rowNumber: number, label: string) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().slice(0, 10);
+  }
+
+  const text = cellToText(value);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+
+  const frenchDate = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (frenchDate) {
+    const [, day, month, year] = frenchDate;
+    const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+    if (!Number.isNaN(date.getTime())) return date.toISOString().slice(0, 10);
+  }
+
+  throw new Error(`${label} invalide a la ligne ${rowNumber}`);
+}
+
+function parseImportStatus(
+  value: ExcelCell,
+  rowNumber: number,
+): SpecialLeaveStatusCode | undefined {
+  const token = normalizeHeader(value);
+  if (!token) return undefined;
+  if (["approved", "valide", "validee", "valides"].includes(token)) return "APPROVED";
+  if (["pending", "aconfirmer", "attente", "avalider"].includes(token)) return "PENDING";
+  if (["review", "inreview", "enrevue"].includes(token)) return "IN_REVIEW";
+  if (["rejected", "refuse", "refusee"].includes(token)) return "REJECTED";
+  if (["cancelled", "canceled", "annule", "annulee"].includes(token)) return "CANCELLED";
+  throw new Error(`Statut invalide a la ligne ${rowNumber}`);
+}
+
+function getSheetRows(result: ExcelReadResult) {
+  return Array.isArray(result) ? result : (result.rows ?? []);
+}
+
+function parseCsvText(text: string): ExcelCell[][] {
+  const normalized = text.replace(/^\uFEFF/, "");
+  const delimiter = normalized.includes(";") ? ";" : ",";
+
+  return normalized
+    .split(/\r?\n/)
+    .filter((line) => line.trim())
+    .map((line) =>
+      line.split(delimiter).map((cell) => cell.trim().replace(/^"|"$/g, "").replace(/""/g, '"')),
+    );
+}
+
+function parseImportRows(result: ExcelReadResult): SpecialLeaveImportRow[] {
+  const sheetRows = getSheetRows(result).filter((row) =>
+    row.some((cell) => cell !== null && cell !== undefined && String(cell).trim() !== ""),
+  );
+  if (sheetRows.length < 2) {
+    throw new Error("Le fichier doit contenir une ligne d'en-tete et au moins une ligne.");
+  }
+
+  const [headerRow, ...bodyRows] = sheetRows;
+  const columns = headerRow.map((header) => {
+    const normalized = normalizeHeader(header);
+    if (["matricule", "mat", "codeemploye", "codecollaborateur"].includes(normalized)) {
+      return "matricule";
+    }
+    if (["evenement", "event", "typeevenement", "type"].includes(normalized)) {
+      return "eventLabel";
+    }
+    if (["dateevenement", "dateevent"].includes(normalized)) return "eventDate";
+    if (["datedebut", "debut", "startdate"].includes(normalized)) return "startDate";
+    if (["statut", "status"].includes(normalized)) return "status";
+    if (["motif", "raison", "commentaire", "reason"].includes(normalized)) return "reason";
+    if (["lienjustificatif", "justificatif", "proofurl"].includes(normalized)) return "proofUrl";
+    if (["nomfichierjustificatif", "nomjustificatif", "prooffilename"].includes(normalized)) {
+      return "proofFilename";
+    }
+    return "";
+  });
+
+  if (
+    !columns.includes("matricule") ||
+    !columns.includes("eventLabel") ||
+    !columns.includes("startDate")
+  ) {
+    throw new Error("Colonnes requises: Matricule, Evenement et Date debut");
+  }
+
+  const rows = bodyRows.map((row, rowIndex) => {
+    const rowNumber = rowIndex + 2;
+    const values: Partial<SpecialLeaveImportRow> = {};
+
+    columns.forEach((column, columnIndex) => {
+      if (!column) return;
+      if (column === "matricule") values.matricule = cellToText(row[columnIndex]);
+      if (column === "eventLabel") values.eventLabel = cellToText(row[columnIndex]);
+      if (column === "eventDate" && cellToText(row[columnIndex])) {
+        values.eventDate = cellToDateInput(row[columnIndex], rowNumber, "Date evenement");
+      }
+      if (column === "startDate") {
+        values.startDate = cellToDateInput(row[columnIndex], rowNumber, "Date debut");
+      }
+      if (column === "status") values.status = parseImportStatus(row[columnIndex], rowNumber);
+      if (column === "reason") values.reason = cellToText(row[columnIndex]) || undefined;
+      if (column === "proofUrl") values.proofUrl = cellToText(row[columnIndex]) || undefined;
+      if (column === "proofFilename") {
+        values.proofFilename = cellToText(row[columnIndex]) || undefined;
+      }
+    });
+
+    if (!values.matricule) throw new Error(`Matricule manquant a la ligne ${rowNumber}`);
+    if (!values.eventLabel) throw new Error(`Evenement manquant a la ligne ${rowNumber}`);
+    if (!values.startDate) throw new Error(`Date debut manquante a la ligne ${rowNumber}`);
+
+    return values as SpecialLeaveImportRow;
+  });
+
+  const seen = new Set<string>();
+  const duplicate = rows.find((row) => {
+    const key = `${row.matricule.trim().toUpperCase()}:${row.eventLabel.trim().toLowerCase()}:${row.startDate}`;
+    if (seen.has(key)) return true;
+    seen.add(key);
+    return false;
+  });
+  if (duplicate) {
+    throw new Error(
+      `Ligne en double dans le fichier: ${duplicate.matricule} / ${duplicate.eventLabel} / ${duplicate.startDate}`,
+    );
+  }
+
+  return rows;
+}
+
+function downloadImportTemplate() {
+  const csv = [
+    "Matricule;Evenement;Date evenement;Date debut;Statut;Motif;Lien justificatif",
+    "EMP001;Mariage;2026-07-10;2026-07-10;APPROVED;Mariage civil;https://...",
+    "EMP002;Naissance;2026-08-05;2026-08-05;PENDING;Naissance enfant;",
+  ].join("\n");
+  const blob = new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "modele-import-conges-speciaux.csv";
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 function SpecialLeaveForm({
@@ -251,29 +458,10 @@ function SpecialLeaveForm({
           />
         </label>
 
-        <label className="grid gap-1.5 text-sm">
-          <span className="text-xs font-medium text-muted-foreground">Fin *</span>
-          <input
-            type="date"
-            className={inputClass}
-            value={draft.endDate}
-            onChange={(event) => set("endDate", event.target.value)}
-            required
-          />
-        </label>
-
-        <label className="grid gap-1.5 text-sm">
-          <span className="text-xs font-medium text-muted-foreground">Jours *</span>
-          <input
-            type="number"
-            min="0.5"
-            step="0.5"
-            className={inputClass}
-            value={draft.days}
-            onChange={(event) => set("days", Number(event.target.value))}
-            required
-          />
-        </label>
+        <div className="rounded-md border border-dashed bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+          La date de fin et le nombre de jours seront calcules automatiquement selon l'evenement et
+          le sexe de l'employe.
+        </div>
 
         <label className="grid gap-1.5 text-sm">
           <span className="text-xs font-medium text-muted-foreground">Lien justificatif</span>
@@ -382,8 +570,6 @@ function EditSpecialLeaveDialog({
     employeeId: row.employeeId,
     eventLabel: row.eventLabel,
     startDate: row.startDate,
-    endDate: row.endDate,
-    days: row.days,
     reason: row.reason,
     status: row.statusCode,
     proofUrl: "",
@@ -394,8 +580,6 @@ function EditSpecialLeaveDialog({
       employeeId: row.employeeId,
       eventLabel: row.eventLabel,
       startDate: row.startDate,
-      endDate: row.endDate,
-      days: row.days,
       reason: row.reason,
       status: row.statusCode,
       proofUrl: "",
@@ -546,10 +730,13 @@ function SpecialLeaveCard({
 
 export function Speciaux() {
   const queryClient = useQueryClient();
+  const importInputRef = useRef<HTMLInputElement>(null);
   const [dateRange, setDateRange] = useState<DateRangeValue>(() => currentYearRange());
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"" | SpecialLeaveStatusCode>("");
   const [cancelTarget, setCancelTarget] = useState<SpecialLeaveRow | null>(null);
+  const [importRows, setImportRows] = useState<SpecialLeaveImportRow[]>(emptyImportRows);
+  const [lastImport, setLastImport] = useState<SpecialLeaveImportResponse | null>(null);
 
   const specialLeavesQuery = useQuery({
     queryKey: ["rh-special-leaves", ...dateRangeQueryKey(dateRange)],
@@ -626,6 +813,25 @@ export function Speciaux() {
     },
   });
 
+  const importSpecialLeaves = useMutation({
+    mutationFn: (rows: SpecialLeaveImportRow[]) =>
+      apiFetch<SpecialLeaveImportResponse>("/rh/special-leaves/import", {
+        method: "POST",
+        body: JSON.stringify({ rows }),
+      }),
+    onSuccess: (response) => {
+      setLastImport(response);
+      setImportRows(emptyImportRows);
+      toast.success(`${response.imported} conge(s) importe(s), ${response.skipped} ignore(s)`);
+      refresh();
+    },
+    onError: (error) => {
+      toast.error("Import impossible", {
+        description: error instanceof Error ? error.message : "Erreur inconnue",
+      });
+    },
+  });
+
   const filteredRows = useMemo(() => {
     const query = search.trim().toLowerCase();
     return rows.filter((row) => {
@@ -648,12 +854,46 @@ export function Speciaux() {
     () => filteredRows.filter((row) => row.leaveTypeCode !== "EVT"),
     [filteredRows],
   );
+  const importPreviewTotals = useMemo(
+    () => ({
+      rows: importRows.length,
+      approved: importRows.filter((row) => (row.status ?? "APPROVED") === "APPROVED").length,
+    }),
+    [importRows],
+  );
+  const lastImportRows = lastImport?.rows ?? [];
 
   const isMutating =
     createSpecialLeave.isPending ||
     updateSpecialLeave.isPending ||
     cancelSpecialLeave.isPending ||
-    decideEvent.isPending;
+    decideEvent.isPending ||
+    importSpecialLeaves.isPending;
+
+  const handleImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    try {
+      const sheet = file.name.toLowerCase().endsWith(".csv")
+        ? parseCsvText(await file.text())
+        : ((await readSheet(file)) as ExcelReadResult);
+      const rows = parseImportRows(sheet);
+      setImportRows(rows);
+      setLastImport(null);
+      toast.success(`${rows.length} ligne(s) prete(s) a importer`);
+    } catch (error) {
+      toast.error("Lecture impossible", {
+        description: error instanceof Error ? error.message : "Erreur inconnue",
+      });
+    }
+  };
+
+  const clearImport = () => {
+    setImportRows(emptyImportRows);
+    setLastImport(null);
+  };
 
   const cancelRow = (row: SpecialLeaveRow) => {
     setCancelTarget(row);
@@ -707,23 +947,11 @@ export function Speciaux() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Demandes spéciales" value={totals.total} tone="blue" />
-        <StatCard label="Validées" value={totals.approved} tone="green" />
-        <StatCard label="Jours utilisés" value={totals.days} suffix="jour(s)" tone="orange" />
-        <StatCard label="À traiter" value={totals.pending} tone="yellow" />
-      </div>
-
-      <Card className="mt-4 overflow-hidden">
-        <div className="flex flex-col gap-3 border-b px-5 py-4 xl:flex-row xl:items-center xl:justify-between">
-          <div>
-            <h3 className="font-semibold">Registre des congés spéciaux</h3>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Quota annuel séparé, justificatifs et validations RH.
-            </p>
-          </div>
-          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] xl:flex xl:items-center">
-            <div className="relative min-w-0 xl:w-72">
+      <Card className="mb-6 p-5">
+        <div className="grid gap-3 xl:grid-cols-[minmax(240px,1fr)_auto_auto_auto] xl:items-end">
+          <label className="grid gap-1.5 text-sm">
+            <span className="text-xs font-medium text-muted-foreground">Recherche</span>
+            <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <input
                 className="w-full rounded-md border bg-background py-2 pl-9 pr-3 text-sm"
@@ -732,6 +960,9 @@ export function Speciaux() {
                 onChange={(event) => setSearch(event.target.value)}
               />
             </div>
+          </label>
+          <label className="grid gap-1.5 text-sm">
+            <span className="text-xs font-medium text-muted-foreground">Statut</span>
             <select
               className="rounded-md border bg-background px-3 py-2 text-sm"
               value={statusFilter}
@@ -746,12 +977,139 @@ export function Speciaux() {
                 </option>
               ))}
             </select>
-            <DateRangeFilter value={dateRange} onChange={setDateRange} compact />
-            <Button variant="outline" onClick={refresh} disabled={specialLeavesQuery.isFetching}>
-              <RefreshCw className="size-4" /> Actualiser
+          </label>
+          <DateRangeFilter value={dateRange} onChange={setDateRange} compact />
+          <Button variant="outline" onClick={refresh} disabled={specialLeavesQuery.isFetching}>
+            <RefreshCw className="size-4" /> Actualiser
+          </Button>
+        </div>
+      </Card>
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <StatCard label="Demandes spéciales" value={totals.total} tone="blue" />
+        <StatCard label="Validées" value={totals.approved} tone="green" />
+        <StatCard label="Jours utilisés" value={totals.days} suffix="jour(s)" tone="orange" />
+        <StatCard label="À traiter" value={totals.pending} tone="yellow" />
+      </div>
+
+      <Card className="mt-4 p-5">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div>
+            <h3 className="font-semibold">Import Excel des congés spéciaux</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Le fichier ne contient pas de colonne jours : la durée est calculée automatiquement.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={downloadImportTemplate}>
+              <Download className="size-4" /> Modele
             </Button>
+            <Button variant="outline" onClick={() => importInputRef.current?.click()}>
+              <FileUp className="size-4" /> Charger Excel
+            </Button>
+            <Button
+              variant="primary"
+              disabled={!importRows.length || isMutating}
+              onClick={() => importSpecialLeaves.mutate(importRows)}
+            >
+              <UploadCloud className="size-4" />
+              {importSpecialLeaves.isPending ? "Import..." : "Importer"}
+            </Button>
+            <Button
+              variant="ghost"
+              disabled={!importRows.length && !lastImport}
+              onClick={clearImport}
+            >
+              <Trash2 className="size-4" /> Vider
+            </Button>
+            <input
+              ref={importInputRef}
+              type="file"
+              className="hidden"
+              accept=".xlsx,.xls,.csv"
+              onChange={handleImportFile}
+            />
           </div>
         </div>
+      </Card>
+
+      <Card className="mt-4 overflow-hidden">
+        <div className="flex flex-col gap-3 border-b px-5 py-4 xl:flex-row xl:items-center xl:justify-between">
+          <div>
+            <h3 className="font-semibold">Registre des congés spéciaux</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Quota annuel séparé, justificatifs et validations RH.
+            </p>
+          </div>
+          <NewSpecialLeaveDialog
+            employees={employees}
+            disabled={isMutating}
+            onCreate={(payload) => createSpecialLeave.mutateAsync(payload)}
+          />
+        </div>
+
+        {(importRows.length > 0 || lastImport) && (
+          <div className="border-b bg-muted/15 px-5 py-4">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h4 className="text-sm font-semibold">
+                  {importRows.length ? "Apercu de l'import Excel" : "Dernier import Excel"}
+                </h4>
+                <p className="text-xs text-muted-foreground">
+                  {importRows.length
+                    ? `${importPreviewTotals.rows} ligne(s), ${importPreviewTotals.approved} validee(s) par defaut. Les jours seront calcules au moment de l'import.`
+                    : `${lastImport?.imported ?? 0} importee(s), ${lastImport?.skipped ?? 0} ignoree(s).`}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-3 overflow-x-auto rounded-md border bg-background">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/40 text-left text-xs text-muted-foreground">
+                  <tr>
+                    <th className="px-4 py-2">Matricule</th>
+                    <th className="px-4 py-2">Evenement</th>
+                    <th className="px-4 py-2">Date debut</th>
+                    <th className="px-4 py-2">Statut</th>
+                    <th className="px-4 py-2">Jours calcules</th>
+                    <th className="px-4 py-2">Resultat</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {importRows.length
+                    ? importRows.slice(0, 8).map((row) => (
+                        <tr key={`${row.matricule}-${row.eventLabel}-${row.startDate}`}>
+                          <td className="px-4 py-2 font-medium">{row.matricule}</td>
+                          <td className="px-4 py-2">{row.eventLabel}</td>
+                          <td className="px-4 py-2">{formatDate(row.startDate)}</td>
+                          <td className="px-4 py-2">{row.status ?? "APPROVED"}</td>
+                          <td className="px-4 py-2 text-muted-foreground">Calcul serveur</td>
+                          <td className="px-4 py-2">
+                            <Badge tone="pending">Pret</Badge>
+                          </td>
+                        </tr>
+                      ))
+                    : lastImportRows.slice(0, 8).map((row) => (
+                        <tr key={`${row.rowNumber}-${row.matricule}-${row.startDate}`}>
+                          <td className="px-4 py-2 font-medium">{row.matricule}</td>
+                          <td className="px-4 py-2">{row.eventLabel}</td>
+                          <td className="px-4 py-2">{formatDate(row.startDate)}</td>
+                          <td className="px-4 py-2">{row.status}</td>
+                          <td className="px-4 py-2">
+                            {formatNumber(row.days)} j, fin {formatDate(row.endDate)}
+                          </td>
+                          <td className="px-4 py-2">
+                            <Badge tone={row.imported ? "valid" : "neutral"}>
+                              {row.imported ? "Importe" : (row.skippedReason ?? "Ignore")}
+                            </Badge>
+                          </td>
+                        </tr>
+                      ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         {specialLeavesQuery.isLoading ? (
           <div className="px-5 py-10 text-center text-sm text-muted-foreground">

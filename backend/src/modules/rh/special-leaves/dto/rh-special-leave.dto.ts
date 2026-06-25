@@ -1,12 +1,15 @@
 import {
+  IsArray,
   IsEnum,
   IsNumber,
   IsOptional,
   IsString,
   Max,
   Min,
+  ValidateNested,
 } from 'class-validator';
 import { LeaveRequestStatus } from '@prisma/client';
+import { Type } from 'class-transformer';
 
 export class CreateRhSpecialLeaveDto {
   @IsString()
@@ -22,13 +25,15 @@ export class CreateRhSpecialLeaveDto {
   @IsString()
   startDate!: string;
 
+  @IsOptional()
   @IsString()
-  endDate!: string;
+  endDate?: string;
 
+  @IsOptional()
   @IsNumber()
   @Min(0.5)
   @Max(365)
-  days!: number;
+  days?: number;
 
   @IsOptional()
   @IsString()
@@ -89,4 +94,46 @@ export class UpdateRhSpecialLeaveDto {
   @IsOptional()
   @IsString()
   proofFilename?: string;
+}
+
+export class ImportRhSpecialLeaveRowDto {
+  @IsString()
+  matricule!: string;
+
+  @IsString()
+  eventLabel!: string;
+
+  @IsOptional()
+  @IsString()
+  eventDate?: string;
+
+  @IsString()
+  startDate!: string;
+
+  @IsOptional()
+  @IsEnum(LeaveRequestStatus)
+  status?: LeaveRequestStatus;
+
+  @IsOptional()
+  @IsString()
+  reason?: string;
+
+  @IsOptional()
+  @IsString()
+  proofUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  proofFilename?: string;
+}
+
+export class ImportRhSpecialLeavesDto {
+  @IsOptional()
+  @IsString()
+  importedById?: string;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ImportRhSpecialLeaveRowDto)
+  rows!: ImportRhSpecialLeaveRowDto[];
 }

@@ -257,24 +257,8 @@ export function RhLeaveBalancesPage() {
 
   return (
     <AppShell title="Import soldes CP">
-      <div className="grid gap-4 md:grid-cols-3">
-        <StatCard label="Lignes en attente" value={previewTotals.rows} tone="blue" />
-        <StatCard
-          label="Solde CP fichier"
-          value={formatNumber(previewTotals.balance)}
-          suffix="jour(s)"
-          tone="green"
-        />
-        <StatCard
-          label="Dernier import"
-          value={lastResult ? lastResult.imported : 0}
-          suffix={lastResult ? `${formatNumber(lastResult.totals.newRemaining)} jour(s)` : "Aucun"}
-          tone="orange"
-        />
-      </div>
-
-      <Card className="mt-6 p-5">
-        <div className="grid gap-4 lg:grid-cols-[160px_minmax(240px,1fr)_auto] lg:items-end">
+      <Card className="mb-6 p-5">
+        <div className="grid gap-4 lg:grid-cols-[160px_minmax(240px,1fr)] lg:items-end">
           <label className="grid gap-1.5 text-sm">
             <span className="text-xs font-medium text-muted-foreground">Annee</span>
             <input
@@ -298,29 +282,48 @@ export function RhLeaveBalancesPage() {
               />
             </div>
           </label>
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={downloadTemplate}>
-              <Download className="size-4" /> Modele
-            </Button>
-            <Button variant="outline" onClick={() => fileInputRef.current?.click()}>
-              <FileUp className="size-4" /> Charger
-            </Button>
-            <Button
-              variant="primary"
-              disabled={!canImport}
-              onClick={() => importMutation.mutate(previewRows)}
-            >
-              <UploadCloud className="size-4" />
-              {importMutation.isPending ? "Import..." : "Importer"}
-            </Button>
-            <Button
-              variant="ghost"
-              disabled={!previewRows.length && !lastResult}
-              onClick={clearPreview}
-            >
-              <Trash2 className="size-4" /> Vider
-            </Button>
-          </div>
+        </div>
+      </Card>
+
+      <div className="grid gap-4 md:grid-cols-3">
+        <StatCard label="Lignes en attente" value={previewTotals.rows} tone="blue" />
+        <StatCard
+          label="Solde CP fichier"
+          value={formatNumber(previewTotals.balance)}
+          suffix="jour(s)"
+          tone="green"
+        />
+        <StatCard
+          label="Dernier import"
+          value={lastResult ? lastResult.imported : 0}
+          suffix={lastResult ? `${formatNumber(lastResult.totals.newRemaining)} jour(s)` : "Aucun"}
+          tone="orange"
+        />
+      </div>
+
+      <Card className="mt-6 p-5">
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={downloadTemplate}>
+            <Download className="size-4" /> Modele
+          </Button>
+          <Button variant="outline" onClick={() => fileInputRef.current?.click()}>
+            <FileUp className="size-4" /> Charger
+          </Button>
+          <Button
+            variant="primary"
+            disabled={!canImport}
+            onClick={() => importMutation.mutate(previewRows)}
+          >
+            <UploadCloud className="size-4" />
+            {importMutation.isPending ? "Import..." : "Importer"}
+          </Button>
+          <Button
+            variant="ghost"
+            disabled={!previewRows.length && !lastResult}
+            onClick={clearPreview}
+          >
+            <Trash2 className="size-4" /> Vider
+          </Button>
         </div>
         <input
           ref={fileInputRef}

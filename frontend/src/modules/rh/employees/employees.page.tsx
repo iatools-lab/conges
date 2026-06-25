@@ -899,6 +899,50 @@ export function RhEmployes() {
 
   return (
     <AppShell title="Employés" subtitle="Gestion des employés">
+      <Card className="mb-6 p-5">
+        <div className="grid gap-3 xl:grid-cols-[minmax(240px,1fr)_auto_auto] xl:items-end">
+          <label className="grid gap-1.5 text-sm">
+            <span className="text-xs font-medium text-muted-foreground">Recherche</span>
+            <div className="relative">
+              <Search className="size-4 pointer-events-none absolute left-2.5 top-2.5 text-muted-foreground" />
+              <input
+                value={search}
+                onChange={(event) => {
+                  setSearch(event.target.value);
+                  setPage(1);
+                }}
+                placeholder="Matricule, nom, prénom, rôle, e-mail..."
+                className="w-full rounded-md border bg-card py-2 pl-8 pr-3 text-sm"
+              />
+            </div>
+          </label>
+          <label className="grid gap-1.5 text-sm">
+            <span className="text-xs font-medium text-muted-foreground">Pôle</span>
+            <select
+              value={deptFilter}
+              onChange={(event) => {
+                setDeptFilter(event.target.value);
+                setPage(1);
+              }}
+              className="rounded-md border bg-card px-3 py-2 text-sm"
+            >
+              <option value="">Tous pôles</option>
+              {departmentOptions.map((department) => (
+                <option key={department}>{department}</option>
+              ))}
+            </select>
+          </label>
+          <DateRangeFilter
+            value={dateRange}
+            onChange={(nextRange) => {
+              setDateRange(nextRange);
+              setPage(1);
+            }}
+            compact
+          />
+        </div>
+      </Card>
+
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
         <StatCard label="Total employés" value={String(employees.length)} tone="blue" />
         <StatCard
@@ -918,44 +962,17 @@ export function RhEmployes() {
         />
       </div>
 
+      <Card className="mt-6 p-5">
+        <div className="flex flex-wrap gap-2">
+          <ImportEmployeesButton onImport={importEmployees} />
+        </div>
+      </Card>
+
       <Card className="mt-6">
         <CardHeader
           title="Liste des employés"
           action={
             <div className="flex flex-wrap items-center gap-2">
-              <div className="relative">
-                <Search className="size-4 absolute left-2.5 top-2.5 text-muted-foreground" />
-                <input
-                  value={search}
-                  onChange={(event) => {
-                    setSearch(event.target.value);
-                    setPage(1);
-                  }}
-                  placeholder="Matricule, nom, prénom, rôle, e-mail..."
-                  className="pl-8 pr-3 py-2 text-sm border rounded-md bg-card w-full sm:w-64"
-                />
-              </div>
-              <select
-                value={deptFilter}
-                onChange={(event) => {
-                  setDeptFilter(event.target.value);
-                  setPage(1);
-                }}
-                className="border rounded-md px-3 py-2 text-sm bg-card"
-              >
-                <option value="">Tous pôles</option>
-                {departmentOptions.map((department) => (
-                  <option key={department}>{department}</option>
-                ))}
-              </select>
-              <DateRangeFilter
-                value={dateRange}
-                onChange={(nextRange) => {
-                  setDateRange(nextRange);
-                  setPage(1);
-                }}
-                compact
-              />
               <Button variant="outline" onClick={exportFilteredEmployees}>
                 <Download className="size-4" /> Export
               </Button>
@@ -967,7 +984,6 @@ export function RhEmployes() {
               >
                 <Trash2 className="size-4" /> Supprimer ({selectedIds.length})
               </Button>
-              <ImportEmployeesButton onImport={importEmployees} />
               <NewEmployeeDialog onCreate={(employee) => createEmployee.mutateAsync(employee)} />
             </div>
           }

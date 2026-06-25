@@ -1,3 +1,5 @@
+import { AUTH_SESSION_KEY, clearAuthSession, isAuthSessionExpired } from "@/modules/auth/session";
+
 const API_BASE_URL =
   (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "") ??
   "http://localhost:3000/api/v1";
@@ -7,19 +9,33 @@ type ApiErrorBody = {
   error?: string;
 };
 
-function getSessionToken() {
+const SESSION_EXPIRED_MESSAGE = "Votre session a expiré. Veuillez vous reconnecter.";
+
+function isAuthEndpoint(path: string) {
+  return path.startsWith("/auth/");
+}
+
+function getSessionToken(path: string) {
   if (typeof window === "undefined") return "";
 
+  const raw = window.localStorage.getItem(AUTH_SESSION_KEY);
+  if (!raw) return "";
+
+  let parsed: { token?: string; expiresAt?: string };
   try {
-    const raw = window.localStorage.getItem("upowa.auth.session");
-    if (!raw) return "";
-    const parsed = JSON.parse(raw) as { token?: string; expiresAt?: string };
-    if (!parsed.token) return "";
-    if (parsed.expiresAt && Date.parse(parsed.expiresAt) <= Date.now()) return "";
-    return parsed.token;
+    parsed = JSON.parse(raw) as { token?: string; expiresAt?: string };
   } catch {
     return "";
   }
+
+  if (!parsed.token) return "";
+  if (isAuthSessionExpired(parsed)) {
+    clearAuthSession();
+    if (!isAuthEndpoint(path)) throw new Error(SESSION_EXPIRED_MESSAGE);
+    return "";
+  }
+
+  return parsed.token;
 }
 
 function getApiErrorMessage(body: ApiErrorBody, fallback: string) {
@@ -33,7 +49,7 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
   };
 
   if (!headers.Authorization) {
-    const token = getSessionToken();
+    const token = getSessionToken(path);
     if (token) headers.Authorization = `Bearer ${token}`;
   }
 
@@ -58,6 +74,11 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
   }
 
   if (!response.ok) {
+    if (response.status === 401 && !isAuthEndpoint(path)) {
+      clearAuthSession();
+      throw new Error(SESSION_EXPIRED_MESSAGE);
+    }
+
     let body: ApiErrorBody = {};
     try {
       body = (await response.json()) as ApiErrorBody;

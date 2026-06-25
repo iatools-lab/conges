@@ -11,6 +11,7 @@ import {
 import { RhSpecialLeavesService } from './special-leaves.service';
 import {
   CreateRhSpecialLeaveDto,
+  ImportRhSpecialLeavesDto,
   UpdateRhSpecialLeaveDto,
 } from './dto/rh-special-leave.dto';
 
@@ -30,6 +31,11 @@ export class RhSpecialLeavesController {
   @Post()
   create(@Body() dto: CreateRhSpecialLeaveDto) {
     return this.specialLeavesService.create(dto);
+  }
+
+  @Post('import')
+  importRows(@Body() dto: ImportRhSpecialLeavesDto) {
+    return this.specialLeavesService.importRows(dto);
   }
 
   @Patch(':id')

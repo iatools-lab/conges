@@ -16,7 +16,14 @@ export type AuthSession = {
   expiresAt?: string;
 };
 
-const AUTH_SESSION_KEY = "upowa.auth.session";
+export const AUTH_SESSION_KEY = "upowa.auth.session";
+
+export function isAuthSessionExpired(session: Pick<AuthSession, "expiresAt"> | null | undefined) {
+  if (!session?.expiresAt) return false;
+
+  const expiresAt = Date.parse(session.expiresAt);
+  return Number.isFinite(expiresAt) && expiresAt <= Date.now();
+}
 
 export function getAuthSession(): AuthSession | null {
   if (typeof window === "undefined") return null;
@@ -25,7 +32,13 @@ export function getAuthSession(): AuthSession | null {
   if (!raw) return null;
 
   try {
-    return JSON.parse(raw) as AuthSession;
+    const session = JSON.parse(raw) as AuthSession;
+    if (isAuthSessionExpired(session)) {
+      window.localStorage.removeItem(AUTH_SESSION_KEY);
+      return null;
+    }
+
+    return session;
   } catch {
     window.localStorage.removeItem(AUTH_SESSION_KEY);
     return null;
@@ -59,6 +72,24 @@ export function useAuthSession() {
       window.removeEventListener("upowa-auth-session", sync);
     };
   }, []);
+
+  useEffect(() => {
+    if (!session?.expiresAt) return;
+
+    const expiresIn = Date.parse(session.expiresAt) - Date.now();
+    if (!Number.isFinite(expiresIn)) return;
+
+    if (expiresIn <= 0) {
+      clearAuthSession();
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      clearAuthSession();
+    }, expiresIn);
+
+    return () => window.clearTimeout(timeout);
+  }, [session?.expiresAt]);
 
   return { ready, session };
 }

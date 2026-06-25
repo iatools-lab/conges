@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { AUTH_SESSION_KEY } from "@/modules/auth/session";
 import { apiFetch } from "./api";
 
 function jsonResponse(body: unknown) {
@@ -16,7 +17,7 @@ describe("apiFetch", () => {
 
   it("sends the signed session token as a Bearer authorization header", async () => {
     window.localStorage.setItem(
-      "upowa.auth.session",
+      AUTH_SESSION_KEY,
       JSON.stringify({
         token: "signed-token",
         expiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -34,9 +35,9 @@ describe("apiFetch", () => {
     );
   });
 
-  it("does not send expired session tokens", async () => {
+  it("clears expired sessions before calling protected endpoints", async () => {
     window.localStorage.setItem(
-      "upowa.auth.session",
+      AUTH_SESSION_KEY,
       JSON.stringify({
         token: "expired-token",
         expiresAt: new Date(Date.now() - 60_000).toISOString(),
@@ -44,13 +45,30 @@ describe("apiFetch", () => {
       }),
     );
 
-    await apiFetch("/rh/dashboard");
+    await expect(apiFetch("/rh/dashboard")).rejects.toThrow("session");
 
-    expect(fetch).toHaveBeenCalledWith(
-      expect.stringContaining("/rh/dashboard"),
-      expect.objectContaining({
-        headers: expect.not.objectContaining({ Authorization: expect.any(String) }),
+    expect(fetch).not.toHaveBeenCalled();
+    expect(window.localStorage.getItem(AUTH_SESSION_KEY)).toBeNull();
+  });
+
+  it("clears the current session when a protected endpoint returns 401", async () => {
+    window.localStorage.setItem(
+      AUTH_SESSION_KEY,
+      JSON.stringify({
+        token: "signed-token",
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        roles: ["rh"],
       }),
     );
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ message: "Unauthorized" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await expect(apiFetch("/rh/dashboard")).rejects.toThrow("session");
+
+    expect(window.localStorage.getItem(AUTH_SESSION_KEY)).toBeNull();
   });
 });
