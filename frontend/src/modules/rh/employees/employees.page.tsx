@@ -899,10 +899,10 @@ export function RhEmployes() {
 
   return (
     <AppShell title="Employés" subtitle="Gestion des employés">
-      <Card className="mb-6 p-5">
-        <div className="grid gap-3 xl:grid-cols-[minmax(240px,1fr)_auto_auto] xl:items-end">
-          <label className="grid gap-1.5 text-sm">
-            <span className="text-xs font-medium text-muted-foreground">Recherche</span>
+      <Card className="mb-4">
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="grid gap-1 text-xs text-muted-foreground">
+            Recherche
             <div className="relative">
               <Search className="size-4 pointer-events-none absolute left-2.5 top-2.5 text-muted-foreground" />
               <input
@@ -912,19 +912,19 @@ export function RhEmployes() {
                   setPage(1);
                 }}
                 placeholder="Matricule, nom, prénom, rôle, e-mail..."
-                className="w-full rounded-md border bg-card py-2 pl-8 pr-3 text-sm"
+                className="h-9 w-full rounded-md border bg-card pl-8 pr-3 text-sm"
               />
             </div>
           </label>
-          <label className="grid gap-1.5 text-sm">
-            <span className="text-xs font-medium text-muted-foreground">Pôle</span>
+          <label className="grid gap-1 text-xs text-muted-foreground">
+            Pôle
             <select
               value={deptFilter}
               onChange={(event) => {
                 setDeptFilter(event.target.value);
                 setPage(1);
               }}
-              className="rounded-md border bg-card px-3 py-2 text-sm"
+              className="h-9 rounded-md border bg-card px-3 text-sm"
             >
               <option value="">Tous pôles</option>
               {departmentOptions.map((department) => (
@@ -938,7 +938,6 @@ export function RhEmployes() {
               setDateRange(nextRange);
               setPage(1);
             }}
-            compact
           />
         </div>
       </Card>

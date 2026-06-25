@@ -450,16 +450,13 @@ export function VueGlobale() {
       title="Vue globale des congés (RH)"
       subtitle="Pilotage des soldes et des planifications par département"
     >
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="inline-flex items-center gap-2 text-sm text-muted-foreground bg-muted/50 px-3 py-1.5 rounded-md">
-            <Building2 className="size-4" /> Périmètre RH global
-          </div>
-          <DateRangeFilter value={dateRange} onChange={applyDateRange} />
+      <div className="flex flex-wrap items-end gap-2 mb-4">
+        <label className="grid gap-1 text-xs text-muted-foreground">
+          Département
           <select
-            className="rounded-md border px-3 py-2 text-sm bg-background"
             value={department}
             onChange={(event) => setDepartment(event.target.value)}
+            className="h-9 rounded-md border bg-card px-3 text-sm"
           >
             <option value="ALL">Tous départements</option>
             {(data?.departments ?? []).map((option) => (
@@ -468,16 +465,17 @@ export function VueGlobale() {
               </option>
             ))}
           </select>
-          <div className="relative w-full sm:w-72">
-            <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Rechercher employé, manager…"
-              className="w-full rounded-md border bg-background py-2 pl-8 pr-3 text-sm"
-            />
-          </div>
+        </label>
+        <div className="relative">
+          <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Rechercher employé, manager…"
+            className="h-9 w-full rounded-md border bg-card pl-8 pr-3 text-sm"
+          />
         </div>
+        <DateRangeFilter value={dateRange} onChange={applyDateRange} />
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">

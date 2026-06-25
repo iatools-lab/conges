@@ -1124,150 +1124,94 @@ export function Speciaux() {
             Aucun congé spécial trouvé.
           </div>
         ) : (
-          <>
-            <div className="grid gap-3 p-4 xl:hidden">
-              {filteredRows.map((row) => (
-                <SpecialLeaveCard
-                  key={row.id}
-                  row={row}
-                  employees={employees}
-                  disabled={isMutating}
-                  onCancel={cancelRow}
-                  onApproveEvent={approveEvent}
-                  onRejectEvent={rejectEvent}
-                  onSave={(id, payload) => updateSpecialLeave.mutateAsync({ id, payload })}
-                />
-              ))}
-            </div>
-
-            <div className="hidden overflow-x-auto xl:block">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/40 text-left text-xs text-muted-foreground">
-                  <tr>
-                    <th className="px-5 py-3">Employé</th>
-                    <th className="px-5 py-3">Type événement</th>
-                    <th className="px-5 py-3">Date événement</th>
-                    <th className="px-5 py-3">Justificatif</th>
-                    <th className="px-5 py-3">Commentaire employé</th>
-                    <th className="px-5 py-3">Statut</th>
-                    <th className="px-5 py-3">Commentaire RH</th>
-                    <th className="px-5 py-3 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {eventRows.map((row) => (
-                    <tr key={row.id}>
-                      <td className="px-5 py-3">
+          <div className="hidden overflow-x-auto xl:block">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/40 text-left text-xs text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-3">Employé</th>
+                  <th className="px-4 py-3">Événement</th>
+                  <th className="px-4 py-3">Date</th>
+                  <th className="px-4 py-3">Statut</th>
+                  <th className="px-4 py-3 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {filteredRows.map((row) => {
+                  const isEventRow = row.leaveTypeCode === "EVT";
+                  return (
+                    <tr key={row.id} className="hover:bg-muted/30">
+                      <td className="px-4 py-3">
                         <div className="font-medium">{row.employeeName}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {row.matricule} · {row.department}
-                        </div>
+                        <div className="text-xs text-muted-foreground">{row.department}</div>
                       </td>
-                      <td className="px-5 py-3">
+                      <td className="px-4 py-3">
                         <div className="font-medium">{row.eventLabel}</div>
-                        <div className="text-xs text-muted-foreground">{row.reference}</div>
                       </td>
-                      <td className="px-5 py-3">
+                      <td className="px-4 py-3">
                         <div className="inline-flex items-center gap-2">
                           <CalendarDays className="size-4 text-muted-foreground" />
                           {formatDate(row.startDate)}
                         </div>
                       </td>
-                      <td className="px-5 py-3">
-                        <span className="inline-flex items-center gap-2">
-                          <FileCheck2 className="size-4 text-muted-foreground" /> {row.proofLabel}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3">{row.reason || "-"}</td>
-                      <td className="px-5 py-3">
+                      <td className="px-4 py-3">
                         <Badge tone={row.status}>{row.statusLabel}</Badge>
                       </td>
-                      <td className="px-5 py-3">{row.rhComment || "-"}</td>
-                      <td className="px-5 py-3 text-right">
-                        <div className="flex justify-end gap-2">
-                          <Button
-                            variant="outline"
-                            className="px-3 py-1.5"
-                            disabled={isMutating || row.statusCode === "APPROVED"}
-                            onClick={() => approveEvent(row)}
-                          >
-                            Valider
-                          </Button>
-                          <Button
-                            variant="outline"
-                            className="px-3 py-1.5 text-destructive"
-                            disabled={isMutating || row.statusCode === "REJECTED"}
-                            onClick={() => rejectEvent(row)}
-                          >
-                            Refuser
-                          </Button>
+                      <td className="px-4 py-3 text-right">
+                        <div className="flex justify-end">
+                          {isEventRow ? (
+                            <div className="flex gap-2">
+                              <Button
+                                variant="outline"
+                                className="px-2 py-1 text-xs"
+                                disabled={isMutating || row.statusCode === "APPROVED"}
+                                onClick={() => approveEvent(row)}
+                              >
+                                Valider
+                              </Button>
+                              <Button
+                                variant="outline"
+                                className="px-2 py-1 text-xs text-destructive"
+                                disabled={isMutating || row.statusCode === "REJECTED"}
+                                onClick={() => rejectEvent(row)}
+                              >
+                                Refuser
+                              </Button>
+                            </div>
+                          ) : (
+                            <div className="flex gap-2">
+                              <EditSpecialLeaveDialog
+                                row={row}
+                                employees={employees}
+                                disabled={isMutating}
+                                onSave={(id, payload) =>
+                                  updateSpecialLeave.mutateAsync({ id, payload })
+                                }
+                              />
+                              <Button
+                                variant="outline"
+                                className="px-2 py-1 text-xs text-muted-foreground"
+                                disabled={isMutating || row.statusCode === "CANCELLED"}
+                                onClick={() => cancelRow(row)}
+                              >
+                                <XCircle className="size-4" />
+                              </Button>
+                            </div>
+                          )}
                         </div>
                       </td>
                     </tr>
-                  ))}
-                  {eventRows.length === 0 && (
-                    <tr>
-                      <td colSpan={8} className="px-5 py-8 text-center text-muted-foreground">
-                        Aucun événement déclaré.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            {specialRows.length > 0 && (
-              <div className="hidden overflow-x-auto border-t xl:block">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/20 text-left text-xs text-muted-foreground">
-                    <tr>
-                      <th className="px-5 py-3">Employé</th>
-                      <th className="px-5 py-3">Événement</th>
-                      <th className="px-5 py-3">Période</th>
-                      <th className="px-5 py-3">Jours</th>
-                      <th className="px-5 py-3">Statut</th>
-                      <th className="px-5 py-3 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {specialRows.map((row) => (
-                      <tr key={row.id}>
-                        <td className="px-5 py-3">{row.employeeName}</td>
-                        <td className="px-5 py-3">{row.eventLabel}</td>
-                        <td className="px-5 py-3">
-                          {formatDate(row.startDate)} - {formatDate(row.endDate)}
-                        </td>
-                        <td className="px-5 py-3">{row.days}</td>
-                        <td className="px-5 py-3">
-                          <Badge tone={row.status}>{row.statusLabel}</Badge>
-                        </td>
-                        <td className="px-5 py-3 text-right">
-                          <div className="flex justify-end gap-2">
-                            <EditSpecialLeaveDialog
-                              row={row}
-                              employees={employees}
-                              disabled={isMutating}
-                              onSave={(id, payload) =>
-                                updateSpecialLeave.mutateAsync({ id, payload })
-                              }
-                            />
-                            <Button
-                              variant="outline"
-                              className="px-3 py-1.5 text-muted-foreground"
-                              disabled={isMutating || row.statusCode === "CANCELLED"}
-                              onClick={() => cancelRow(row)}
-                            >
-                              <XCircle className="size-4" /> Annuler
-                            </Button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </>
+                  );
+                })}
+                {filteredRows.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
+                      Aucun congé spécial trouvé.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         )}
       </Card>
     </AppShell>
