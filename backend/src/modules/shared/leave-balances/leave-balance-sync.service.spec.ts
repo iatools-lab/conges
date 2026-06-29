@@ -9,6 +9,7 @@ function createHarness() {
       aggregate: jest.fn(),
     },
     leaveBalance: {
+      findUnique: jest.fn().mockResolvedValue(null),
       upsert: jest.fn(),
     },
   } as any;
@@ -58,6 +59,24 @@ describe('LeaveBalanceSyncService', () => {
       expect.objectContaining({
         create: expect.objectContaining({ taken: 4, scheduled: 7 }),
         update: { taken: 4, scheduled: 7 },
+      }),
+    );
+  });
+
+  it('keeps the RH taken-days adjustment during synchronization', async () => {
+    const { prisma, service } = createHarness();
+    prisma.leaveBalance.findUnique.mockResolvedValue({ takenAdjustment: -2 });
+    prisma.leaveRequest.aggregate
+      .mockResolvedValueOnce({ _sum: { days: 10 } })
+      .mockResolvedValueOnce({ _sum: { days: 0 } });
+
+    await service.syncForKeys([
+      { userId: 'employee-1', leaveTypeId: 'type-1', year: 2026 },
+    ]);
+
+    expect(prisma.leaveBalance.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: { taken: 8, scheduled: 0 },
       }),
     );
   });

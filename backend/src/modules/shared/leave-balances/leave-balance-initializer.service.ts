@@ -131,6 +131,36 @@ export class LeaveBalanceInitializerService {
     return this.initializeYear({ year, userIds: [userId], client });
   }
 
+  async refreshUserEntitlements(
+    userId: string,
+    client: PrismaClientLike = this.prisma,
+  ) {
+    const [balances, requests] = await Promise.all([
+      client.leaveBalance.findMany({
+        where: { userId },
+        distinct: ['year'],
+        select: { year: true },
+      }),
+      client.leaveRequest.findMany({
+        where: { ownerId: userId },
+        select: { startDate: true },
+      }),
+    ]);
+    const years = Array.from(
+      new Set([
+        new Date().getUTCFullYear(),
+        ...balances.map((balance) => balance.year),
+        ...requests.map((request) => request.startDate.getUTCFullYear()),
+      ]),
+    ).sort((left, right) => left - right);
+
+    for (const year of years) {
+      await this.initializeUserYear(userId, year, client);
+    }
+
+    return { userId, years };
+  }
+
   private balanceKey(userId: string, leaveTypeId: string) {
     return `${userId}:${leaveTypeId}`;
   }

@@ -178,12 +178,16 @@ export class RhChildrenService {
 
   private toResponse(child: ChildRecord) {
     const ageYears = this.getCompletedYears(child.dateNaissance, new Date());
-    const eligibleUntil = this.getEligibilityEndDate(child.dateNaissance);
-    const isUnderMaxAge = eligibleUntil > new Date();
     const parentEligibleForChildBonus = child.parent.sexe === Sexe.F;
+    const eligibilityEndDate = this.getEligibilityEndDate(child.dateNaissance);
+    const isUnderMaxAge = eligibilityEndDate > new Date();
     const bonusDays =
       parentEligibleForChildBonus && isUnderMaxAge ? CHILD_BONUS_DAYS : 0;
-    const status = isUnderMaxAge ? 'valid' : 'expired';
+    const status = !parentEligibleForChildBonus
+      ? 'not_eligible'
+      : isUnderMaxAge
+        ? 'valid'
+        : 'expired';
 
     return {
       id: child.id,
@@ -200,7 +204,9 @@ export class RhChildrenService {
       ageLabel: `${ageYears} ${ageYears > 1 ? 'ans' : 'an'}`,
       bonusDays,
       bonusLabel: bonusDays ? `+${bonusDays}` : '0',
-      eligibleUntil: eligibleUntil.toISOString().slice(0, 10),
+      eligibleUntil: parentEligibleForChildBonus
+        ? eligibilityEndDate.toISOString().slice(0, 10)
+        : null,
       status,
       statusLabel: this.getStatusLabel(status),
     };
@@ -209,7 +215,7 @@ export class RhChildrenService {
   private getStatusLabel(status: string) {
     if (status === 'valid') return 'Validé';
     if (status === 'expired') return 'Expiré';
-    return 'Validé';
+    return 'Non éligible';
   }
 
   private getEligibilityEndDate(dateNaissance: Date) {

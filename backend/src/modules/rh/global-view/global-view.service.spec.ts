@@ -57,8 +57,15 @@ function createHarness() {
     notification: {
       createMany: jest.fn(),
     },
+    publicHoliday: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
     auditLog: {
       create: jest.fn(),
+    },
+    leaveBalance: {
+      findMany: jest.fn(),
+      update: jest.fn(),
     },
     $transaction: jest.fn(async (callback) => callback(prisma)),
   } as any;
@@ -75,6 +82,7 @@ function createHarness() {
     syncForRequest: jest.fn(),
     syncForKeys: jest.fn(),
     syncYear: jest.fn(),
+    syncUserYear: jest.fn(),
   } as any;
   const leaveBalanceInitializer = {
     initializeUserYear: jest.fn(),
@@ -146,6 +154,143 @@ function createHarness() {
 }
 
 describe('RhGlobalViewService', () => {
+  it('persists an RH correction to paid leave days taken', async () => {
+    const { prisma, leaveBalanceSync, leaveBalanceInitializer, service } =
+      createHarness();
+    prisma.user.findUnique.mockResolvedValueOnce(rhUser).mockResolvedValueOnce({
+      id: 'employee-1',
+      matricule: 'EMP001',
+      nom: 'Employee',
+      prenom: 'Test',
+    });
+    prisma.leaveBalance.findMany.mockResolvedValue([
+      {
+        id: 'balance-cp',
+        taken: 30,
+        takenAdjustment: 0,
+        leaveType: { code: 'CP' },
+      },
+    ]);
+
+    const result = await service.updateTakenDays('employee-1', {
+      rhId: rhUser.id,
+      year: 2026,
+      taken: 20,
+      comment: 'Régularisation RH',
+    });
+
+    expect(leaveBalanceInitializer.initializeUserYear).toHaveBeenCalledWith(
+      'employee-1',
+      2026,
+      prisma,
+    );
+    expect(leaveBalanceSync.syncUserYear).toHaveBeenCalledWith(
+      'employee-1',
+      2026,
+      prisma,
+    );
+    expect(prisma.leaveBalance.update).toHaveBeenCalledWith({
+      where: { id: 'balance-cp' },
+      data: { taken: 20, takenAdjustment: -10 },
+    });
+    expect(prisma.auditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          userId: rhUser.id,
+          entity: 'LeaveBalance',
+          entityId: 'employee-1',
+          metadata: expect.objectContaining({
+            previousTaken: 30,
+            newTaken: 20,
+            adjustmentDelta: -10,
+          }),
+        }),
+      }),
+    );
+    expect(result).toEqual(
+      expect.objectContaining({ previousTaken: 30, taken: 20 }),
+    );
+  });
+
+  it('updates planned paid leave days and recalculates the end date', async () => {
+    const { prisma, leaveBalanceSync, service } = createHarness();
+    prisma.user.findUnique.mockResolvedValueOnce(rhUser);
+    prisma.leaveRequest.findUnique.mockResolvedValue({
+      id: 'planned-request-1',
+      reference: 'PLAN-2026-001',
+      ownerId: 'employee-1',
+      leaveTypeId: 'type-cp',
+      startDate: new Date('2026-06-05T00:00:00.000Z'),
+      endDate: new Date('2026-06-05T00:00:00.000Z'),
+      days: 1,
+      status: LeaveRequestStatus.DRAFT,
+      submittedAt: null,
+      owner: {
+        matricule: 'EMP001',
+        nom: 'Employee',
+        prenom: 'Test',
+      },
+      leaveType: {
+        code: 'CP',
+        name: 'Conges payes',
+        category: 'CONGE_PAYE',
+      },
+    });
+    prisma.leaveRequest.update.mockImplementation(({ data }) =>
+      Promise.resolve({
+        id: 'planned-request-1',
+        reference: 'PLAN-2026-001',
+        ownerId: 'employee-1',
+        leaveTypeId: 'type-cp',
+        startDate: new Date('2026-06-05T00:00:00.000Z'),
+        endDate: data.endDate,
+        days: data.days,
+      }),
+    );
+
+    const result = await service.updatePlannedDays('planned-request-1', {
+      rhId: rhUser.id,
+      days: 2,
+      comment: 'Correction planning',
+    });
+
+    expect(prisma.leaveRequest.update).toHaveBeenCalledWith({
+      where: { id: 'planned-request-1' },
+      data: {
+        days: 2,
+        endDate: new Date('2026-06-08T00:00:00.000Z'),
+      },
+      select: expect.any(Object),
+    });
+    expect(leaveBalanceSync.syncForRequest).toHaveBeenCalledWith(
+      'planned-request-1',
+      prisma,
+    );
+    expect(prisma.auditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          userId: rhUser.id,
+          entity: 'LeaveRequest',
+          entityId: 'planned-request-1',
+          metadata: expect.objectContaining({
+            source: 'rh_planned_days_adjustment',
+            previousDays: 1,
+            newDays: 2,
+            previousEndDate: '2026-06-05',
+            newEndDate: '2026-06-08',
+          }),
+        }),
+      }),
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        previousDays: 1,
+        days: 2,
+        endDate: '2026-06-08',
+      }),
+    );
+  });
+
   it('approves an RH-reviewed request and notifies employee plus N+1', async () => {
     const { prisma, emailService, leaveBalanceSync, service } = createHarness();
 

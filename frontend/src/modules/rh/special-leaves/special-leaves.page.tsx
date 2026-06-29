@@ -9,6 +9,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { readSheet } from "read-excel-file/browser";
 import { AppShell } from "@/components/AppShell";
+import { RowActions } from "@/components/RowActions";
 import {
   DateRangeFilter,
   appendDateRange,
@@ -39,6 +40,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   CalendarDays,
+  CheckCircle2,
   Download,
   FileCheck2,
   FileUp,
@@ -556,14 +558,17 @@ function EditSpecialLeaveDialog({
   row,
   employees,
   disabled,
+  open,
+  onOpenChange,
   onSave,
 }: {
   row: SpecialLeaveRow;
   employees: RhEmployee[];
   disabled: boolean;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
   onSave: (id: string, payload: SpecialLeavePayload) => Promise<unknown>;
 }) {
-  const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<SpecialLeavePayload>({
     employeeId: row.employeeId,
     eventLabel: row.eventLabel,
@@ -586,7 +591,7 @@ function EditSpecialLeaveDialog({
   const submit = async () => {
     try {
       await onSave(row.id, normalizePayload(draft));
-      setOpen(false);
+      onOpenChange(false);
     } catch (error) {
       toast.error("Modification impossible", {
         description: error instanceof Error ? error.message : "Erreur inconnue",
@@ -598,15 +603,10 @@ function EditSpecialLeaveDialog({
     <Dialog
       open={open}
       onOpenChange={(nextOpen) => {
-        setOpen(nextOpen);
+        onOpenChange(nextOpen);
         if (nextOpen) resetDraft();
       }}
     >
-      <DialogTrigger asChild>
-        <Button variant="outline" className="px-3 py-1.5" disabled={disabled}>
-          <Pencil className="size-4" /> Modifier
-        </Button>
-      </DialogTrigger>
       <DialogContent className="sm:max-w-[680px]">
         <DialogHeader>
           <DialogTitle>Modifier {row.reference}</DialogTitle>
@@ -620,11 +620,82 @@ function EditSpecialLeaveDialog({
           disabled={disabled}
           submitLabel="Enregistrer"
           setDraft={setDraft}
-          onCancel={() => setOpen(false)}
+          onCancel={() => onOpenChange(false)}
           onSubmit={submit}
         />
       </DialogContent>
     </Dialog>
+  );
+}
+
+function SpecialLeaveActions({
+  row,
+  employees,
+  disabled,
+  onCancel,
+  onApproveEvent,
+  onRejectEvent,
+  onSave,
+}: {
+  row: SpecialLeaveRow;
+  employees: RhEmployee[];
+  disabled: boolean;
+  onCancel: (row: SpecialLeaveRow) => void;
+  onApproveEvent: (row: SpecialLeaveRow) => void;
+  onRejectEvent: (row: SpecialLeaveRow) => void;
+  onSave: (id: string, payload: SpecialLeavePayload) => Promise<unknown>;
+}) {
+  const [editOpen, setEditOpen] = useState(false);
+  const isEventRow = row.leaveTypeCode === "EVT";
+
+  return (
+    <>
+      <RowActions
+        actions={
+          isEventRow
+            ? [
+                {
+                  label: "Valider",
+                  icon: CheckCircle2,
+                  disabled: disabled || row.statusCode === "APPROVED",
+                  onSelect: () => onApproveEvent(row),
+                },
+                {
+                  label: "Refuser",
+                  icon: XCircle,
+                  destructive: true,
+                  disabled: disabled || row.statusCode === "REJECTED",
+                  onSelect: () => onRejectEvent(row),
+                },
+              ]
+            : [
+                {
+                  label: "Modifier",
+                  icon: Pencil,
+                  disabled,
+                  onSelect: () => setEditOpen(true),
+                },
+                {
+                  label: "Annuler",
+                  icon: XCircle,
+                  destructive: true,
+                  disabled: disabled || row.statusCode === "CANCELLED",
+                  onSelect: () => onCancel(row),
+                },
+              ]
+        }
+      />
+      {!isEventRow && (
+        <EditSpecialLeaveDialog
+          row={row}
+          employees={employees}
+          disabled={disabled}
+          open={editOpen}
+          onOpenChange={setEditOpen}
+          onSave={onSave}
+        />
+      )}
+    </>
   );
 }
 
@@ -645,8 +716,6 @@ function SpecialLeaveCard({
   onRejectEvent: (row: SpecialLeaveRow) => void;
   onSave: (id: string, payload: SpecialLeavePayload) => Promise<unknown>;
 }) {
-  const isEventRow = row.leaveTypeCode === "EVT";
-
   return (
     <article className="rounded-lg border bg-card p-4 shadow-sm">
       <div className="flex items-start justify-between gap-3">
@@ -683,44 +752,16 @@ function SpecialLeaveCard({
         </div>
       </div>
 
-      <div className="mt-4 flex flex-wrap justify-end gap-2">
-        {isEventRow ? (
-          <>
-            <Button
-              variant="outline"
-              className="px-3 py-1.5"
-              disabled={disabled || row.statusCode === "APPROVED"}
-              onClick={() => onApproveEvent(row)}
-            >
-              Valider
-            </Button>
-            <Button
-              variant="outline"
-              className="px-3 py-1.5 text-destructive"
-              disabled={disabled || row.statusCode === "REJECTED"}
-              onClick={() => onRejectEvent(row)}
-            >
-              Refuser
-            </Button>
-          </>
-        ) : (
-          <>
-            <EditSpecialLeaveDialog
-              row={row}
-              employees={employees}
-              disabled={disabled}
-              onSave={onSave}
-            />
-            <Button
-              variant="outline"
-              className="px-3 py-1.5 text-muted-foreground"
-              disabled={disabled || row.statusCode === "CANCELLED"}
-              onClick={() => onCancel(row)}
-            >
-              <XCircle className="size-4" /> Annuler
-            </Button>
-          </>
-        )}
+      <div className="mt-4 flex justify-end">
+        <SpecialLeaveActions
+          row={row}
+          employees={employees}
+          disabled={disabled}
+          onCancel={onCancel}
+          onApproveEvent={onApproveEvent}
+          onRejectEvent={onRejectEvent}
+          onSave={onSave}
+        />
       </div>
     </article>
   );
@@ -1148,7 +1189,6 @@ export function Speciaux() {
               </thead>
               <tbody className="divide-y">
                 {filteredRows.map((row) => {
-                  const isEventRow = row.leaveTypeCode === "EVT";
                   return (
                     <tr key={row.id} className="hover:bg-muted/30">
                       <td className="px-4 py-3">
@@ -1169,45 +1209,17 @@ export function Speciaux() {
                       </td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex justify-end">
-                          {isEventRow ? (
-                            <div className="flex gap-2">
-                              <Button
-                                variant="outline"
-                                className="px-2 py-1 text-xs"
-                                disabled={isMutating || row.statusCode === "APPROVED"}
-                                onClick={() => approveEvent(row)}
-                              >
-                                Valider
-                              </Button>
-                              <Button
-                                variant="outline"
-                                className="px-2 py-1 text-xs text-destructive"
-                                disabled={isMutating || row.statusCode === "REJECTED"}
-                                onClick={() => rejectEvent(row)}
-                              >
-                                Refuser
-                              </Button>
-                            </div>
-                          ) : (
-                            <div className="flex gap-2">
-                              <EditSpecialLeaveDialog
-                                row={row}
-                                employees={employees}
-                                disabled={isMutating}
-                                onSave={(id, payload) =>
-                                  updateSpecialLeave.mutateAsync({ id, payload })
-                                }
-                              />
-                              <Button
-                                variant="outline"
-                                className="px-2 py-1 text-xs text-muted-foreground"
-                                disabled={isMutating || row.statusCode === "CANCELLED"}
-                                onClick={() => cancelRow(row)}
-                              >
-                                <XCircle className="size-4" />
-                              </Button>
-                            </div>
-                          )}
+                          <SpecialLeaveActions
+                            row={row}
+                            employees={employees}
+                            disabled={isMutating}
+                            onCancel={cancelRow}
+                            onApproveEvent={approveEvent}
+                            onRejectEvent={rejectEvent}
+                            onSave={(id, payload) =>
+                              updateSpecialLeave.mutateAsync({ id, payload })
+                            }
+                          />
                         </div>
                       </td>
                     </tr>

@@ -22,6 +22,7 @@ import {
 } from './dto/employee-leave-request.dto';
 import { EmailService } from '../../shared/notifications/email.service';
 import { LeaveBalanceSyncService } from '../../shared/leave-balances/leave-balance-sync.service';
+import { LeaveBalanceInitializerService } from '../../shared/leave-balances/leave-balance-initializer.service';
 import { overlapDateWhere, resolveDateRange } from '../../../common/date-range';
 import { countWorkingDays as countBusinessDays } from '../../../common/working-days';
 
@@ -102,6 +103,7 @@ export class EmployeeLeaveRequestsService {
     private readonly prisma: PrismaService,
     private readonly emailService: EmailService,
     private readonly leaveBalanceSync: LeaveBalanceSyncService,
+    private readonly leaveBalanceInitializer: LeaveBalanceInitializerService,
   ) {}
 
   async findAll(query: FindEmployeeLeaveRequestsQueryDto) {
@@ -171,6 +173,12 @@ export class EmployeeLeaveRequestsService {
       requestedSubtypeCode: dto.leaveSubtypeCode,
       year: startDate.getUTCFullYear(),
       requestedDays: days,
+    });
+    this.ensurePaidLeaveTakingAllowed({
+      poolCode: leaveSelection.poolCode,
+      leaveTypeCode: leaveSelection.leaveType.code,
+      hireDate: user.dateEmbauche,
+      startDate,
     });
     const attachment = this.toAttachment(proof);
     this.assertRequiredProof(
@@ -297,6 +305,16 @@ export class EmployeeLeaveRequestsService {
 
     const effectiveLeaveTypeId =
       leaveSelection?.leaveType.id ?? existing.leaveTypeId;
+    const effectiveLeaveTypeCode =
+      leaveSelection?.leaveType.code ?? existing.leaveType.code;
+    this.ensurePaidLeaveTakingAllowed({
+      poolCode:
+        leaveSelection?.poolCode ??
+        this.poolCodeFromLeaveType(existing.leaveType),
+      leaveTypeCode: effectiveLeaveTypeCode,
+      hireDate: user.dateEmbauche,
+      startDate,
+    });
     const attachment = this.toAttachment(proof);
     const proofRequired =
       leaveSelection?.leaveType.requiresProof ??
@@ -327,7 +345,7 @@ export class EmployeeLeaveRequestsService {
     await this.ensureMaternityFullRequest({
       userId: user.id,
       leaveTypeId: effectiveLeaveTypeId,
-      leaveTypeCode: leaveSelection?.leaveType.code ?? existing.leaveType.code,
+      leaveTypeCode: effectiveLeaveTypeCode,
       userSexe: user.sexe,
       year: effectiveYear,
       requestedDays: days,
@@ -410,6 +428,12 @@ export class EmployeeLeaveRequestsService {
       existing.leaveType.requiresProof,
       (existing.attachments?.length ?? 0) > 0,
     );
+    this.ensurePaidLeaveTakingAllowed({
+      poolCode: this.poolCodeFromLeaveType(existing.leaveType),
+      leaveTypeCode: existing.leaveType.code,
+      hireDate: user.dateEmbauche,
+      startDate: existing.startDate,
+    });
 
     await this.ensureSufficientBalance({
       userId: user.id,
@@ -541,6 +565,7 @@ export class EmployeeLeaveRequestsService {
         n2Id: true,
         n3Id: true,
         sexe: true,
+        dateEmbauche: true,
         status: true,
         department: {
           select: { id: true, code: true, name: true, managerId: true },
@@ -627,6 +652,10 @@ export class EmployeeLeaveRequestsService {
 
     const poolKind =
       normalizedCode === PAID_POOL_CODE ? PAID_POOL_CODE : SPECIAL_POOL_CODE;
+    await this.leaveBalanceInitializer.initializeUserYear(
+      params.userId,
+      params.year,
+    );
     const leaveTypes = await this.prisma.leaveType.findMany({
       where: { active: true },
       select: {
@@ -780,6 +809,11 @@ export class EmployeeLeaveRequestsService {
   }) {
     if (params.skipCheck) return;
 
+    await this.leaveBalanceInitializer.initializeUserYear(
+      params.userId,
+      params.year,
+    );
+
     const balance = await this.prisma.leaveBalance.findUnique({
       where: {
         userId_leaveTypeId_year: {
@@ -813,6 +847,31 @@ export class EmployeeLeaveRequestsService {
         `Le nombre de jours demandé (${this.roundDays(params.requestedDays)}) excède votre solde disponible (${remaining}).`,
       );
     }
+  }
+
+  private ensurePaidLeaveTakingAllowed(params: {
+    poolCode: string | null;
+    leaveTypeCode: string;
+    hireDate: Date;
+    startDate: Date;
+  }) {
+    if (!this.isPaidLeaveTakingSelection(params)) return;
+
+    const firstAnniversary = this.addUtcYears(params.hireDate, 1);
+    if (params.startDate >= firstAnniversary) return;
+
+    throw new BadRequestException(
+      `Les congés payés ne peuvent être pris qu'à partir du ${this.formatDate(firstAnniversary)} (un an après la date d'embauche).`,
+    );
+  }
+
+  private isPaidLeaveTakingSelection(params: {
+    poolCode: string | null;
+    leaveTypeCode: string;
+  }) {
+    const normalizedCode = params.leaveTypeCode.trim().toUpperCase();
+
+    return params.poolCode === PAID_POOL_CODE || normalizedCode === 'CP';
   }
 
   private async findLeaveTypes() {
@@ -1095,6 +1154,16 @@ export class EmployeeLeaveRequestsService {
 
   private toInputDate(date: Date) {
     return date.toISOString().slice(0, 10);
+  }
+
+  private addUtcYears(date: Date, years: number) {
+    return new Date(
+      Date.UTC(
+        date.getUTCFullYear() + years,
+        date.getUTCMonth(),
+        date.getUTCDate(),
+      ),
+    );
   }
 
   private fullName(user: { nom: string; prenom: string }) {

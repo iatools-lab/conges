@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/components/AppShell";
+import { RowActions } from "@/components/RowActions";
 import {
   DateRangeFilter,
   appendDateRange,
@@ -14,6 +15,14 @@ import {
 } from "@/components/DateRangeFilter";
 import { Badge, Button, Card, CardHeader, StatCard } from "@/components/ui-kit";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { apiFetch } from "@/lib/api";
 import {
   AlertCircle,
@@ -21,9 +30,11 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
+  Pencil,
   RefreshCw,
   Search,
 } from "lucide-react";
+import { toast } from "sonner";
 
 type BadgeTone =
   | "valid"
@@ -48,6 +59,7 @@ type BalanceRow = {
   manager: string;
   total: number;
   taken: number;
+  takenAdjustment: number;
   planned: number;
   remaining: number;
   passif: number;
@@ -57,6 +69,7 @@ type BalanceRow = {
 type PlanificationRow = {
   id: string;
   reference: string;
+  ownerId: string;
   employee: string;
   departmentCode: string;
   departmentName: string;
@@ -66,6 +79,9 @@ type PlanificationRow = {
   endDateIso: string;
   days: number;
   type: string;
+  leaveTypeCode: string;
+  leaveTypeCategory: string;
+  canAdjustPlannedDays: boolean;
   statusCode: string;
   status: BadgeTone;
   label: string;
@@ -89,6 +105,25 @@ type GlobalViewResponse = {
     liabilityDays: number;
     alerts: number;
   };
+};
+
+type TakenDaysAdjustmentResponse = {
+  userId: string;
+  year: number;
+  previousTaken: number;
+  taken: number;
+  takenAdjustment: number;
+};
+
+type PlannedDaysAdjustmentResponse = {
+  id: string;
+  reference: string;
+  userId: string;
+  previousDays: number;
+  days: number;
+  startDate: string;
+  previousEndDate: string;
+  endDate: string;
 };
 
 const currentYear = new Date().getFullYear();
@@ -219,6 +254,216 @@ function exportRowsCsv(rows: BalanceRow[], year: string) {
   link.download = `vue-globale-rh-${year}.csv`;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+function BalanceRowActions({
+  row,
+  year,
+  plannedRequests,
+  disabledTaken,
+  disabledPlanned,
+  onSaveTaken,
+  onSavePlanned,
+}: {
+  row: BalanceRow;
+  year: number;
+  plannedRequests: PlanificationRow[];
+  disabledTaken: boolean;
+  disabledPlanned: boolean;
+  onSaveTaken: (taken: number, comment: string) => Promise<unknown>;
+  onSavePlanned: (requestId: string, days: number, comment: string) => Promise<unknown>;
+}) {
+  const [takenOpen, setTakenOpen] = useState(false);
+  const [plannedOpen, setPlannedOpen] = useState(false);
+  const [taken, setTaken] = useState(String(row.taken));
+  const [plannedRequestId, setPlannedRequestId] = useState(plannedRequests[0]?.id ?? "");
+  const selectedPlan =
+    plannedRequests.find((request) => request.id === plannedRequestId) ?? plannedRequests[0];
+  const [plannedDays, setPlannedDays] = useState(String(selectedPlan?.days ?? row.planned));
+  const [comment, setComment] = useState("");
+  const [plannedComment, setPlannedComment] = useState("");
+
+  const openTakenDialog = () => {
+    setTaken(String(row.taken));
+    setComment("");
+    setTakenOpen(true);
+  };
+
+  const openPlannedDialog = () => {
+    const firstPlan = plannedRequests[0];
+    setPlannedRequestId(firstPlan?.id ?? "");
+    setPlannedDays(String(firstPlan?.days ?? row.planned));
+    setPlannedComment("");
+    setPlannedOpen(true);
+  };
+
+  return (
+    <>
+      <RowActions
+        actions={[
+          {
+            label: "Ajuster les jours pris",
+            icon: Pencil,
+            disabled: disabledTaken,
+            onSelect: openTakenDialog,
+          },
+          {
+            label: "Ajuster les jours planifiés",
+            icon: Pencil,
+            disabled: disabledPlanned || plannedRequests.length === 0,
+            onSelect: openPlannedDialog,
+          },
+        ]}
+      />
+      <Dialog open={takenOpen} onOpenChange={setTakenOpen}>
+        <DialogContent className="sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle>Ajuster les jours pris</DialogTitle>
+            <DialogDescription>
+              Corrigez le total de {row.employee} pour {year}. Cette correction restera appliquée
+              lors des prochaines synchronisations.
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            className="grid gap-4"
+            onSubmit={async (event) => {
+              event.preventDefault();
+              const nextTaken = Number(taken);
+              if (!Number.isFinite(nextTaken) || nextTaken < 0) {
+                toast.error("Le nombre de jours pris doit être positif ou nul");
+                return;
+              }
+              await onSaveTaken(nextTaken, comment);
+              setTakenOpen(false);
+            }}
+          >
+            <label className="grid gap-1.5 text-sm">
+              <span className="text-xs font-medium text-muted-foreground">Jours pris</span>
+              <input
+                type="number"
+                min="0"
+                step="0.5"
+                value={taken}
+                onChange={(event) => setTaken(event.target.value)}
+                className="rounded-md border bg-background px-3 py-2"
+                required
+              />
+            </label>
+            <label className="grid gap-1.5 text-sm">
+              <span className="text-xs font-medium text-muted-foreground">
+                Motif de la correction
+              </span>
+              <textarea
+                rows={3}
+                maxLength={500}
+                value={comment}
+                onChange={(event) => setComment(event.target.value)}
+                className="rounded-md border bg-background px-3 py-2"
+                placeholder="Ex. régularisation validée par la RH"
+              />
+            </label>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setTakenOpen(false)}>
+                Annuler
+              </Button>
+              <Button type="submit" disabled={disabledTaken}>
+                Enregistrer
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={plannedOpen} onOpenChange={setPlannedOpen}>
+        <DialogContent className="sm:max-w-[560px]">
+          <DialogHeader>
+            <DialogTitle>Ajuster les jours planifiés</DialogTitle>
+            <DialogDescription>
+              Choisissez la planification de {row.employee}, puis indiquez le nouveau nombre de
+              jours. La date de fin sera recalculée automatiquement en jours ouvrés.
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            className="grid gap-4"
+            onSubmit={async (event) => {
+              event.preventDefault();
+              const nextDays = Number(plannedDays);
+              if (!plannedRequestId) {
+                toast.error("Sélectionnez une planification");
+                return;
+              }
+              if (!Number.isInteger(nextDays) || nextDays <= 0) {
+                toast.error("Le nombre de jours planifiés doit être un entier positif");
+                return;
+              }
+              await onSavePlanned(plannedRequestId, nextDays, plannedComment);
+              setPlannedOpen(false);
+            }}
+          >
+            <label className="grid gap-1.5 text-sm">
+              <span className="text-xs font-medium text-muted-foreground">Planification</span>
+              <select
+                value={plannedRequestId}
+                onChange={(event) => {
+                  const nextId = event.target.value;
+                  const nextPlan = plannedRequests.find((request) => request.id === nextId);
+                  setPlannedRequestId(nextId);
+                  setPlannedDays(String(nextPlan?.days ?? ""));
+                }}
+                className="rounded-md border bg-background px-3 py-2"
+                required
+              >
+                {plannedRequests.map((plan) => (
+                  <option key={plan.id} value={plan.id}>
+                    {plan.reference} · {plan.startDate} → {plan.endDate} · {formatNumber(plan.days)}{" "}
+                    j
+                  </option>
+                ))}
+              </select>
+            </label>
+            {selectedPlan && (
+              <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                Date de début conservée : {selectedPlan.startDate}. Date de fin actuelle :{" "}
+                {selectedPlan.endDate}.
+              </div>
+            )}
+            <label className="grid gap-1.5 text-sm">
+              <span className="text-xs font-medium text-muted-foreground">Jours planifiés</span>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={plannedDays}
+                onChange={(event) => setPlannedDays(event.target.value)}
+                className="rounded-md border bg-background px-3 py-2"
+                required
+              />
+            </label>
+            <label className="grid gap-1.5 text-sm">
+              <span className="text-xs font-medium text-muted-foreground">
+                Motif de la correction
+              </span>
+              <textarea
+                rows={3}
+                maxLength={500}
+                value={plannedComment}
+                onChange={(event) => setPlannedComment(event.target.value)}
+                className="rounded-md border bg-background px-3 py-2"
+                placeholder="Ex. correction du planning validée par la RH"
+              />
+            </label>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setPlannedOpen(false)}>
+                Annuler
+              </Button>
+              <Button type="submit" disabled={disabledPlanned || plannedRequests.length === 0}>
+                Enregistrer
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
 }
 
 function MonthCalendar({
@@ -372,6 +617,7 @@ function StatusFilterRow({
 }
 
 export function VueGlobale() {
+  const queryClient = useQueryClient();
   const [department, setDepartment] = useState("ALL");
   const [dateRange, setDateRange] = useState<DateRangeValue>(() => currentYearRange());
   const [year, setYear] = useState(String(currentYear));
@@ -384,6 +630,51 @@ export function VueGlobale() {
   const { data, isError, isFetching, isLoading, refetch } = useQuery({
     queryKey: ["rh-global-view", department, ...dateRangeQueryKey(dateRange)],
     queryFn: () => apiFetch<GlobalViewResponse>(buildGlobalViewPath(dateRange, department)),
+  });
+  const updateTakenDays = useMutation({
+    mutationFn: ({ userId, taken, comment }: { userId: string; taken: number; comment: string }) =>
+      apiFetch<TakenDaysAdjustmentResponse>(`/rh/global-view/balances/${userId}/taken`, {
+        method: "PATCH",
+        body: JSON.stringify({ year: Number(year), taken, comment: comment.trim() || undefined }),
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries();
+      toast.success("Jours pris mis à jour");
+    },
+    onError: (error) => {
+      toast.error("Correction impossible", {
+        description: error instanceof Error ? error.message : "Erreur inconnue",
+      });
+    },
+  });
+  const updatePlannedDays = useMutation({
+    mutationFn: ({
+      requestId,
+      days,
+      comment,
+    }: {
+      requestId: string;
+      days: number;
+      comment: string;
+    }) =>
+      apiFetch<PlannedDaysAdjustmentResponse>(
+        `/rh/global-view/requests/${requestId}/planned-days`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ days, comment: comment.trim() || undefined }),
+        },
+      ),
+    onSuccess: async (response) => {
+      await queryClient.invalidateQueries();
+      toast.success("Jours planifiés mis à jour", {
+        description: `${response.reference}: nouvelle date de fin ${response.endDate}`,
+      });
+    },
+    onError: (error) => {
+      toast.error("Correction impossible", {
+        description: error instanceof Error ? error.message : "Erreur inconnue",
+      });
+    },
   });
 
   const applyDateRange = (nextRange: DateRangeValue) => {
@@ -413,7 +704,8 @@ export function VueGlobale() {
       .toLowerCase()
       .includes(searchText);
   });
-  const planifications = (data?.planifications ?? []).filter((planification) => {
+  const allPlanifications = data?.planifications ?? [];
+  const planifications = allPlanifications.filter((planification) => {
     if (!selectedStatuses.includes(planification.status)) return false;
     if (!searchText) return true;
 
@@ -717,24 +1009,51 @@ export function VueGlobale() {
                     <th className="px-5 py-3">Planifié</th>
                     <th className="px-5 py-3">Restant</th>
                     <th className="px-5 py-3">Passif</th>
+                    <th className="px-5 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {rows.map((row) => (
-                    <tr key={row.id} className="hover:bg-muted/30">
-                      <td className="px-5 py-3 font-medium">{row.employee}</td>
-                      <td className="px-5 py-3">{row.departmentName}</td>
-                      <td className="px-5 py-3">{row.manager}</td>
-                      <td className="px-5 py-3">{formatNumber(row.total)}</td>
-                      <td className="px-5 py-3">{formatNumber(row.taken)}</td>
-                      <td className="px-5 py-3">{formatNumber(row.planned)}</td>
-                      <td className="px-5 py-3 font-medium">{formatNumber(row.remaining)}</td>
-                      <td className="px-5 py-3">{formatNumber(row.passif)}</td>
-                    </tr>
-                  ))}
+                  {rows.map((row) => {
+                    const rowPlannedRequests = allPlanifications.filter(
+                      (plan) => plan.ownerId === row.id && plan.canAdjustPlannedDays,
+                    );
+
+                    return (
+                      <tr key={row.id} className="hover:bg-muted/30">
+                        <td className="px-5 py-3 font-medium">{row.employee}</td>
+                        <td className="px-5 py-3">{row.departmentName}</td>
+                        <td className="px-5 py-3">{row.manager}</td>
+                        <td className="px-5 py-3">{formatNumber(row.total)}</td>
+                        <td className="px-5 py-3">
+                          <div>{formatNumber(row.taken)}</div>
+                          {row.takenAdjustment !== 0 && (
+                            <div className="text-xs text-muted-foreground"> </div>
+                          )}
+                        </td>
+                        <td className="px-5 py-3">{formatNumber(row.planned)}</td>
+                        <td className="px-5 py-3 font-medium">{formatNumber(row.remaining)}</td>
+                        <td className="px-5 py-3">{formatNumber(row.passif)}</td>
+                        <td className="px-5 py-3 text-right">
+                          <BalanceRowActions
+                            row={row}
+                            year={Number(year)}
+                            plannedRequests={rowPlannedRequests}
+                            disabledTaken={updateTakenDays.isPending}
+                            disabledPlanned={updatePlannedDays.isPending}
+                            onSaveTaken={(taken, comment) =>
+                              updateTakenDays.mutateAsync({ userId: row.id, taken, comment })
+                            }
+                            onSavePlanned={(requestId, days, comment) =>
+                              updatePlannedDays.mutateAsync({ requestId, days, comment })
+                            }
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
                   {!rows.length && (
                     <tr>
-                      <td className="px-5 py-8 text-center text-muted-foreground" colSpan={8}>
+                      <td className="px-5 py-8 text-center text-muted-foreground" colSpan={9}>
                         Aucun solde trouvé pour ce périmètre.
                       </td>
                     </tr>

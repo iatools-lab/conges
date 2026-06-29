@@ -105,7 +105,7 @@ export class LeaveBalanceSyncService {
     const today = new Date(
       Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
     );
-    const [approved, scheduled] = await Promise.all([
+    const [approved, scheduled, existingBalance] = await Promise.all([
       client.leaveRequest.aggregate({
         where: {
           ownerId: key.userId,
@@ -139,7 +139,23 @@ export class LeaveBalanceSyncService {
         },
         _sum: { days: true },
       }),
+      client.leaveBalance.findUnique({
+        where: {
+          userId_leaveTypeId_year: {
+            userId: key.userId,
+            leaveTypeId: key.leaveTypeId,
+            year: key.year,
+          },
+        },
+        select: { takenAdjustment: true },
+      }),
     ]);
+    const takenAdjustment = this.toNumber(
+      existingBalance?.takenAdjustment ?? 0,
+    );
+    const taken = this.toNumber(
+      this.toNumber(approved._sum.days) + takenAdjustment,
+    );
 
     await client.leaveBalance.upsert({
       where: {
@@ -155,11 +171,12 @@ export class LeaveBalanceSyncService {
         year: key.year,
         acquired: 0,
         carryover: 0,
-        taken: this.toNumber(approved._sum.days),
+        taken,
+        takenAdjustment,
         scheduled: this.toNumber(scheduled._sum.days),
       },
       update: {
-        taken: this.toNumber(approved._sum.days),
+        taken,
         scheduled: this.toNumber(scheduled._sum.days),
       },
     });

@@ -283,6 +283,7 @@ model LeaveBalance {
   year        Int // Année de référence
   acquired    Float     @default(0) // Jours acquis
   taken       Float     @default(0) // Jours pris
+  takenAdjustment Float @default(0) // Correction RH persistante appliquée aux jours pris
   scheduled   Float     @default(0) // Jours planifiés (approuvés non encore pris)
   carryover   Float     @default(0) // Report année précédente
   expiresAt   DateTime?

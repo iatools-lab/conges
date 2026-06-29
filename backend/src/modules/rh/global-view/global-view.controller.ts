@@ -17,6 +17,10 @@ import { RhGlobalViewService } from './global-view.service';
 import { DecideRhRequestDto } from './dto/rh-request-decision.dto';
 import { RemarkRhRequestDto } from './dto/rh-request-remark.dto';
 import { ImportRhLeaveHistoryDto } from './dto/rh-leave-history-import.dto';
+import {
+  UpdateRhPlannedDaysDto,
+  UpdateRhTakenDaysDto,
+} from './dto/rh-balance-adjustment.dto';
 
 @Controller('rh/global-view')
 export class RhGlobalViewController {
@@ -56,6 +60,30 @@ export class RhGlobalViewController {
     @Req() req: AuthenticatedRequest,
   ) {
     return this.globalViewService.addRemark(
+      id,
+      withAuthenticatedRh(dto, requireAuthSession(req)),
+    );
+  }
+
+  @Patch('balances/:userId/taken')
+  updateTakenDays(
+    @Param('userId') userId: string,
+    @Body() dto: UpdateRhTakenDaysDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.globalViewService.updateTakenDays(
+      userId,
+      withAuthenticatedRh(dto, requireAuthSession(req)),
+    );
+  }
+
+  @Patch('requests/:id/planned-days')
+  updatePlannedDays(
+    @Param('id') id: string,
+    @Body() dto: UpdateRhPlannedDaysDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.globalViewService.updatePlannedDays(
       id,
       withAuthenticatedRh(dto, requireAuthSession(req)),
     );

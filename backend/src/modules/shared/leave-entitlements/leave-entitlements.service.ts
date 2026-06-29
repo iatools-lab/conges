@@ -17,8 +17,6 @@ type EntitlementLeaveType = {
 };
 
 const ANNUAL_PAID_LEAVE_DAYS = 24;
-const MONTHLY_PAID_LEAVE_DAYS = 2;
-const CYCLE_MONTHS = 12;
 const SENIORITY_STEP_YEARS = 5;
 const SENIORITY_STEP_DAYS = 3;
 const CHILD_BONUS_DAYS = 2;
@@ -101,81 +99,29 @@ export class LeaveEntitlementsService {
     annualDays = ANNUAL_PAID_LEAVE_DAYS,
     today = new Date(),
   ) {
-    const maxDays = Math.max(annualDays, 0);
-    const TRANSITION_END = new Date(Date.UTC(2028, 3, 1)); // 1er avril 2028
-    const FIXED_CYCLE_START = new Date(Date.UTC(year - 1, 3, 1)); // 1er avril de l'année N-1
-
-    // Après le 1er avril 2028, on revient au fonctionnement actuel
-    if (today >= TRANSITION_END) {
-      return this.computeOriginalPaidLeaveDays(hireDate, year, maxDays, today);
-    }
-
-    // Période transitoire : cycle fixe du 1er avril au 31 mars
     const firstAnniversary = this.addUtcYears(hireDate, 1);
-    const cycleEnd = this.addUtcYears(FIXED_CYCLE_START, 1);
-    const referenceDate = year === today.getUTCFullYear() ? today : cycleEnd;
+    const referenceDate =
+      year === today.getUTCFullYear()
+        ? today
+        : new Date(Date.UTC(year, 11, 31, 23, 59, 59, 999));
+    const normalizedAnnualDays = Math.max(annualDays, 0);
 
-    // Si l'employé a déjà ≥1 an au début du cycle fixe → cycle fixe complet
-    if (firstAnniversary <= FIXED_CYCLE_START) {
-      if (referenceDate <= FIXED_CYCLE_START) return 0;
-      const completedMonths = this.getCompletedMonths(
-        FIXED_CYCLE_START,
-        referenceDate,
-      );
+    // Les congés payés s'acquièrent dès l'embauche au prorata mensuel.
+    // La restriction de prise avant un an est appliquée côté demandes.
+    if (referenceDate < hireDate) return 0;
+
+    if (referenceDate < firstAnniversary) {
+      const completedMonths = this.getCompletedMonths(hireDate, referenceDate);
+
       return this.roundDays(
-        Math.min(completedMonths * MONTHLY_PAID_LEAVE_DAYS, maxDays),
+        Math.min(
+          normalizedAnnualDays,
+          completedMonths * (normalizedAnnualDays / 12),
+        ),
       );
     }
 
-    // Employé avec <1 an : logique basée sur date d'embauche (inchangée)
-    // jusqu'au 1er anniversaire, puis cycle fixe après
-    const hireCycleStart = this.getCycleStart(hireDate, year);
-
-    // Si le 1er anniversaire tombe après la fin du cycle → cycle embauche uniquement
-    if (firstAnniversary >= cycleEnd || referenceDate <= hireCycleStart) {
-      return this.computeOriginalPaidLeaveDays(hireDate, year, maxDays, today);
-    }
-
-    // Phase 1 : de l'embauche au 1er anniversaire (cycle embauche)
-    // Phase 2 : du 1er anniversaire à aujourd'hui/fin de cycle (cycle fixe)
-    if (referenceDate <= firstAnniversary) {
-      return this.computeOriginalPaidLeaveDays(hireDate, year, maxDays, today);
-    }
-
-    // Mois écoulés depuis le 1er anniversaire (cycle fixe)
-    const monthsFromAnniversary = this.getCompletedMonths(
-      firstAnniversary,
-      referenceDate,
-    );
-
-    return this.roundDays(
-      Math.min(monthsFromAnniversary * MONTHLY_PAID_LEAVE_DAYS, maxDays),
-    );
-  }
-
-  private computeOriginalPaidLeaveDays(
-    hireDate: Date,
-    year: number,
-    annualDays: number,
-    today: Date,
-  ) {
-    const cycleStart = this.getCycleStart(hireDate, year);
-    const cycleEnd = this.addUtcYears(cycleStart, 1);
-    const referenceDate = year === today.getUTCFullYear() ? today : cycleEnd;
-    const cappedReference =
-      referenceDate < cycleStart ? cycleStart : referenceDate;
-
-    if (cappedReference <= cycleStart) return 0;
-
-    const completedMonths = this.getCompletedMonths(
-      cycleStart,
-      cappedReference,
-    );
-    const maxDays = Math.max(annualDays, 0);
-
-    return this.roundDays(
-      Math.min(completedMonths * MONTHLY_PAID_LEAVE_DAYS, maxDays),
-    );
+    return this.roundDays(normalizedAnnualDays);
   }
 
   getChildBonusDays(
@@ -291,12 +237,6 @@ export class LeaveEntitlementsService {
     return new Date(Date.UTC(year, 11, 31));
   }
 
-  private getCycleStart(hireDate: Date, year: number) {
-    return new Date(
-      Date.UTC(year - 1, hireDate.getUTCMonth(), hireDate.getUTCDate()),
-    );
-  }
-
   private addUtcYears(date: Date, years: number) {
     return new Date(
       Date.UTC(
@@ -305,19 +245,6 @@ export class LeaveEntitlementsService {
         date.getUTCDate(),
       ),
     );
-  }
-
-  private getCompletedMonths(startDate: Date, referenceDate: Date) {
-    const yearDiff =
-      referenceDate.getUTCFullYear() - startDate.getUTCFullYear();
-    const monthDiff = referenceDate.getUTCMonth() - startDate.getUTCMonth();
-    let months = yearDiff * CYCLE_MONTHS + monthDiff;
-
-    if (referenceDate.getUTCDate() < startDate.getUTCDate()) {
-      months -= 1;
-    }
-
-    return Math.max(months, 0);
   }
 
   private getCompletedYears(startDate: Date, referenceDate: Date) {
@@ -330,6 +257,18 @@ export class LeaveEntitlementsService {
     if (beforeAnniversary) years -= 1;
 
     return Math.max(years, 0);
+  }
+
+  private getCompletedMonths(startDate: Date, referenceDate: Date) {
+    let months =
+      (referenceDate.getUTCFullYear() - startDate.getUTCFullYear()) * 12 +
+      (referenceDate.getUTCMonth() - startDate.getUTCMonth());
+    const beforeMonthlyAnniversary =
+      referenceDate.getUTCDate() < startDate.getUTCDate();
+
+    if (beforeMonthlyAnniversary) months -= 1;
+
+    return Math.max(months, 0);
   }
 
   private isYoungerThan(date: Date, maxAge: number, referenceDate: Date) {

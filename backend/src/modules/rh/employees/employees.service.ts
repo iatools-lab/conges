@@ -331,11 +331,7 @@ export class RhEmployeesService {
       select: { id: true },
     });
 
-    await this.leaveBalanceInitializer.initializeUserYear(
-      id,
-      new Date().getUTCFullYear(),
-      client,
-    );
+    await this.leaveBalanceInitializer.refreshUserEntitlements(id, client);
 
     const updatedEmployee = await this.findEmployeeRecordById(client, id);
     return this.toResponse(updatedEmployee);

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/components/AppShell";
+import { RowActions } from "@/components/RowActions";
 import {
   DateRangeFilter,
   allDateRange,
@@ -50,7 +51,7 @@ type RhChild = {
   ageLabel: string;
   bonusDays: number;
   bonusLabel: string;
-  eligibleUntil: string;
+  eligibleUntil: string | null;
   status: ChildStatus;
   statusLabel: string;
 };
@@ -267,14 +268,17 @@ function EditChildDialog({
   child,
   employees,
   disabled,
+  open,
+  onOpenChange,
   onSave,
 }: {
   child: RhChild;
   employees: RhEmployee[];
   disabled: boolean;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
   onSave: (id: string, payload: ChildPayload) => void;
 }) {
-  const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<ChildPayload>({
     parentId: child.parentId,
     nom: child.nom,
@@ -296,15 +300,10 @@ function EditChildDialog({
     <Dialog
       open={open}
       onOpenChange={(nextOpen) => {
-        setOpen(nextOpen);
+        onOpenChange(nextOpen);
         if (nextOpen) resetDraft();
       }}
     >
-      <DialogTrigger asChild>
-        <Button variant="outline" className="mr-2 px-3 py-1.5" disabled={disabled}>
-          <Pencil className="size-4" /> Modifier
-        </Button>
-      </DialogTrigger>
       <DialogContent className="sm:max-w-[640px]">
         <DialogHeader>
           <DialogTitle>Modifier {child.childName}</DialogTitle>
@@ -318,14 +317,60 @@ function EditChildDialog({
           disabled={disabled}
           submitLabel="Enregistrer"
           setDraft={setDraft}
-          onCancel={() => setOpen(false)}
+          onCancel={() => onOpenChange(false)}
           onSubmit={() => {
             onSave(child.id, normalizeChildPayload(draft));
-            setOpen(false);
+            onOpenChange(false);
           }}
         />
       </DialogContent>
     </Dialog>
+  );
+}
+
+function ChildActions({
+  child,
+  employees,
+  disabled,
+  onSave,
+  onDelete,
+}: {
+  child: RhChild;
+  employees: RhEmployee[];
+  disabled: boolean;
+  onSave: (id: string, payload: ChildPayload) => void;
+  onDelete: (child: RhChild) => void;
+}) {
+  const [editOpen, setEditOpen] = useState(false);
+
+  return (
+    <>
+      <RowActions
+        actions={[
+          {
+            label: "Modifier",
+            icon: Pencil,
+            disabled,
+            onSelect: () => setEditOpen(true),
+          },
+          {
+            label: "Supprimer",
+            icon: Trash2,
+            destructive: true,
+            disabled,
+            onSelect: () => onDelete(child),
+          },
+        ]}
+      />
+      <EditChildDialog
+        child={child}
+        employees={employees}
+        disabled={disabled}
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        onSave={onSave}
+      />
+    </>
   );
 }
 
@@ -344,45 +389,6 @@ function ChildCard({
   onSave: (id: string, payload: ChildPayload) => void;
   onDelete: (child: RhChild) => void;
 }) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState<ChildPayload>({
-    parentId: child.parentId,
-    nom: child.nom,
-    prenom: child.prenom,
-    dateNaissance: child.dateNaissance,
-    sexe: child.sexe,
-  });
-
-  const save = () => {
-    onSave(child.id, normalizeChildPayload(draft));
-    setEditing(false);
-  };
-
-  if (editing) {
-    return (
-      <article className="rounded-lg border bg-card p-4 shadow-sm">
-        <div className="mb-4 flex items-center gap-3">
-          <div className="flex size-10 items-center justify-center rounded-lg bg-stat-blue text-stat-blue-fg">
-            <Baby className="size-5" />
-          </div>
-          <div>
-            <div className="font-semibold">Modifier {child.childName}</div>
-            <div className="text-xs text-muted-foreground">{child.parentName}</div>
-          </div>
-        </div>
-        <ChildForm
-          draft={draft}
-          employees={employees}
-          disabled={isSaving || isDeleting}
-          submitLabel="Enregistrer"
-          setDraft={setDraft}
-          onCancel={() => setEditing(false)}
-          onSubmit={save}
-        />
-      </article>
-    );
-  }
-
   return (
     <article className="rounded-lg border bg-card p-4 shadow-sm">
       <div className="flex items-start justify-between gap-3">
@@ -410,28 +416,19 @@ function ChildCard({
           <div className="text-xs text-muted-foreground">Bonus enfant</div>
           <div className="mt-1 font-semibold">{child.bonusLabel} jour(s)</div>
           <div className="text-xs text-muted-foreground">
-            Éligible jusqu'au {child.eligibleUntil}
+            {child.eligibleUntil ? `Éligible jusqu'au ${child.eligibleUntil}` : "Non applicable"}
           </div>
         </div>
       </div>
 
-      <div className="mt-4 flex flex-wrap justify-end gap-2">
-        <Button
-          variant="outline"
-          className="px-3 py-1.5"
+      <div className="mt-4 flex justify-end">
+        <ChildActions
+          child={child}
+          employees={employees}
           disabled={isSaving || isDeleting}
-          onClick={() => setEditing(true)}
-        >
-          <Pencil className="size-4" /> Modifier
-        </Button>
-        <Button
-          variant="danger"
-          className="px-3 py-1.5"
-          disabled={isSaving || isDeleting}
-          onClick={() => onDelete(child)}
-        >
-          <Trash2 className="size-4" /> Supprimer
-        </Button>
+          onSave={onSave}
+          onDelete={onDelete}
+        />
       </div>
     </article>
   );
@@ -668,7 +665,9 @@ export function Enfants() {
                       </div>
                     </td>
                     <td className="px-3 py-3">{child.ageLabel}</td>
-                    <td className="px-3 py-3 text-muted-foreground">{child.eligibleUntil}</td>
+                    <td className="px-3 py-3 text-muted-foreground">
+                      {child.eligibleUntil ?? "—"}
+                    </td>
                     <td className="px-3 py-3">
                       <div className="inline-flex items-center gap-1 rounded-md bg-stat-orange px-2 py-1 text-xs font-semibold text-stat-orange-fg">
                         <Gift className="size-3.5" /> {child.bonusLabel} j
@@ -678,24 +677,17 @@ export function Enfants() {
                       <Badge tone={statusTone[child.status]}>{child.statusLabel}</Badge>
                     </td>
                     <td className="px-5 py-3 text-right">
-                      <EditChildDialog
+                      <ChildActions
                         child={child}
                         employees={employees}
                         disabled={updateChild.isPending || deleteChild.isPending}
                         onSave={(id, payload) => updateChild.mutate({ id, payload })}
-                      />
-                      <Button
-                        variant="danger"
-                        className="px-3 py-1.5"
-                        disabled={updateChild.isPending || deleteChild.isPending}
-                        onClick={() => {
+                        onDelete={(childToDelete) => {
                           if (window.confirm(`Supprimer ${child.childName} ?`)) {
-                            deleteChild.mutate(child.id);
+                            deleteChild.mutate(childToDelete.id);
                           }
                         }}
-                      >
-                        <Trash2 className="size-4" /> Supprimer
-                      </Button>
+                      />
                     </td>
                   </tr>
                 ))}

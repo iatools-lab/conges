@@ -41,6 +41,7 @@ export type RowAction = {
   label: string;
   icon?: LucideIcon;
   destructive?: boolean;
+  disabled?: boolean;
   onSelect?: () => void;
 };
 
@@ -125,10 +126,8 @@ export function RowActions({
               <div key={a.label}>
                 {isLastDestructive && i > 0 && <DropdownMenuSeparator />}
                 <DropdownMenuItem
-                  onSelect={(e) => {
-                    e.preventDefault();
-                    a.onSelect?.();
-                  }}
+                  disabled={a.disabled}
+                  onSelect={() => a.onSelect?.()}
                   className={a.destructive ? "text-destructive focus:text-destructive" : ""}
                 >
                   {Icon && <Icon className="size-4 mr-2" />}

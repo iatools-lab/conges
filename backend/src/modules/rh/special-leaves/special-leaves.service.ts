@@ -1109,6 +1109,15 @@ export class RhSpecialLeavesService {
     ]);
 
     if (!user || !leaveType) return;
+    const takenAdjustment = await this.getTakenAdjustment(
+      client,
+      userId,
+      leaveTypeId,
+      year,
+    );
+    const taken = this.toNumber(
+      this.toNumber(approved._sum.days) + takenAdjustment,
+    );
 
     await client.leaveBalance.upsert({
       where: { userId_leaveTypeId_year: { userId, leaveTypeId, year } },
@@ -1122,7 +1131,8 @@ export class RhSpecialLeavesService {
           year,
         }),
         carryover: 0,
-        taken: this.toNumber(approved._sum.days),
+        taken,
+        takenAdjustment,
         scheduled: this.toNumber(scheduled._sum.days),
       },
       update: {
@@ -1131,7 +1141,7 @@ export class RhSpecialLeavesService {
           user,
           year,
         }),
-        taken: this.toNumber(approved._sum.days),
+        taken,
         scheduled: this.toNumber(scheduled._sum.days),
       },
     });
@@ -1190,6 +1200,15 @@ export class RhSpecialLeavesService {
     ]);
 
     if (!user || !leaveType) return;
+    const takenAdjustment = await this.getTakenAdjustment(
+      client,
+      userId,
+      leaveTypeId,
+      year,
+    );
+    const taken = this.toNumber(
+      this.toNumber(approved._sum.days) + takenAdjustment,
+    );
 
     await client.leaveBalance.upsert({
       where: { userId_leaveTypeId_year: { userId, leaveTypeId, year } },
@@ -1203,11 +1222,12 @@ export class RhSpecialLeavesService {
           year,
         }),
         carryover: 0,
-        taken: this.toNumber(approved._sum.days),
+        taken,
+        takenAdjustment,
         scheduled: this.toNumber(scheduled._sum.days),
       },
       update: {
-        taken: this.toNumber(approved._sum.days),
+        taken,
         scheduled: this.toNumber(scheduled._sum.days),
       },
     });
@@ -1325,6 +1345,15 @@ export class RhSpecialLeavesService {
             _sum: { days: true },
           }),
         ]);
+        const takenAdjustment = await this.getTakenAdjustment(
+          client,
+          userId,
+          leaveType.id,
+          year,
+        );
+        const taken = this.toNumber(
+          this.toNumber(approved._sum.days) + takenAdjustment,
+        );
 
         await client.leaveBalance.upsert({
           where: {
@@ -1344,7 +1373,8 @@ export class RhSpecialLeavesService {
               year,
             }),
             carryover: 0,
-            taken: this.toNumber(approved._sum.days),
+            taken,
+            takenAdjustment,
             scheduled: this.toNumber(scheduled._sum.days),
           },
           update: {
@@ -1353,12 +1383,28 @@ export class RhSpecialLeavesService {
               user,
               year,
             }),
-            taken: this.toNumber(approved._sum.days),
+            taken,
             scheduled: this.toNumber(scheduled._sum.days),
           },
         });
       }),
     );
+  }
+
+  private async getTakenAdjustment(
+    client: PrismaClientLike,
+    userId: string,
+    leaveTypeId: string,
+    year: number,
+  ) {
+    const balance = await client.leaveBalance.findUnique({
+      where: {
+        userId_leaveTypeId_year: { userId, leaveTypeId, year },
+      },
+      select: { takenAdjustment: true },
+    });
+
+    return this.toNumber(balance?.takenAdjustment ?? 0);
   }
 
   private isBirthEventLabel(value: string) {

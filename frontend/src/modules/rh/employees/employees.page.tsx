@@ -760,7 +760,7 @@ export function RhEmployes() {
   });
 
   const employees = useMemo(() => employeesQuery.data ?? [], [employeesQuery.data]);
-  const refreshEmployees = () => queryClient.invalidateQueries({ queryKey: ["rh-employees"] });
+  const refreshEmployees = () => queryClient.invalidateQueries();
 
   useEffect(() => {
     setSelectedIds((current) =>

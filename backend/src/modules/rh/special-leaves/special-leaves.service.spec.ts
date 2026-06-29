@@ -88,6 +88,7 @@ function createHarness() {
       aggregate: jest.fn(),
     },
     leaveBalance: {
+      findUnique: jest.fn().mockResolvedValue(null),
       upsert: jest.fn(),
     },
     event: {

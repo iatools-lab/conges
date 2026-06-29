@@ -82,7 +82,7 @@ export class EmployeeBalancesService {
           year,
         });
 
-        const [approvedAgg, scheduledAgg] = await Promise.all([
+        const [approvedAgg, scheduledAgg, existingBalance] = await Promise.all([
           this.prisma.leaveRequest.aggregate({
             where: {
               ownerId: userId,
@@ -103,7 +103,23 @@ export class EmployeeBalancesService {
             },
             _sum: { days: true },
           }),
+          this.prisma.leaveBalance.findUnique({
+            where: {
+              userId_leaveTypeId_year: {
+                userId,
+                leaveTypeId: leaveType.id,
+                year,
+              },
+            },
+            select: { takenAdjustment: true },
+          }),
         ]);
+        const takenAdjustment = this.roundDays(
+          existingBalance?.takenAdjustment ?? 0,
+        );
+        const taken = this.roundDays(
+          (approvedAgg._sum.days ?? 0) + takenAdjustment,
+        );
 
         await this.prisma.leaveBalance.upsert({
           where: {
@@ -119,12 +135,13 @@ export class EmployeeBalancesService {
             year,
             acquired,
             carryover: 0,
-            taken: this.roundDays(approvedAgg._sum.days ?? 0),
+            taken,
+            takenAdjustment,
             scheduled: this.roundDays(scheduledAgg._sum.days ?? 0),
           },
           update: {
             acquired,
-            taken: this.roundDays(approvedAgg._sum.days ?? 0),
+            taken,
             scheduled: this.roundDays(scheduledAgg._sum.days ?? 0),
           },
         });

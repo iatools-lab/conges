@@ -24,10 +24,15 @@ import {
 } from './dto/rh-request-decision.dto';
 import { RemarkRhRequestDto } from './dto/rh-request-remark.dto';
 import { ImportRhLeaveHistoryDto } from './dto/rh-leave-history-import.dto';
+import {
+  UpdateRhPlannedDaysDto,
+  UpdateRhTakenDaysDto,
+} from './dto/rh-balance-adjustment.dto';
 import { EmailService } from '../../shared/notifications/email.service';
 import { LeaveBalanceSyncService } from '../../shared/leave-balances/leave-balance-sync.service';
 import { LeaveBalanceInitializerService } from '../../shared/leave-balances/leave-balance-initializer.service';
 import { overlapDateWhere, resolveDateRange } from '../../../common/date-range';
+import { endDateForWorkingDays } from '../../../common/working-days';
 type BadgeTone =
   | 'valid'
   | 'pending'
@@ -46,6 +51,7 @@ const TRACKED_REQUEST_STATUSES = [
   LeaveRequestStatus.REJECTED,
   LeaveRequestStatus.CANCELLED,
 ];
+const PAID_BALANCE_CODES = ['CP', 'ANC', 'ENF', 'PASSIF'] as const;
 
 type NormalizedHistoryImportRow = {
   reference: string;
@@ -69,6 +75,256 @@ export class RhGlobalViewService {
     private readonly leaveBalanceSync: LeaveBalanceSyncService,
     private readonly leaveBalanceInitializer: LeaveBalanceInitializerService,
   ) {}
+
+  async updateTakenDays(userId: string, dto: UpdateRhTakenDaysDto) {
+    const rhUser = await this.resolveRh(dto.rhId, dto.rhEmail);
+    const targetTaken = this.roundDays(dto.taken);
+
+    return this.prisma.$transaction(async (transaction) => {
+      const employee = await transaction.user.findUnique({
+        where: { id: userId },
+        select: { id: true, matricule: true, nom: true, prenom: true },
+      });
+      if (!employee) throw new NotFoundException('Employé introuvable');
+
+      await this.leaveBalanceInitializer.initializeUserYear(
+        userId,
+        dto.year,
+        transaction,
+      );
+      await this.leaveBalanceSync.syncUserYear(userId, dto.year, transaction);
+
+      const balances = await transaction.leaveBalance.findMany({
+        where: {
+          userId,
+          year: dto.year,
+          leaveType: { code: { in: [...PAID_BALANCE_CODES] } },
+        },
+        orderBy: { leaveType: { code: 'asc' } },
+        select: {
+          id: true,
+          taken: true,
+          takenAdjustment: true,
+          leaveType: { select: { code: true } },
+        },
+      });
+      if (!balances.length) {
+        throw new BadRequestException(
+          'Aucun solde de congés payés disponible pour cet employé',
+        );
+      }
+
+      const previousTaken = this.roundDays(
+        balances.reduce((sum, balance) => sum + balance.taken, 0),
+      );
+      let remainingDelta = this.roundDays(targetTaken - previousTaken);
+      const changes: Array<{
+        id: string;
+        code: string;
+        taken: number;
+        takenAdjustment: number;
+      }> = [];
+
+      if (remainingDelta > 0) {
+        const targetBalance =
+          balances.find((balance) => balance.leaveType.code === 'CP') ??
+          balances[0];
+        changes.push({
+          id: targetBalance.id,
+          code: targetBalance.leaveType.code,
+          taken: this.roundDays(targetBalance.taken + remainingDelta),
+          takenAdjustment: this.roundDays(
+            targetBalance.takenAdjustment + remainingDelta,
+          ),
+        });
+        remainingDelta = 0;
+      } else if (remainingDelta < 0) {
+        let reduction = Math.abs(remainingDelta);
+        const orderedBalances = balances.slice().sort((left, right) => {
+          if (left.leaveType.code === 'CP') return -1;
+          if (right.leaveType.code === 'CP') return 1;
+          return right.taken - left.taken;
+        });
+
+        for (const balance of orderedBalances) {
+          if (reduction <= 0) break;
+          const appliedReduction = Math.min(balance.taken, reduction);
+          if (appliedReduction <= 0) continue;
+          changes.push({
+            id: balance.id,
+            code: balance.leaveType.code,
+            taken: this.roundDays(balance.taken - appliedReduction),
+            takenAdjustment: this.roundDays(
+              balance.takenAdjustment - appliedReduction,
+            ),
+          });
+          reduction = this.roundDays(reduction - appliedReduction);
+        }
+        remainingDelta = this.roundDays(-reduction);
+      }
+
+      if (remainingDelta !== 0) {
+        throw new BadRequestException(
+          'Impossible d’appliquer la correction des jours pris',
+        );
+      }
+
+      for (const change of changes) {
+        await transaction.leaveBalance.update({
+          where: { id: change.id },
+          data: {
+            taken: change.taken,
+            takenAdjustment: change.takenAdjustment,
+          },
+        });
+      }
+
+      const totalTakenAdjustment = this.roundDays(
+        balances.reduce((sum, balance) => sum + balance.takenAdjustment, 0) +
+          (targetTaken - previousTaken),
+      );
+      await transaction.auditLog.create({
+        data: {
+          userId: rhUser.id,
+          action: AuditAction.UPDATE,
+          entity: 'LeaveBalance',
+          entityId: userId,
+          metadata: {
+            source: 'rh_taken_days_adjustment',
+            year: dto.year,
+            employeeId: employee.id,
+            employeeMatricule: employee.matricule,
+            previousTaken,
+            newTaken: targetTaken,
+            adjustmentDelta: this.roundDays(targetTaken - previousTaken),
+            totalTakenAdjustment,
+            comment: dto.comment?.trim() || null,
+          },
+        },
+      });
+
+      return {
+        userId,
+        year: dto.year,
+        previousTaken,
+        taken: targetTaken,
+        takenAdjustment: totalTakenAdjustment,
+      };
+    });
+  }
+
+  async updatePlannedDays(requestId: string, dto: UpdateRhPlannedDaysDto) {
+    const rhUser = await this.resolveRh(dto.rhId, dto.rhEmail);
+    const targetDays = dto.days;
+
+    return this.prisma.$transaction(async (transaction) => {
+      const request = await transaction.leaveRequest.findUnique({
+        where: { id: requestId },
+        select: {
+          id: true,
+          reference: true,
+          ownerId: true,
+          leaveTypeId: true,
+          startDate: true,
+          endDate: true,
+          days: true,
+          status: true,
+          submittedAt: true,
+          leaveType: { select: { code: true, name: true, category: true } },
+          owner: {
+            select: {
+              matricule: true,
+              nom: true,
+              prenom: true,
+            },
+          },
+        },
+      });
+      if (!request) throw new NotFoundException('Planification introuvable');
+      if (!this.isPaidBalanceLeaveType(request.leaveType)) {
+        throw new BadRequestException(
+          'Cette correction est rÃ©servÃ©e aux congÃ©s payÃ©s planifiÃ©s.',
+        );
+      }
+      if (!this.isPlannedRequest(request)) {
+        throw new BadRequestException(
+          'Cette demande nâ€™est plus considÃ©rÃ©e comme planifiÃ©e.',
+        );
+      }
+
+      const searchEnd = new Date(request.startDate);
+      searchEnd.setUTCDate(searchEnd.getUTCDate() + targetDays * 2 + 30);
+      const holidays = await transaction.publicHoliday.findMany({
+        where: {
+          country: 'CM',
+          OR: [
+            { date: { gte: request.startDate, lte: searchEnd } },
+            { recurring: true },
+          ],
+        },
+        select: { date: true, recurring: true },
+      });
+      const nextEndDate = endDateForWorkingDays(
+        request.startDate,
+        targetDays,
+        holidays,
+      );
+      const previousDays = this.roundDays(request.days);
+      const previousEndDate = request.endDate;
+
+      const updated = await transaction.leaveRequest.update({
+        where: { id: request.id },
+        data: {
+          days: targetDays,
+          endDate: nextEndDate,
+        },
+        select: {
+          id: true,
+          reference: true,
+          ownerId: true,
+          leaveTypeId: true,
+          startDate: true,
+          endDate: true,
+          days: true,
+        },
+      });
+
+      await this.leaveBalanceSync.syncForRequest(updated.id, transaction);
+      await transaction.auditLog.create({
+        data: {
+          userId: rhUser.id,
+          action: AuditAction.UPDATE,
+          entity: 'LeaveRequest',
+          entityId: updated.id,
+          metadata: {
+            source: 'rh_planned_days_adjustment',
+            reference: updated.reference,
+            employeeId: request.ownerId,
+            employeeMatricule: request.owner.matricule,
+            employeeName: this.fullName(request.owner),
+            leaveType: request.leaveType.code,
+            previousDays,
+            newDays: targetDays,
+            previousEndDate: this.toInputDate(previousEndDate),
+            newEndDate: this.toInputDate(updated.endDate),
+            comment: dto.comment?.trim() || null,
+          },
+        },
+      });
+
+      return {
+        id: updated.id,
+        reference: updated.reference,
+        userId: updated.ownerId,
+        leaveTypeId: updated.leaveTypeId,
+        previousDays,
+        days: this.roundDays(updated.days),
+        startDate: this.toInputDate(updated.startDate),
+        previousEndDate: this.toInputDate(previousEndDate),
+        endDate: this.toInputDate(updated.endDate),
+      };
+    });
+  }
 
   async decideRequest(id: string, dto: DecideRhRequestDto) {
     await this.autoRejectOverdueRequests();
@@ -664,6 +920,7 @@ export class RhGlobalViewService {
               acquired: true,
               carryover: true,
               taken: true,
+              takenAdjustment: true,
               scheduled: true,
               leaveType: { select: { code: true, category: true } },
             },
@@ -680,9 +937,11 @@ export class RhGlobalViewService {
           endDate: true,
           days: true,
           status: true,
-          leaveType: { select: { code: true, name: true } },
+          submittedAt: true,
+          leaveType: { select: { code: true, name: true, category: true } },
           owner: {
             select: {
+              id: true,
               nom: true,
               prenom: true,
               department: { select: { code: true, name: true } },
@@ -738,6 +997,7 @@ export class RhGlobalViewService {
             acquired: true;
             carryover: true;
             taken: true;
+            takenAdjustment: true;
             scheduled: true;
             leaveType: { select: { code: true; category: true } };
           };
@@ -757,6 +1017,12 @@ export class RhGlobalViewService {
     const taken = this.roundDays(
       cpBalances.reduce((sum, balance) => sum + balance.taken, 0),
     );
+    const takenAdjustment = this.roundDays(
+      cpBalances.reduce(
+        (sum, balance) => sum + (balance.takenAdjustment ?? 0),
+        0,
+      ),
+    );
     const planned = this.roundDays(
       cpBalances.reduce((sum, balance) => sum + balance.scheduled, 0),
     );
@@ -774,6 +1040,7 @@ export class RhGlobalViewService {
         'Non renseigné',
       total,
       taken,
+      takenAdjustment,
       planned,
       remaining,
       passif: this.roundDays(liability),
@@ -790,9 +1057,11 @@ export class RhGlobalViewService {
         endDate: true;
         days: true;
         status: true;
-        leaveType: { select: { code: true; name: true } };
+        submittedAt: true;
+        leaveType: { select: { code: true; name: true; category: true } };
         owner: {
           select: {
+            id: true;
             nom: true;
             prenom: true;
             department: { select: { code: true; name: true } };
@@ -807,6 +1076,7 @@ export class RhGlobalViewService {
     return {
       id: request.id,
       reference: request.reference,
+      ownerId: request.owner.id,
       employee: this.fullName(request.owner),
       manager: this.fullName(request.owner.n1) || 'Non renseigné',
       departmentCode: request.owner.department?.code ?? 'NONE',
@@ -817,6 +1087,11 @@ export class RhGlobalViewService {
       endDateIso: request.endDate.toISOString().slice(0, 10),
       days: this.roundDays(request.days),
       type: request.leaveType.name,
+      leaveTypeCode: request.leaveType.code,
+      leaveTypeCategory: request.leaveType.category,
+      canAdjustPlannedDays:
+        this.isPaidBalanceLeaveType(request.leaveType) &&
+        this.isPlannedRequest(request),
       statusCode: request.status,
       status: status.tone,
       label: status.label,
@@ -860,6 +1135,46 @@ export class RhGlobalViewService {
     }
 
     return { tone: 'valid' as const, label: 'Conforme' };
+  }
+
+  private isPaidBalanceLeaveType(leaveType: {
+    code: string;
+    category: LeaveCategory;
+  }) {
+    return (
+      leaveType.category === LeaveCategory.CONGE_PAYE ||
+      PAID_BALANCE_CODES.includes(
+        leaveType.code
+          .trim()
+          .toUpperCase() as (typeof PAID_BALANCE_CODES)[number],
+      )
+    );
+  }
+
+  private isPlannedRequest(request: {
+    status: LeaveRequestStatus;
+    submittedAt?: Date | null;
+    endDate: Date;
+  }) {
+    if (
+      request.status === LeaveRequestStatus.PENDING ||
+      request.status === LeaveRequestStatus.IN_REVIEW
+    ) {
+      return true;
+    }
+    if (request.status === LeaveRequestStatus.DRAFT && !request.submittedAt) {
+      return true;
+    }
+    if (request.status === LeaveRequestStatus.APPROVED) {
+      const now = new Date();
+      const today = new Date(
+        Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+      );
+
+      return request.endDate >= today;
+    }
+
+    return false;
   }
 
   private toBadgeStatus(status: LeaveRequestStatus): {

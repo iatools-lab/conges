@@ -366,7 +366,7 @@ export class EmployeeEventsService {
 
     await Promise.all(
       leaveTypes.map(async (leaveType) => {
-        const [approved, scheduled] = await Promise.all([
+        const [approved, scheduled, existingBalance] = await Promise.all([
           client.leaveRequest.aggregate({
             where: {
               ownerId: user.id,
@@ -387,7 +387,23 @@ export class EmployeeEventsService {
             },
             _sum: { days: true },
           }),
+          client.leaveBalance.findUnique({
+            where: {
+              userId_leaveTypeId_year: {
+                userId: user.id,
+                leaveTypeId: leaveType.id,
+                year,
+              },
+            },
+            select: { takenAdjustment: true },
+          }),
         ]);
+        const takenAdjustment = this.toNumber(
+          existingBalance?.takenAdjustment ?? 0,
+        );
+        const taken = this.toNumber(
+          this.toNumber(approved._sum.days) + takenAdjustment,
+        );
 
         await client.leaveBalance.upsert({
           where: {
@@ -407,7 +423,8 @@ export class EmployeeEventsService {
               year,
             }),
             carryover: 0,
-            taken: this.toNumber(approved._sum.days),
+            taken,
+            takenAdjustment,
             scheduled: this.toNumber(scheduled._sum.days),
           },
           update: {
@@ -416,7 +433,7 @@ export class EmployeeEventsService {
               user,
               year,
             }),
-            taken: this.toNumber(approved._sum.days),
+            taken,
             scheduled: this.toNumber(scheduled._sum.days),
           },
         });
