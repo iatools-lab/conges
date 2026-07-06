@@ -7,7 +7,13 @@ import {
   Patch,
   Post,
   Query,
+  Req,
 } from '@nestjs/common';
+import {
+  requireAuthSession,
+  type AuthenticatedRequest,
+  withAuthenticatedRh,
+} from '../../../common/auth/authenticated-request';
 import { RhSpecialLeavesService } from './special-leaves.service';
 import {
   CreateRhSpecialLeaveDto,
@@ -39,8 +45,15 @@ export class RhSpecialLeavesController {
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateRhSpecialLeaveDto) {
-    return this.specialLeavesService.update(id, dto);
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateRhSpecialLeaveDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.specialLeavesService.update(
+      id,
+      withAuthenticatedRh(dto, requireAuthSession(req)),
+    );
   }
 
   @Delete(':id')

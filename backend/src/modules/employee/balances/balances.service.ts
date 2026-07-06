@@ -73,6 +73,10 @@ export class EmployeeBalancesService {
 
     const yearStart = new Date(Date.UTC(year, 0, 1));
     const nextYearStart = new Date(Date.UTC(year + 1, 0, 1));
+    const now = new Date();
+    const today = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+    );
 
     await Promise.all(
       activeLeaveTypes.map(async (leaveType) => {
@@ -89,6 +93,7 @@ export class EmployeeBalancesService {
               leaveTypeId: leaveType.id,
               startDate: { gte: yearStart, lt: nextYearStart },
               status: LeaveRequestStatus.APPROVED,
+              endDate: { lt: today },
             },
             _sum: { days: true },
           }),
@@ -97,9 +102,24 @@ export class EmployeeBalancesService {
               ownerId: userId,
               leaveTypeId: leaveType.id,
               startDate: { gte: yearStart, lt: nextYearStart },
-              status: {
-                in: [LeaveRequestStatus.PENDING, LeaveRequestStatus.IN_REVIEW],
-              },
+              OR: [
+                {
+                  status: LeaveRequestStatus.APPROVED,
+                  endDate: { gte: today },
+                },
+                {
+                  status: {
+                    in: [
+                      LeaveRequestStatus.PENDING,
+                      LeaveRequestStatus.IN_REVIEW,
+                    ],
+                  },
+                },
+                {
+                  status: LeaveRequestStatus.DRAFT,
+                  submittedAt: null,
+                },
+              ],
             },
             _sum: { days: true },
           }),
@@ -228,12 +248,13 @@ export class EmployeeBalancesService {
     const paidTotals = this.sumRowsRaw(paidDetails);
     const rawSpecialTotals = this.sumRows(specialDetails);
     const specialTotals = {
-      ...rawSpecialTotals,
-      acquired: this.roundDays(
-        Math.min(rawSpecialTotals.acquired, SPECIAL_POOL_CAP_DAYS),
-      ),
+      acquired: specialDetails.length ? SPECIAL_POOL_CAP_DAYS : 0,
+      taken: rawSpecialTotals.taken,
+      scheduled: rawSpecialTotals.scheduled,
       remaining: this.roundDays(
-        Math.min(rawSpecialTotals.remaining, SPECIAL_POOL_CAP_DAYS),
+        (specialDetails.length ? SPECIAL_POOL_CAP_DAYS : 0) -
+          rawSpecialTotals.taken -
+          rawSpecialTotals.scheduled,
       ),
     };
 

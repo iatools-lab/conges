@@ -8,6 +8,7 @@ import {
   EventType,
   LeaveCategory,
   LeaveRequestStatus,
+  NotificationType,
   Prisma,
   Sexe,
   UserStatus,
@@ -52,8 +53,6 @@ type ActiveEmployee = {
   sexe: Sexe;
   status: UserStatus;
 };
-const EVENT_STATUS_MARKER =
-  /\s*\[RH_STATUS:(APPROVED|REJECTED|CANCELLED)\]\s*$/;
 const BIRTH_LEAVE_FALLBACK_DAYS = {
   [Sexe.F]: 90,
   [Sexe.M]: 3,
@@ -115,6 +114,9 @@ const eventRowSelect = {
   description: true,
   processed: true,
   proofUrl: true,
+  status: true,
+  rhComment: true,
+  reviewedAt: true,
   createdAt: true,
   user: {
     select: {
@@ -740,34 +742,41 @@ export class RhSpecialLeavesService {
       const status = dto.status;
       if (
         status !== undefined &&
+        status !== LeaveRequestStatus.IN_REVIEW &&
         status !== LeaveRequestStatus.APPROVED &&
         status !== LeaveRequestStatus.REJECTED &&
         status !== LeaveRequestStatus.CANCELLED
       ) {
         throw new BadRequestException(
-          'Pour un événement, seules les actions Valider ou Refuser sont autorisées',
+          'Décision RH invalide pour cet événement',
         );
       }
 
-      const processed =
-        status === LeaveRequestStatus.APPROVED
-          ? true
-          : status === LeaveRequestStatus.REJECTED ||
-              status === LeaveRequestStatus.CANCELLED
-            ? false
-            : event.processed;
-      const eventStatus =
-        status ??
-        (processed ? LeaveRequestStatus.APPROVED : LeaveRequestStatus.PENDING);
+      if (status === undefined) {
+        throw new BadRequestException('Une décision RH est requise');
+      }
+
+      const rhComment = dto.rhComment?.trim() || null;
+      if (
+        (status === LeaveRequestStatus.IN_REVIEW ||
+          status === LeaveRequestStatus.REJECTED) &&
+        !rhComment
+      ) {
+        throw new BadRequestException(
+          'Un commentaire RH est obligatoire pour cette décision',
+        );
+      }
+
+      const processed = status === LeaveRequestStatus.APPROVED;
 
       const updated = await transaction.event.update({
         where: { id: event.id },
         data: {
           processed,
-          description: this.withEventStatusMarker(
-            event.description,
-            eventStatus,
-          ),
+          status,
+          rhComment,
+          reviewedAt: new Date(),
+          description: this.stripLegacyEventStatusMarker(event.description),
         },
         select: eventRowSelect,
       });
@@ -786,21 +795,56 @@ export class RhSpecialLeavesService {
         updated.eventDate.getUTCFullYear(),
       );
 
+      await transaction.auditLog.create({
+        data: {
+          userId: dto.rhId ?? null,
+          action: AuditAction.UPDATE,
+          entity: 'Event',
+          entityId: updated.id,
+          metadata: {
+            source: 'rh_special_leaves',
+            decision: status,
+            comment: rhComment,
+            ownerId: updated.user.id,
+          },
+        },
+      });
+
+      await transaction.notification.create({
+        data: {
+          userId: updated.user.id,
+          type: NotificationType.SYSTEM,
+          title:
+            status === LeaveRequestStatus.APPROVED
+              ? 'Événement validé par la RH'
+              : status === LeaveRequestStatus.IN_REVIEW
+                ? 'Événement mis en revue par la RH'
+                : 'Événement refusé par la RH',
+          description: rhComment ?? 'Consultez le suivi de votre déclaration.',
+          link: '/declarer',
+        },
+      });
+
       const eventRow = this.toEventRow(updated);
 
       // Notify employee by email
-      if (status !== undefined && updated.user.email) {
+      if (updated.user.email) {
         const approved = status === LeaveRequestStatus.APPROVED;
+        const inReview = status === LeaveRequestStatus.IN_REVIEW;
         await this.emailService.send({
           to: updated.user.email,
           link: '/declarer',
           actionLabel: 'Voir mes declarations',
           subject: approved
             ? `Événement validé — ${this.eventTypeLabel(updated.type)}`
-            : `Événement refusé — ${this.eventTypeLabel(updated.type)}`,
+            : inReview
+              ? `Événement en revue — ${this.eventTypeLabel(updated.type)}`
+              : `Événement refusé — ${this.eventTypeLabel(updated.type)}`,
           text: approved
             ? `Votre déclaration d'événement (${this.eventTypeLabel(updated.type)} du ${updated.eventDate.toISOString().slice(0, 10)}) a été validée par la RH.`
-            : `Votre déclaration d'événement (${this.eventTypeLabel(updated.type)} du ${updated.eventDate.toISOString().slice(0, 10)}) a été refusée par la RH.`,
+            : inReview
+              ? `Votre déclaration d'événement (${this.eventTypeLabel(updated.type)} du ${updated.eventDate.toISOString().slice(0, 10)}) a été mise en revue par la RH.${rhComment ? ` Commentaire : ${rhComment}` : ''}`
+              : `Votre déclaration d'événement (${this.eventTypeLabel(updated.type)} du ${updated.eventDate.toISOString().slice(0, 10)}) a été refusée par la RH.${rhComment ? ` Commentaire : ${rhComment}` : ''}`,
         });
       }
 
@@ -1249,14 +1293,20 @@ export class RhSpecialLeavesService {
         eventDate: request.startDate,
       },
       orderBy: [{ createdAt: 'desc' }],
-      select: { id: true, processed: true },
+      select: { id: true, processed: true, status: true },
     });
 
     if (event) {
-      if (event.processed !== shouldBeProcessed) {
+      const eventStatus = shouldBeProcessed
+        ? LeaveRequestStatus.APPROVED
+        : LeaveRequestStatus.PENDING;
+      if (
+        event.processed !== shouldBeProcessed ||
+        event.status !== eventStatus
+      ) {
         await client.event.update({
           where: { id: event.id },
-          data: { processed: shouldBeProcessed },
+          data: { processed: shouldBeProcessed, status: eventStatus },
           select: { id: true },
         });
       }
@@ -1268,6 +1318,9 @@ export class RhSpecialLeavesService {
           eventDate: request.startDate,
           description: `Import RH ${request.reference}`,
           processed: shouldBeProcessed,
+          status: shouldBeProcessed
+            ? LeaveRequestStatus.APPROVED
+            : LeaveRequestStatus.PENDING,
         },
         select: { id: true },
       });
@@ -1477,6 +1530,7 @@ export class RhSpecialLeavesService {
       days: this.roundDays(request.days),
       proof: request.attachments.length > 0,
       proofLabel: request.attachments.length > 0 ? 'Oui' : 'Non',
+      proofUrl: request.attachments[0]?.url ?? null,
       status: status.tone,
       statusCode: request.status,
       statusLabel: status.label,
@@ -1533,12 +1587,7 @@ export class RhSpecialLeavesService {
   }
 
   private toEventRow(event: EventRowRecord) {
-    const mappedStatus =
-      this.extractEventStatusMarker(event.description) ??
-      (event.processed
-        ? LeaveRequestStatus.APPROVED
-        : LeaveRequestStatus.PENDING);
-    const status = this.toBadgeStatus(mappedStatus);
+    const status = this.toBadgeStatus(event.status);
     const eventLabel = this.eventTypeLabel(event.type);
 
     return {
@@ -1556,59 +1605,26 @@ export class RhSpecialLeavesService {
       days: 0,
       proof: Boolean(event.proofUrl),
       proofLabel: event.proofUrl ? 'Oui' : 'Non',
+      proofUrl: event.proofUrl,
       status: status.tone,
-      statusCode: mappedStatus,
+      statusCode: event.status,
       statusLabel: status.label,
       quotaTotal: 0,
       quotaUsed: 0,
       quotaRemaining: 0,
-      reason: this.stripEventStatusMarker(event.description),
-      rhComment: '',
+      reason: this.stripLegacyEventStatusMarker(event.description),
+      rhComment: event.rhComment ?? '',
       submittedAt: event.createdAt.toISOString(),
-      decidedAt:
-        mappedStatus === LeaveRequestStatus.APPROVED ||
-        mappedStatus === LeaveRequestStatus.REJECTED ||
-        mappedStatus === LeaveRequestStatus.CANCELLED
-          ? event.createdAt.toISOString()
-          : null,
+      decidedAt: event.reviewedAt?.toISOString() ?? null,
     };
   }
 
-  private withEventStatusMarker(
-    description: string | null | undefined,
-    status: LeaveRequestStatus,
-  ) {
-    const stripped = this.stripEventStatusMarker(description);
-    if (
-      status !== LeaveRequestStatus.APPROVED &&
-      status !== LeaveRequestStatus.REJECTED &&
-      status !== LeaveRequestStatus.CANCELLED
-    ) {
-      return stripped || null;
-    }
-
-    return `${stripped}${stripped ? ' ' : ''}[RH_STATUS:${status}]`;
-  }
-
-  private extractEventStatusMarker(
-    description: string | null | undefined,
-  ): LeaveRequestStatus | null {
-    const match = description?.match(EVENT_STATUS_MARKER);
-    if (!match) return null;
-
-    const status = match[1];
-    if (status === LeaveRequestStatus.APPROVED)
-      return LeaveRequestStatus.APPROVED;
-    if (status === LeaveRequestStatus.REJECTED)
-      return LeaveRequestStatus.REJECTED;
-    if (status === LeaveRequestStatus.CANCELLED)
-      return LeaveRequestStatus.CANCELLED;
-
-    return null;
-  }
-
-  private stripEventStatusMarker(description: string | null | undefined) {
-    return description?.replace(EVENT_STATUS_MARKER, '').trim() ?? '';
+  private stripLegacyEventStatusMarker(description: string | null | undefined) {
+    return (
+      description
+        ?.replace(/\s*\[RH_STATUS:(APPROVED|REJECTED|CANCELLED)\]\s*$/, '')
+        .trim() ?? ''
+    );
   }
 
   private async ensureChildFromBirthEvent(
@@ -1719,7 +1735,7 @@ export class RhSpecialLeavesService {
       [LeaveRequestStatus.PENDING]: { tone: 'pending', label: 'À confirmer' },
       [LeaveRequestStatus.IN_REVIEW]: { tone: 'pending', label: 'En revue' },
       [LeaveRequestStatus.APPROVED]: { tone: 'valid', label: 'Validé' },
-      [LeaveRequestStatus.REJECTED]: { tone: 'rejected', label: 'À revoir' },
+      [LeaveRequestStatus.REJECTED]: { tone: 'rejected', label: 'Refusé' },
       [LeaveRequestStatus.CANCELLED]: { tone: 'neutral', label: 'Annulé' },
     };
 

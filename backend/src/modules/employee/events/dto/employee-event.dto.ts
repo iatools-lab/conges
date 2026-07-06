@@ -11,7 +11,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
-import { EventType } from '@prisma/client';
+import { EventType, LeaveRequestStatus } from '@prisma/client';
 
 export class FindEmployeeEventsQueryDto {
   @IsOptional()
@@ -72,7 +72,17 @@ export class ReviewEmployeeEventDto {
   @IsEmail()
   rhEmail?: string;
 
+  @IsOptional()
   @Type(() => Boolean)
   @IsBoolean()
-  approved!: boolean;
+  approved?: boolean;
+
+  @IsOptional()
+  @IsEnum(LeaveRequestStatus)
+  status?: LeaveRequestStatus;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  rhComment?: string;
 }

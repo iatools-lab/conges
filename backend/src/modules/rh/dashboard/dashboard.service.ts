@@ -133,7 +133,13 @@ export class RhDashboardService {
           ...overlapDateWhere(range),
         },
       }),
-      this.prisma.event.count({ where: { processed: false } }),
+      this.prisma.event.count({
+        where: {
+          status: {
+            in: [LeaveRequestStatus.PENDING, LeaveRequestStatus.IN_REVIEW],
+          },
+        },
+      }),
       this.prisma.leaveRequest.aggregate({
         where: {
           status: LeaveRequestStatus.APPROVED,

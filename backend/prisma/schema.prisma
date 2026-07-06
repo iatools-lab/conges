@@ -179,19 +179,19 @@ model User {
   roles UserRole[]
 
   // Relations métier
-  leaveRequests      LeaveRequest[] @relation("RequestOwner")
-  validations        Validation[]   @relation("Validator")
-  balances           LeaveBalance[]
-  children           Child[]
-  events             Event[]
-  notifications      Notification[]
-  auditLogs          AuditLog[]
-  managedDepartments Department[]   @relation("DepartmentManager")
-  conflictsResolved  Conflict[]     @relation("ConflictResolver")
-  overtimeRequests   OvertimeRequest[] @relation("OvertimeOwner")
+  leaveRequests              LeaveRequest[]    @relation("RequestOwner")
+  validations                Validation[]      @relation("Validator")
+  balances                   LeaveBalance[]
+  children                   Child[]
+  events                     Event[]
+  notifications              Notification[]
+  auditLogs                  AuditLog[]
+  managedDepartments         Department[]      @relation("DepartmentManager")
+  conflictsResolved          Conflict[]        @relation("ConflictResolver")
+  overtimeRequests           OvertimeRequest[] @relation("OvertimeOwner")
   overtimeDecisionsAsManager OvertimeRequest[] @relation("OvertimeManagerValidator")
-  overtimeDecisionsAsRh OvertimeRequest[] @relation("OvertimeRhValidator")
-  otpRequests        OtpRequest[]
+  overtimeDecisionsAsRh      OvertimeRequest[] @relation("OvertimeRhValidator")
+  otpRequests                OtpRequest[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -218,18 +218,18 @@ model UserRole {
 // ============================================================
 
 model OtpRequest {
-  id        String    @id @default(cuid())
-  userId    String
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  type      OtpType   @default(PASSWORD_RESET)
-  code      String    // Code OTP haché avec scrypt et sel par code
-  status    OtpStatus @default(PENDING)
-  attempts  Int       @default(0)
-  maxAttempts Int     @default(3)
-  expiresAt DateTime
-  verifiedAt DateTime?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type        OtpType   @default(PASSWORD_RESET)
+  code        String // Code OTP haché avec scrypt et sel par code
+  status      OtpStatus @default(PENDING)
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(3)
+  expiresAt   DateTime
+  verifiedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   @@index([userId, status])
   @@index([createdAt])
@@ -275,19 +275,19 @@ model LeaveType {
 }
 
 model LeaveBalance {
-  id          String    @id @default(cuid())
-  userId      String
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  leaveTypeId String
-  leaveType   LeaveType @relation(fields: [leaveTypeId], references: [id])
-  year        Int // Année de référence
-  acquired    Float     @default(0) // Jours acquis
-  taken       Float     @default(0) // Jours pris
-  takenAdjustment Float @default(0) // Correction RH persistante appliquée aux jours pris
-  scheduled   Float     @default(0) // Jours planifiés (approuvés non encore pris)
-  carryover   Float     @default(0) // Report année précédente
-  expiresAt   DateTime?
-  updatedAt   DateTime  @updatedAt
+  id              String    @id @default(cuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  leaveTypeId     String
+  leaveType       LeaveType @relation(fields: [leaveTypeId], references: [id])
+  year            Int // Année de référence
+  acquired        Float     @default(0) // Jours acquis
+  taken           Float     @default(0) // Jours pris
+  takenAdjustment Float     @default(0) // Correction RH persistante appliquée aux jours pris
+  scheduled       Float     @default(0) // Jours planifiés (approuvés non encore pris)
+  carryover       Float     @default(0) // Report année précédente
+  expiresAt       DateTime?
+  updatedAt       DateTime  @updatedAt
 
   @@unique([userId, leaveTypeId, year])
   @@index([userId])
@@ -358,18 +358,22 @@ model Attachment {
 // ============================================================
 
 model Event {
-  id          String    @id @default(cuid())
+  id          String             @id @default(cuid())
   userId      String
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
   type        EventType
   eventDate   DateTime
   description String?
   proofUrl    String?
-  processed   Boolean   @default(false) // Traité par RH ?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  status      LeaveRequestStatus @default(PENDING)
+  rhComment   String?
+  reviewedAt  DateTime?
+  processed   Boolean            @default(false) // Traité par RH ?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
 
   @@index([userId])
+  @@index([status])
 }
 
 // ============================================================

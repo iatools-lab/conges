@@ -22,7 +22,7 @@ import { Calendar, FileText, Paperclip, Plus } from "lucide-react";
 import React, { useState } from "react";
 import { toast } from "sonner";
 
-type EventStatusTone = "valid" | "pending";
+type EventStatusTone = "valid" | "pending" | "rejected";
 
 type EventRow = {
   id: string;
@@ -33,8 +33,10 @@ type EventRow = {
   description: string;
   hasProof: boolean;
   processed: boolean;
+  statusCode: "PENDING" | "IN_REVIEW" | "APPROVED" | "REJECTED" | "CANCELLED";
   statusLabel: string;
   statusTone: EventStatusTone;
+  rhComment: string;
 };
 
 type EventsResponse = {
@@ -80,8 +82,12 @@ export function Declarer() {
   });
 
   const rows = eventsQuery.data?.rows ?? emptyRows;
-  const pendingCount = rows.filter((row) => !row.processed).length;
-  const processedCount = rows.filter((row) => row.processed).length;
+  const pendingCount = rows.filter(
+    (row) => row.statusCode === "PENDING" || row.statusCode === "IN_REVIEW",
+  ).length;
+  const processedCount = rows.filter(
+    (row) => row.statusCode === "APPROVED" || row.statusCode === "REJECTED",
+  ).length;
 
   const startNewDeclaration = (row?: EventRow) => {
     setType(row?.type ?? "BIRTH");
@@ -159,27 +165,28 @@ export function Declarer() {
           }
         />
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[820px] text-sm">
+          <table className="w-full min-w-[1000px] text-sm">
             <thead className="bg-muted/40 text-left text-xs text-muted-foreground">
               <tr>
                 <th className="px-5 py-3">Événement</th>
                 <th className="px-5 py-3">Date</th>
                 <th className="px-5 py-3">Justificatif</th>
                 <th className="px-5 py-3">Statut</th>
-                <th className="px-5 py-3">Commentaire</th>
+                <th className="px-5 py-3">Ma description</th>
+                <th className="px-5 py-3">Commentaire RH</th>
                 <th className="px-5 py-3 text-right">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y">
               {eventsQuery.isLoading ? (
                 <tr>
-                  <td colSpan={6} className="px-5 py-10 text-center text-muted-foreground">
+                  <td colSpan={7} className="px-5 py-10 text-center text-muted-foreground">
                     Chargement des déclarations...
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-5 py-10 text-center text-muted-foreground">
+                  <td colSpan={7} className="px-5 py-10 text-center text-muted-foreground">
                     Aucune déclaration enregistrée.
                   </td>
                 </tr>
@@ -193,6 +200,7 @@ export function Declarer() {
                       <Badge tone={row.statusTone}>{row.statusLabel}</Badge>
                     </td>
                     <td className="px-5 py-3 text-muted-foreground">{row.description || "—"}</td>
+                    <td className="px-5 py-3 text-muted-foreground">{row.rhComment || "—"}</td>
                     <td className="px-5 py-3 text-right">
                       <Button variant="outline" onClick={() => startNewDeclaration(row)}>
                         Déclarer
@@ -298,7 +306,7 @@ export function Declarer() {
                 <input
                   key={fileInputKey}
                   type="file"
-                  accept="image/*"
+                  accept="application/pdf,image/jpeg,image/png,image/webp,image/gif"
                   aria-label="Choisir un justificatif"
                   onChange={(event) => setFile(event.target.files?.[0] ?? null)}
                   className="sr-only"
@@ -309,6 +317,7 @@ export function Declarer() {
                   <span>Aucun fichier</span>
                 )}
               </label>
+              <div className="mt-1 text-xs text-muted-foreground">Image ou PDF, 3 Mo maximum.</div>
             </Field>
             <DialogFooter className="gap-2">
               <Button type="button" variant="outline" onClick={() => setOpen(false)}>

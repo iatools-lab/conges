@@ -1,4 +1,5 @@
 import {
+  IsEmail,
   IsArray,
   IsEnum,
   IsNumber,
@@ -55,6 +56,14 @@ export class CreateRhSpecialLeaveDto {
 export class UpdateRhSpecialLeaveDto {
   @IsOptional()
   @IsString()
+  rhId?: string;
+
+  @IsOptional()
+  @IsEmail()
+  rhEmail?: string;
+
+  @IsOptional()
+  @IsString()
   employeeId?: string;
 
   @IsOptional()
@@ -82,6 +91,10 @@ export class UpdateRhSpecialLeaveDto {
   @IsOptional()
   @IsString()
   reason?: string;
+
+  @IsOptional()
+  @IsString()
+  rhComment?: string;
 
   @IsOptional()
   @IsEnum(LeaveRequestStatus)

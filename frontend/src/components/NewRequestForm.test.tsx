@@ -26,13 +26,39 @@ const leaveTypesWithMaternity: LeaveTypeOption[] = [
   ...leaveTypes,
   { code: "MAT", name: "Congés maternité", requiresProof: true },
 ];
+const specialLeaveTypes: LeaveTypeOption[] = [
+  {
+    code: "SPECIAL",
+    name: "Congés spéciaux",
+    category: "CONGE_SPECIAL",
+    requiresProof: true,
+    children: [
+      {
+        code: "PAT",
+        name: "Congé paternité",
+        category: "CONGE_PATERNITE",
+        requiresProof: true,
+      },
+    ],
+  },
+];
 
 function mockFormApi(
   balances: Array<{ code: string; remaining: number }>,
   holidays: Array<{ id: string; date: string; name: string; recurring: boolean }> = [],
+  specialRemaining?: number,
 ) {
   vi.mocked(apiFetch).mockImplementation((path) =>
-    Promise.resolve(path.includes("/holidays") ? { rows: holidays } : { rows: balances }),
+    Promise.resolve(
+      path.includes("/holidays")
+        ? { rows: holidays }
+        : {
+            rows: balances,
+            ...(specialRemaining === undefined
+              ? {}
+              : { specialTotals: { remaining: specialRemaining } }),
+          },
+    ),
   );
 }
 
@@ -56,6 +82,7 @@ describe("NewRequestForm", () => {
 
     await user.click(screen.getByRole("button", { name: /planifier/i }));
     expect(await screen.findByText("Planifier un congé")).toBeInTheDocument();
+    expect(screen.getByRole("dialog")).toHaveClass("overflow-y-auto");
 
     fireEvent.change(screen.getByLabelText(/date de début/i), {
       target: { value: "2026-06-01" },
@@ -191,6 +218,43 @@ describe("NewRequestForm", () => {
       reason: undefined,
       draft: undefined,
       proof,
+    });
+  });
+
+  it("keeps proof optional for special leave and uses the shared 12-day balance", async () => {
+    mockFormApi(
+      [
+        { code: "SPE", remaining: 12 },
+        { code: "PAT", remaining: 0 },
+      ],
+      [],
+      9,
+    );
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(<NewRequestForm session={session} leaveTypes={specialLeaveTypes} onSubmit={onSubmit} />);
+
+    await user.click(screen.getByRole("button", { name: /nouvelle demande/i }));
+    await waitFor(() => expect(apiFetch).toHaveBeenCalled());
+    expect(screen.getByText(/justificatif \(optionnel\)/i)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(/date de début/i), {
+      target: { value: "2026-06-01" },
+    });
+    fireEvent.change(screen.getByLabelText(/date de fin/i), {
+      target: { value: "2026-06-03" },
+    });
+
+    expect(await screen.findByText(/solde disponible: 9 jour/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /envoyer la demande/i }));
+
+    expect(onSubmit).toHaveBeenCalledWith({
+      leaveTypeCode: "SPECIAL",
+      leaveSubtypeCode: "PAT",
+      startDate: "2026-06-01",
+      endDate: "2026-06-03",
+      reason: undefined,
+      draft: undefined,
     });
   });
 });

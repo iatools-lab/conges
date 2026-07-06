@@ -1,6 +1,7 @@
 import {
   AuditAction,
   EventType,
+  LeaveRequestStatus,
   NotificationType,
   Sexe,
   UserStatus,
@@ -27,7 +28,10 @@ const event = {
   type: EventType.BIRTH,
   eventDate: new Date('2026-06-01T00:00:00.000Z'),
   description: 'Acte de naissance',
-  proofUrl: 'data:image/png;base64,anVzdGlmaWNhdGlm',
+  proofUrl: 'data:application/pdf;base64,anVzdGlmaWNhdGlm',
+  status: LeaveRequestStatus.PENDING,
+  rhComment: null,
+  reviewedAt: null,
   processed: false,
   createdAt: new Date('2026-06-01T08:00:00.000Z'),
   updatedAt: new Date('2026-06-01T08:00:00.000Z'),
@@ -95,8 +99,8 @@ describe('EmployeeEventsService', () => {
   it('keeps event declaration separate from leave requests', async () => {
     const { prisma, emailService, service } = createHarness();
     const proof = {
-      originalname: 'justificatif.png',
-      mimetype: 'image/png',
+      originalname: 'justificatif.pdf',
+      mimetype: 'application/pdf',
       size: 12,
       buffer: Buffer.from('justificatif'),
     };
@@ -145,6 +149,14 @@ describe('EmployeeEventsService', () => {
         expect.objectContaining({ to: 'rh@upowa.org' }),
         expect.objectContaining({ to: 'manager@upowa.org' }),
       ]),
+    );
+    expect(prisma.event.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          proofUrl: expect.stringMatching(/^data:application\/pdf;base64,/),
+          status: LeaveRequestStatus.PENDING,
+        }),
+      }),
     );
   });
 });

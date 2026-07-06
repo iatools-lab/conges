@@ -182,7 +182,7 @@ export class EmployeeLeaveRequestsService {
     });
     const attachment = this.toAttachment(proof);
     this.assertRequiredProof(
-      leaveSelection.leaveType.requiresProof,
+      this.requiresProof(leaveSelection),
       Boolean(attachment),
     );
 
@@ -320,7 +320,13 @@ export class EmployeeLeaveRequestsService {
       leaveSelection?.leaveType.requiresProof ??
       existing.leaveType.requiresProof;
     this.assertRequiredProof(
-      proofRequired,
+      proofRequired &&
+        !this.isSpecialSelection(
+          leaveSelection ?? {
+            leaveType: existing.leaveType,
+            poolCode: this.poolCodeFromLeaveType(existing.leaveType),
+          },
+        ),
       Boolean(attachment) || (existing.attachments?.length ?? 0) > 0,
     );
     const effectiveYear = startYear;
@@ -425,7 +431,8 @@ export class EmployeeLeaveRequestsService {
       );
     }
     this.assertRequiredProof(
-      existing.leaveType.requiresProof,
+      existing.leaveType.requiresProof &&
+        !this.isTypeInPool(existing.leaveType, SPECIAL_POOL_CODE),
       (existing.attachments?.length ?? 0) > 0,
     );
     this.ensurePaidLeaveTakingAllowed({
@@ -616,7 +623,13 @@ export class EmployeeLeaveRequestsService {
   private async resolveLeaveType(code: string) {
     const leaveType = await this.prisma.leaveType.findFirst({
       where: { code: code.trim(), active: true },
-      select: { id: true, code: true, name: true, requiresProof: true },
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        category: true,
+        requiresProof: true,
+      },
     });
 
     if (!leaveType) throw new NotFoundException('Type de congé introuvable');
@@ -725,9 +738,24 @@ export class EmployeeLeaveRequestsService {
       (sum, leaveType) => sum + (balanceByTypeId.get(leaveType.id) ?? 0),
       0,
     );
+    const specialUsed = balances.reduce(
+      (sum, balance) => sum + balance.taken + balance.scheduled,
+      0,
+    );
+    const existingSpecialCredit =
+      poolKind === SPECIAL_POOL_CODE &&
+      params.existingLeaveTypeId &&
+      candidates.some(
+        (candidate) => candidate.id === params.existingLeaveTypeId,
+      )
+        ? (params.existingCredit ?? 0)
+        : 0;
     const pooledRemaining = this.roundDays(
       poolKind === SPECIAL_POOL_CODE
-        ? Math.min(SPECIAL_POOL_CAP_DAYS, pooledRemainingRaw)
+        ? Math.max(
+            0,
+            SPECIAL_POOL_CAP_DAYS - specialUsed + existingSpecialCredit,
+          )
         : pooledRemainingRaw,
     );
 
@@ -789,6 +817,7 @@ export class EmployeeLeaveRequestsService {
         id: selected.id,
         code: selected.code,
         name: selected.name,
+        category: selected.category,
         requiresProof: selected.requiresProof,
       },
       poolCode: poolKind,
@@ -944,7 +973,9 @@ export class EmployeeLeaveRequestsService {
         code: MATERNITY_CODE,
         name: 'Congés maternité',
         category: LeaveCategory.CONGE_MATERNITE,
-        requiresProof: true,
+        requiresProof: paidChildren.some(
+          (leaveType) => leaveType.requiresProof,
+        ),
       },
     );
 
@@ -1311,6 +1342,31 @@ export class EmployeeLeaveRequestsService {
       (leaveType.category === LeaveCategory.CONGE_SPECIAL ||
         leaveType.category === LeaveCategory.CONGE_PATERNITE ||
         leaveType.category === LeaveCategory.CONGE_MALADIE)
+    );
+  }
+
+  private requiresProof(selection: {
+    leaveType: {
+      code: string;
+      category: LeaveCategory;
+      requiresProof: boolean;
+    };
+    poolCode: string | null;
+  }) {
+    return (
+      selection.leaveType.requiresProof &&
+      !this.isSpecialSelection(selection) &&
+      selection.leaveType.code.trim().toUpperCase() !== MATERNITY_CODE
+    );
+  }
+
+  private isSpecialSelection(selection: {
+    leaveType: { code: string; category: LeaveCategory };
+    poolCode: string | null;
+  }) {
+    return (
+      selection.poolCode === SPECIAL_POOL_CODE ||
+      this.isTypeInPool(selection.leaveType, SPECIAL_POOL_CODE)
     );
   }
 

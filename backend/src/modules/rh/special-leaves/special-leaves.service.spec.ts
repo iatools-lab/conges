@@ -93,6 +93,7 @@ function createHarness() {
     },
     event: {
       findFirst: jest.fn(),
+      findUnique: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
     },
@@ -101,6 +102,9 @@ function createHarness() {
       create: jest.fn(),
     },
     auditLog: {
+      create: jest.fn(),
+    },
+    notification: {
       create: jest.fn(),
     },
     $transaction: jest.fn(async (callback) => callback(prisma)),
@@ -128,6 +132,7 @@ function createHarness() {
   prisma.event.update.mockResolvedValue({ id: 'event-1' });
   prisma.child.findFirst.mockResolvedValue({ id: 'child-1' });
   prisma.auditLog.create.mockResolvedValue({});
+  prisma.notification.create.mockResolvedValue({});
   prisma.leaveRequest.create.mockImplementation(({ data }: any) => {
     const leaveType = typesById.get(data.leaveTypeId) ?? specialType;
     return Promise.resolve({
@@ -298,5 +303,64 @@ describe('RhSpecialLeavesService', () => {
         }),
       }),
     );
+  });
+
+  it('puts every employee event in review with a persistent RH comment', async () => {
+    const { prisma, service } = createHarness();
+    const declaredEvent = {
+      id: 'event-1',
+      userId: employee.id,
+      type: 'MARRIAGE',
+      eventDate: new Date('2026-07-10T00:00:00.000Z'),
+      description: 'Mariage civil',
+      proofUrl: 'data:application/pdf;base64,cHJldXZl',
+      processed: false,
+      status: LeaveRequestStatus.PENDING,
+      rhComment: null,
+      reviewedAt: null,
+      createdAt: new Date('2026-07-01T08:00:00.000Z'),
+      user: {
+        ...employee,
+        email: 'employee@upowa.org',
+        department: { name: 'Operations' },
+      },
+    };
+    prisma.event.findUnique.mockResolvedValue(declaredEvent);
+    prisma.event.update.mockImplementation(({ data }: any) =>
+      Promise.resolve({
+        ...declaredEvent,
+        ...data,
+        user: declaredEvent.user,
+      }),
+    );
+
+    const result = await service.update('event:event-1', {
+      status: LeaveRequestStatus.IN_REVIEW,
+      rhComment: 'Merci de préciser la date sur le document.',
+      rhId: 'rh-1',
+    });
+
+    expect(prisma.event.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          processed: false,
+          status: LeaveRequestStatus.IN_REVIEW,
+          rhComment: 'Merci de préciser la date sur le document.',
+        }),
+      }),
+    );
+    expect(prisma.notification.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          userId: employee.id,
+          link: '/declarer',
+        }),
+      }),
+    );
+    expect(result).toMatchObject({
+      statusCode: LeaveRequestStatus.IN_REVIEW,
+      rhComment: 'Merci de préciser la date sur le document.',
+      proofUrl: 'data:application/pdf;base64,cHJldXZl',
+    });
   });
 });

@@ -70,7 +70,9 @@ describe("Declarer", () => {
     const comment = document.querySelector("textarea");
     expect(comment).not.toBeNull();
     await user.type(comment, "Naissance déclarée");
-    const proof = new File(["justificatif"], "justificatif.png", { type: "image/png" });
+    const proof = new File(["justificatif"], "justificatif.pdf", {
+      type: "application/pdf",
+    });
     await user.upload(screen.getByLabelText(/choisir un justificatif/i), proof);
     await user.click(screen.getByRole("button", { name: /soumettre à la rh/i }));
 
@@ -90,7 +92,7 @@ describe("Declarer", () => {
     expect(body.get("type")).toBe("BIRTH");
     expect(body.get("childBirthDate")).toBeTruthy();
     expect(body.get("description")).toBe("Naissance déclarée");
-    expect((body.get("proof") as File).name).toBe("justificatif.png");
+    expect((body.get("proof") as File).name).toBe("justificatif.pdf");
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 
@@ -119,5 +121,36 @@ describe("Declarer", () => {
     expect(body.get("type")).toBe("OTHER");
     expect(body.get("childBirthDate")).toBeNull();
     expect(body.get("description")).toBe("Déménagement - Nouveau domicile");
+  });
+
+  it("shows the RH review status and comment to the employee", async () => {
+    vi.mocked(apiFetch).mockImplementation((path: string) => {
+      if (path.startsWith("/employee/events?")) {
+        return Promise.resolve({
+          rows: [
+            {
+              id: "event-1",
+              type: "MARRIAGE",
+              typeLabel: "Mariage",
+              eventDate: "10/07/2026",
+              createdAt: "01/07/2026",
+              description: "Mariage civil",
+              hasProof: true,
+              processed: false,
+              statusCode: "IN_REVIEW",
+              statusLabel: "En revue RH",
+              statusTone: "pending",
+              rhComment: "Merci de préciser la date sur le document.",
+            },
+          ],
+        });
+      }
+      return Promise.resolve({});
+    });
+
+    renderPage();
+
+    expect(await screen.findByText("En revue RH")).toBeInTheDocument();
+    expect(screen.getByText("Merci de préciser la date sur le document.")).toBeInTheDocument();
   });
 });

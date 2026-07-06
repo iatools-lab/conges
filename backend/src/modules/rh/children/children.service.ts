@@ -3,7 +3,13 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { EventType, Prisma, Sexe, UserStatus } from '@prisma/client';
+import {
+  EventType,
+  LeaveRequestStatus,
+  Prisma,
+  Sexe,
+  UserStatus,
+} from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CreateRhChildDto, UpdateRhChildDto } from './dto/rh-child.dto';
 
@@ -160,6 +166,7 @@ export class RhChildrenService {
           eventDate: child.dateNaissance,
           description,
           processed: true,
+          status: LeaveRequestStatus.APPROVED,
         },
       });
       return;
@@ -172,6 +179,7 @@ export class RhChildrenService {
         eventDate: child.dateNaissance,
         description,
         processed: true,
+        status: LeaveRequestStatus.APPROVED,
       },
     });
   }

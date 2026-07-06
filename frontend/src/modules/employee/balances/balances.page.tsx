@@ -41,14 +41,22 @@ function formatNumber(value: number) {
   return new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 }).format(value);
 }
 
-function BalanceTable({ rows, totals }: { rows: BalanceRow[]; totals: BalanceTotals }) {
+function BalanceTable({
+  rows,
+  totals,
+  acquiredLabel = "Jours acquis",
+}: {
+  rows: BalanceRow[];
+  totals: BalanceTotals;
+  acquiredLabel?: string;
+}) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead className="text-left text-xs text-muted-foreground bg-muted/50">
           <tr>
             <th className="px-5 py-3">Source du droit</th>
-            <th className="px-5 py-3">Jours acquis</th>
+            <th className="px-5 py-3">{acquiredLabel}</th>
             <th className="px-5 py-3">Jours pris</th>
             <th className="px-5 py-3">Jours planifiés</th>
             <th className="px-5 py-3">Solde restant</th>
@@ -137,11 +145,16 @@ export function Solde() {
               Chargement des congés spéciaux...
             </div>
           ) : (
-            <BalanceTable rows={specialRows} totals={specialTotals} />
+            <BalanceTable
+              rows={specialRows}
+              totals={specialTotals}
+              acquiredLabel="Droit par type"
+            />
           )}
           <div className="px-5 py-3 text-xs text-muted-foreground flex items-center gap-2 border-t">
-            <Info className="size-4" /> Affichage regroupé en 2 catégories: PAYE et SPECIAL. Le pool
-            SPECIAL est plafonné à 12 jours sur l'année.
+            <Info className="size-4" /> Tous les congés spéciaux actifs sont détaillés ci-dessus.
+            Ils consomment le même quota annuel de 12 jours : solde restant = 12 − jours pris −
+            jours planifiés.
           </div>
         </Card>
       </div>

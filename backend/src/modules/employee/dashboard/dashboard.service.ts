@@ -20,8 +20,6 @@ type BadgeTone =
   | 'neutral';
 
 const PAID_POOL_CODES = new Set(['CP', 'ANC', 'ENF', 'PASSIF']);
-const SPECIAL_POOL_CODES = new Set(['SPE', 'PAT', 'MAL']);
-const EXCLUDED_SPECIAL_CODES = new Set(['PASSIF', 'MAT', 'SS']);
 
 const dashboardUserSelect = {
   id: true,
@@ -76,7 +74,15 @@ export class EmployeeDashboardService {
           ownerId: userId,
           status: LeaveRequestStatus.APPROVED,
           ...overlapDateWhere(range),
-          leaveType: { category: LeaveCategory.CONGE_SPECIAL },
+          leaveType: {
+            category: {
+              in: [
+                LeaveCategory.CONGE_SPECIAL,
+                LeaveCategory.CONGE_PATERNITE,
+                LeaveCategory.CONGE_MALADIE,
+              ],
+            },
+          },
         },
         _sum: { days: true },
       }),
@@ -156,9 +162,6 @@ export class EmployeeDashboardService {
     const paidBalances = balances.filter((balance) =>
       this.isPaidPoolBalance(balance.leaveType),
     );
-    const specialBalances = balances.filter((balance) =>
-      this.isSpecialPoolBalance(balance.leaveType),
-    );
     const total = paidBalances.reduce(
       (sum, balance) => sum + balance.acquired + balance.carryover,
       0,
@@ -197,10 +200,6 @@ export class EmployeeDashboardService {
       (sum, balance) => sum + balance.carryover,
       0,
     );
-    const specialLeaveLimit = specialBalances.reduce(
-      (sum, balance) => sum + balance.acquired + balance.carryover,
-      0,
-    );
     const specialLeaveQuota = this.leaveEntitlements.getAcquiredDays({
       leaveType: {
         code: 'SPE',
@@ -235,9 +234,7 @@ export class EmployeeDashboardService {
           ? this.roundDays(childBalanceDays)
           : this.leaveEntitlements.getChildBonusDays(user),
         specialLeaveDays,
-        specialLeaveLimit: this.roundDays(
-          specialLeaveLimit || specialLeaveQuota,
-        ),
+        specialLeaveLimit: this.roundDays(specialLeaveQuota),
         pendingRequests,
       },
       nextAbsence: nextAbsence ? this.toNextAbsence(nextAbsence) : null,
@@ -349,22 +346,6 @@ export class EmployeeDashboardService {
   private isPaidPoolBalance(leaveType: { code: string }) {
     return PAID_POOL_CODES.has(
       this.leaveEntitlements.normalizeCode(leaveType.code),
-    );
-  }
-
-  private isSpecialPoolBalance(leaveType: {
-    code: string;
-    category: LeaveCategory;
-  }) {
-    const code = this.leaveEntitlements.normalizeCode(leaveType.code);
-    if (this.isPaidPoolBalance(leaveType)) return false;
-    if (EXCLUDED_SPECIAL_CODES.has(code)) return false;
-
-    return (
-      SPECIAL_POOL_CODES.has(code) ||
-      leaveType.category === LeaveCategory.CONGE_SPECIAL ||
-      leaveType.category === LeaveCategory.CONGE_PATERNITE ||
-      leaveType.category === LeaveCategory.CONGE_MALADIE
     );
   }
 }

@@ -34,6 +34,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -41,8 +42,11 @@ import {
 import {
   CalendarDays,
   CheckCircle2,
+  Clock3,
   Download,
+  Eye,
   FileCheck2,
+  FileSearch,
   FileUp,
   Pencil,
   Plus,
@@ -90,6 +94,7 @@ type SpecialLeaveRow = {
   days: number;
   proof: boolean;
   proofLabel: string;
+  proofUrl?: string | null;
   status: BadgeTone;
   statusCode: SpecialLeaveStatusCode;
   statusLabel: string;
@@ -174,7 +179,7 @@ const statusOptions: { value: SpecialLeaveStatusCode; label: string }[] = [
   { value: "PENDING", label: "À confirmer" },
   { value: "IN_REVIEW", label: "En revue" },
   { value: "APPROVED", label: "Validé" },
-  { value: "REJECTED", label: "À revoir" },
+  { value: "REJECTED", label: "Refusé" },
   { value: "CANCELLED", label: "Annulé" },
 ];
 
@@ -215,6 +220,182 @@ function normalizePayload(payload: SpecialLeavePayload): SpecialLeavePayload {
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 }).format(value);
+}
+
+function isImageProof(url: string) {
+  return url.startsWith("data:image/") || /\.(png|jpe?g|webp|gif)(?:[?#].*)?$/i.test(url);
+}
+
+function ProofPreview({ url, title }: { url?: string | null; title: string }) {
+  if (!url) {
+    return (
+      <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">
+        Aucun justificatif joint.
+      </div>
+    );
+  }
+
+  if (isImageProof(url)) {
+    return (
+      <div className="flex max-h-[65vh] justify-center overflow-auto rounded-md border bg-muted/20 p-2">
+        <img src={url} alt={title} className="max-h-[62vh] max-w-full object-contain" />
+      </div>
+    );
+  }
+
+  return (
+    <iframe src={url} title={title} className="h-[65vh] w-full rounded-md border bg-background" />
+  );
+}
+
+function EventDetailsDialog({
+  row,
+  open,
+  onOpenChange,
+}: {
+  row: SpecialLeaveRow;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[calc(100vh-2rem)] overflow-y-auto sm:max-w-[760px]">
+        <DialogHeader>
+          <DialogTitle>Détail de l'événement</DialogTitle>
+          <DialogDescription>{row.reference}</DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-3 text-sm sm:grid-cols-2">
+          <Detail label="Employé" value={`${row.employeeName} (${row.matricule})`} />
+          <Detail label="Département" value={row.department} />
+          <Detail label="Événement" value={row.eventLabel} />
+          <Detail label="Date" value={formatDate(row.startDate)} />
+          <Detail label="Statut" value={row.statusLabel} />
+          <Detail label="Justificatif" value={row.proofLabel} />
+          <Detail label="Description de l'employé" value={row.reason || "—"} wide />
+          <Detail label="Commentaire RH" value={row.rhComment || "—"} wide />
+        </div>
+        <div className="space-y-2">
+          <div className="text-sm font-medium">Justificatif</div>
+          <ProofPreview url={row.proofUrl} title={`Justificatif ${row.reference}`} />
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ProofDialog({
+  row,
+  open,
+  onOpenChange,
+}: {
+  row: SpecialLeaveRow;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[calc(100vh-2rem)] overflow-y-auto sm:max-w-[900px]">
+        <DialogHeader>
+          <DialogTitle>Justificatif · {row.reference}</DialogTitle>
+          <DialogDescription>Aperçu du document transmis par {row.employeeName}.</DialogDescription>
+        </DialogHeader>
+        <ProofPreview url={row.proofUrl} title={`Justificatif ${row.reference}`} />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function EventDecisionDialog({
+  row,
+  status,
+  open,
+  disabled,
+  onOpenChange,
+  onConfirm,
+}: {
+  row: SpecialLeaveRow;
+  status: "IN_REVIEW" | "REJECTED" | "APPROVED";
+  open: boolean;
+  disabled: boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: (comment: string) => Promise<unknown>;
+}) {
+  const [comment, setComment] = useState("");
+  const commentRequired = status !== "APPROVED";
+  const title =
+    status === "IN_REVIEW"
+      ? "Mettre l'événement en revue"
+      : status === "REJECTED"
+        ? "Refuser l'événement"
+        : "Valider l'événement";
+
+  const submit = async () => {
+    if (commentRequired && !comment.trim()) return;
+    try {
+      await onConfirm(comment.trim());
+      setComment("");
+      onOpenChange(false);
+    } catch (error) {
+      toast.error("Décision impossible", {
+        description: error instanceof Error ? error.message : "Erreur inconnue",
+      });
+    }
+  };
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        onOpenChange(nextOpen);
+        if (!nextOpen) setComment("");
+      }}
+    >
+      <DialogContent className="sm:max-w-[520px]">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>
+            {row.eventLabel} déclaré par {row.employeeName}. Le commentaire sera visible par
+            l'employé.
+          </DialogDescription>
+        </DialogHeader>
+        <label className="grid gap-1.5 text-sm">
+          <span className="text-xs font-medium text-muted-foreground">
+            Commentaire RH {commentRequired ? "*" : "(optionnel)"}
+          </span>
+          <textarea
+            value={comment}
+            onChange={(event) => setComment(event.target.value)}
+            rows={4}
+            maxLength={1000}
+            className={`${inputClass} resize-y`}
+            required={commentRequired}
+          />
+        </label>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            Annuler
+          </Button>
+          <Button
+            type="button"
+            variant={status === "REJECTED" ? "danger" : "primary"}
+            disabled={disabled || (commentRequired && !comment.trim())}
+            onClick={() => void submit()}
+          >
+            Confirmer
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function Detail({ label, value, wide = false }: { label: string; value: string; wide?: boolean }) {
+  return (
+    <div className={`rounded-md border bg-muted/25 p-3 ${wide ? "sm:col-span-2" : ""}`}>
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="mt-1 whitespace-pre-wrap font-medium">{value}</div>
+    </div>
+  );
 }
 
 function normalizeHeader(value: ExcelCell) {
@@ -633,19 +814,26 @@ function SpecialLeaveActions({
   employees,
   disabled,
   onCancel,
-  onApproveEvent,
-  onRejectEvent,
+  onDecideEvent,
   onSave,
 }: {
   row: SpecialLeaveRow;
   employees: RhEmployee[];
   disabled: boolean;
   onCancel: (row: SpecialLeaveRow) => void;
-  onApproveEvent: (row: SpecialLeaveRow) => void;
-  onRejectEvent: (row: SpecialLeaveRow) => void;
+  onDecideEvent: (
+    row: SpecialLeaveRow,
+    status: "IN_REVIEW" | "REJECTED" | "APPROVED",
+    comment: string,
+  ) => Promise<unknown>;
   onSave: (id: string, payload: SpecialLeavePayload) => Promise<unknown>;
 }) {
   const [editOpen, setEditOpen] = useState(false);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [proofOpen, setProofOpen] = useState(false);
+  const [decisionStatus, setDecisionStatus] = useState<
+    "IN_REVIEW" | "REJECTED" | "APPROVED" | null
+  >(null);
   const isEventRow = row.leaveTypeCode === "EVT";
 
   return (
@@ -655,17 +843,36 @@ function SpecialLeaveActions({
           isEventRow
             ? [
                 {
-                  label: "Valider",
-                  icon: CheckCircle2,
-                  disabled: disabled || row.statusCode === "APPROVED",
-                  onSelect: () => onApproveEvent(row),
+                  label: "Voir le détail",
+                  icon: Eye,
+                  onSelect: () => setDetailOpen(true),
+                },
+                {
+                  label: "Voir le justificatif",
+                  icon: FileSearch,
+                  disabled: !row.proofUrl,
+                  onSelect: () => setProofOpen(true),
+                },
+                {
+                  label: "Mettre en revue",
+                  icon: Clock3,
+                  disabled:
+                    disabled || row.statusCode === "IN_REVIEW" || row.statusCode === "APPROVED",
+                  onSelect: () => setDecisionStatus("IN_REVIEW"),
                 },
                 {
                   label: "Refuser",
                   icon: XCircle,
                   destructive: true,
-                  disabled: disabled || row.statusCode === "REJECTED",
-                  onSelect: () => onRejectEvent(row),
+                  disabled:
+                    disabled || row.statusCode === "REJECTED" || row.statusCode === "APPROVED",
+                  onSelect: () => setDecisionStatus("REJECTED"),
+                },
+                {
+                  label: "Valider",
+                  icon: CheckCircle2,
+                  disabled: disabled || row.statusCode === "APPROVED",
+                  onSelect: () => setDecisionStatus("APPROVED"),
                 },
               ]
             : [
@@ -695,6 +902,22 @@ function SpecialLeaveActions({
           onSave={onSave}
         />
       )}
+      {isEventRow && (
+        <>
+          <EventDetailsDialog row={row} open={detailOpen} onOpenChange={setDetailOpen} />
+          <ProofDialog row={row} open={proofOpen} onOpenChange={setProofOpen} />
+          {decisionStatus && (
+            <EventDecisionDialog
+              row={row}
+              status={decisionStatus}
+              open
+              disabled={disabled}
+              onOpenChange={(open) => !open && setDecisionStatus(null)}
+              onConfirm={(comment) => onDecideEvent(row, decisionStatus, comment)}
+            />
+          )}
+        </>
+      )}
     </>
   );
 }
@@ -704,16 +927,18 @@ function SpecialLeaveCard({
   employees,
   disabled,
   onCancel,
-  onApproveEvent,
-  onRejectEvent,
+  onDecideEvent,
   onSave,
 }: {
   row: SpecialLeaveRow;
   employees: RhEmployee[];
   disabled: boolean;
   onCancel: (row: SpecialLeaveRow) => void;
-  onApproveEvent: (row: SpecialLeaveRow) => void;
-  onRejectEvent: (row: SpecialLeaveRow) => void;
+  onDecideEvent: (
+    row: SpecialLeaveRow,
+    status: "IN_REVIEW" | "REJECTED" | "APPROVED",
+    comment: string,
+  ) => Promise<unknown>;
   onSave: (id: string, payload: SpecialLeavePayload) => Promise<unknown>;
 }) {
   return (
@@ -758,8 +983,7 @@ function SpecialLeaveCard({
           employees={employees}
           disabled={disabled}
           onCancel={onCancel}
-          onApproveEvent={onApproveEvent}
-          onRejectEvent={onRejectEvent}
+          onDecideEvent={onDecideEvent}
           onSave={onSave}
         />
       </div>
@@ -827,10 +1051,18 @@ export function Speciaux() {
   });
 
   const decideEvent = useMutation({
-    mutationFn: ({ id, status }: { id: string; status: SpecialLeaveStatusCode }) =>
+    mutationFn: ({
+      id,
+      status,
+      rhComment,
+    }: {
+      id: string;
+      status: "IN_REVIEW" | "REJECTED" | "APPROVED";
+      rhComment: string;
+    }) =>
       apiFetch<SpecialLeaveRow>(`/rh/special-leaves/${id}`, {
         method: "PATCH",
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({ status, rhComment }),
       }),
     onSuccess: () => {
       toast.success("Événement mis à jour");
@@ -945,13 +1177,11 @@ export function Speciaux() {
     });
   };
 
-  const approveEvent = (row: SpecialLeaveRow) => {
-    decideEvent.mutate({ id: row.id, status: "APPROVED" });
-  };
-
-  const rejectEvent = (row: SpecialLeaveRow) => {
-    decideEvent.mutate({ id: row.id, status: "REJECTED" });
-  };
+  const decideEventRow = (
+    row: SpecialLeaveRow,
+    status: "IN_REVIEW" | "REJECTED" | "APPROVED",
+    rhComment: string,
+  ) => decideEvent.mutateAsync({ id: row.id, status, rhComment });
 
   return (
     <AppShell title="Congés spéciaux (RH)">
@@ -1214,8 +1444,7 @@ export function Speciaux() {
                             employees={employees}
                             disabled={isMutating}
                             onCancel={cancelRow}
-                            onApproveEvent={approveEvent}
-                            onRejectEvent={rejectEvent}
+                            onDecideEvent={decideEventRow}
                             onSave={(id, payload) =>
                               updateSpecialLeave.mutateAsync({ id, payload })
                             }

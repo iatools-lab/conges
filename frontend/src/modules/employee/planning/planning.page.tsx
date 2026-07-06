@@ -10,6 +10,7 @@ import {
 import {
   LeaveTypeOption,
   NewRequestForm,
+  isSpecialLeaveSelection,
   type NewRequestPayload,
 } from "@/components/NewRequestForm";
 import { RowActions } from "@/components/RowActions";
@@ -345,7 +346,10 @@ export function Planifier() {
   const editSubtypeOptions = selectedEditLeaveType?.children ?? [];
   const selectedEditSubtype = editSubtypeOptions.find((type) => type.code === editLeaveSubtypeCode);
   const editProofRequired =
-    selectedEditSubtype?.requiresProof ?? selectedEditLeaveType?.requiresProof ?? false;
+    editLeaveTypeCode.trim().toUpperCase() !== "SPECIAL" &&
+    !isSpecialLeaveSelection(selectedEditLeaveType) &&
+    !isSpecialLeaveSelection(selectedEditSubtype) &&
+    (selectedEditSubtype?.requiresProof ?? selectedEditLeaveType?.requiresProof ?? false);
 
   const createDirectRequest = useMutation({
     mutationFn: (payload: NewRequestPayload) =>
@@ -836,7 +840,7 @@ export function Planifier() {
       </Dialog>
 
       <Dialog open={!!editingRequest} onOpenChange={(open) => !open && setEditingRequest(null)}>
-        <DialogContent className="sm:max-w-[560px]">
+        <DialogContent className="max-h-[calc(100vh-2rem)] overflow-y-auto sm:max-w-[560px]">
           <DialogHeader>
             <DialogTitle>Modifier et renvoyer la demande</DialogTitle>
             <DialogDescription>
@@ -933,7 +937,12 @@ export function Planifier() {
 
             <label className="grid gap-1.5 text-sm">
               <span className="text-xs font-medium text-muted-foreground">
-                Justificatif {editingRequest?.hasProof ? "(remplacer, optionnel)" : ""}
+                Justificatif{" "}
+                {editingRequest?.hasProof
+                  ? "(remplacer, optionnel)"
+                  : editProofRequired
+                    ? "(obligatoire)"
+                    : "(optionnel)"}
               </span>
               <input
                 type="file"

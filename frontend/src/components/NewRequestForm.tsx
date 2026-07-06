@@ -48,6 +48,9 @@ const EXCLUDED_SPECIAL_CODES = new Set(["PASSIF", "MAT", "SS"]);
 
 type BalancesResponse = {
   rows: BalanceRow[];
+  specialTotals?: {
+    remaining: number;
+  };
 };
 
 type HolidaysResponse = {
@@ -96,7 +99,14 @@ export function NewRequestForm({
   );
   const subtypeOptions = useMemo(() => selectedLeaveType?.children ?? [], [selectedLeaveType]);
   const selectedSubtype = subtypeOptions.find((type) => type.code === leaveSubtypeCode);
-  const proofRequired = selectedSubtype?.requiresProof ?? selectedLeaveType?.requiresProof ?? false;
+  const isSpecialSelection =
+    normalizeCode(leaveTypeCode) === POOL_SPECIAL_CODE ||
+    isSpecialLeaveSelection(selectedLeaveType) ||
+    isSpecialLeaveSelection(selectedSubtype);
+  const proofRequired =
+    !isSpecialSelection &&
+    !isMaternitySelection &&
+    (selectedSubtype?.requiresProof ?? selectedLeaveType?.requiresProof ?? false);
 
   const requestedDays = useMemo(
     () => countWorkingDays(startDate, endDate, holidays),
@@ -171,6 +181,9 @@ export function NewRequestForm({
           acc[row.code] = row.remaining;
           return acc;
         }, {});
+        if (response.specialTotals) {
+          nextMap[POOL_SPECIAL_CODE] = response.specialTotals.remaining;
+        }
         setBalanceByCode(nextMap);
       })
       .catch(() => {
@@ -227,7 +240,7 @@ export function NewRequestForm({
           </Button>
         )}
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[560px]">
+      <DialogContent className="max-h-[calc(100vh-2rem)] overflow-y-auto sm:max-w-[560px]">
         <DialogHeader>
           <DialogTitle>
             {isPlanning ? "Planifier un congé" : "Nouvelle demande de congé"}
@@ -457,6 +470,10 @@ function getAvailableDaysForSelection(
   }
 
   if (normalized === POOL_SPECIAL_CODE) {
+    if (typeof balanceByCode[POOL_SPECIAL_CODE] === "number") {
+      return roundDays(balanceByCode[POOL_SPECIAL_CODE]);
+    }
+
     const totalSpecial = Object.entries(balanceByCode)
       .filter(([code]) => isSpecialSourceCode(code))
       .reduce((sum, [, remaining]) => sum + Math.max(remaining, 0), 0);
@@ -465,6 +482,21 @@ function getAvailableDaysForSelection(
   }
 
   return balanceByCode[normalized];
+}
+
+export function isSpecialLeaveSelection(leaveType?: LeaveTypeOption) {
+  if (!leaveType) return false;
+
+  const code = normalizeCode(leaveType.code);
+  const category = leaveType.category?.trim().toUpperCase();
+
+  return (
+    code === POOL_SPECIAL_CODE ||
+    code === "SPE" ||
+    category === "CONGE_SPECIAL" ||
+    category === "CONGE_PATERNITE" ||
+    category === "CONGE_MALADIE"
+  );
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {

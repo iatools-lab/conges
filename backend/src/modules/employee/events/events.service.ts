@@ -37,6 +37,9 @@ const eventSelect = {
   eventDate: true,
   description: true,
   proofUrl: true,
+  status: true,
+  rhComment: true,
+  reviewedAt: true,
   processed: true,
   createdAt: true,
   updatedAt: true,
@@ -47,6 +50,7 @@ const allowedImageTypes = new Set([
   'image/png',
   'image/webp',
   'image/gif',
+  'application/pdf',
 ]);
 
 @Injectable()
@@ -98,6 +102,9 @@ export class EmployeeEventsService {
             eventDate,
             description,
             proofUrl,
+            status: LeaveRequestStatus.PENDING,
+            rhComment: null,
+            reviewedAt: null,
             processed: false,
           },
           select: eventSelect,
@@ -226,10 +233,39 @@ export class EmployeeEventsService {
         throw new NotFoundException('Événement introuvable');
       }
 
-      const processed = Boolean(dto.approved);
+      const status =
+        dto.status ??
+        (dto.approved === true
+          ? LeaveRequestStatus.APPROVED
+          : dto.approved === false
+            ? LeaveRequestStatus.REJECTED
+            : null);
+      if (
+        status !== LeaveRequestStatus.IN_REVIEW &&
+        status !== LeaveRequestStatus.APPROVED &&
+        status !== LeaveRequestStatus.REJECTED
+      ) {
+        throw new BadRequestException('Décision RH invalide');
+      }
+      const rhComment = dto.rhComment?.trim() || null;
+      if (
+        (status === LeaveRequestStatus.IN_REVIEW ||
+          status === LeaveRequestStatus.REJECTED) &&
+        !rhComment
+      ) {
+        throw new BadRequestException(
+          'Un commentaire RH est obligatoire pour cette décision',
+        );
+      }
+      const processed = status === LeaveRequestStatus.APPROVED;
       const updated = await transaction.event.update({
         where: { id },
-        data: { processed },
+        data: {
+          processed,
+          status,
+          rhComment,
+          reviewedAt: new Date(),
+        },
         select: eventSelect,
       });
 
@@ -247,7 +283,8 @@ export class EmployeeEventsService {
           entityId: event.id,
           metadata: {
             source: 'rh',
-            decision: processed ? 'approved' : 'rejected',
+            decision: status,
+            comment: rhComment,
             type: event.type,
             ownerId: event.userId,
           },
@@ -260,9 +297,12 @@ export class EmployeeEventsService {
             userId: event.userId,
             type: NotificationType.SYSTEM,
             title: 'Déclaration événement mise à jour',
-            description: processed
-              ? 'Votre déclaration a été validée par la RH.'
-              : 'Votre déclaration a été rejetée par la RH.',
+            description:
+              status === LeaveRequestStatus.APPROVED
+                ? 'Votre déclaration a été validée par la RH.'
+                : status === LeaveRequestStatus.IN_REVIEW
+                  ? 'Votre déclaration a été mise en revue par la RH.'
+                  : 'Votre déclaration a été rejetée par la RH.',
             link: '/declarer',
           },
         });
@@ -324,10 +364,12 @@ export class EmployeeEventsService {
   private toProofDataUrl(proof?: UploadedEventProof) {
     if (!proof) return null;
     if (!allowedImageTypes.has(proof.mimetype)) {
-      throw new BadRequestException('Le justificatif doit être une image');
+      throw new BadRequestException(
+        'Le justificatif doit être une image ou un fichier PDF',
+      );
     }
     if (proof.size > EVENT_PROOF_MAX_BYTES) {
-      throw new BadRequestException('Image justificative trop volumineuse');
+      throw new BadRequestException('Justificatif trop volumineux');
     }
 
     return `data:${proof.mimetype};base64,${proof.buffer.toString('base64')}`;
@@ -488,8 +530,11 @@ export class EmployeeEventsService {
       proofUrl: event.proofUrl,
       hasProof: Boolean(event.proofUrl),
       processed: event.processed,
-      statusLabel: event.processed ? 'Traité RH' : 'En attente RH',
-      statusTone: event.processed ? 'valid' : 'pending',
+      statusCode: event.status,
+      statusLabel: this.eventStatus(event.status).label,
+      statusTone: this.eventStatus(event.status).tone,
+      rhComment: event.rhComment ?? '',
+      reviewedAt: event.reviewedAt?.toISOString() ?? null,
     };
   }
 
@@ -526,6 +571,20 @@ export class EmployeeEventsService {
     };
 
     return labels[type];
+  }
+
+  private eventStatus(status: LeaveRequestStatus) {
+    if (status === LeaveRequestStatus.APPROVED) {
+      return { tone: 'valid', label: 'Validé par la RH' } as const;
+    }
+    if (status === LeaveRequestStatus.REJECTED) {
+      return { tone: 'rejected', label: 'Refusé par la RH' } as const;
+    }
+    if (status === LeaveRequestStatus.IN_REVIEW) {
+      return { tone: 'pending', label: 'En revue RH' } as const;
+    }
+
+    return { tone: 'pending', label: 'En attente RH' } as const;
   }
 
   private toNumber(value: number | null | undefined) {

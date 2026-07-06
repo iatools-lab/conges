@@ -420,7 +420,12 @@ export class RhAlertsService {
     const rule = rules.get('pending-event')!;
     const eventDate = fieldDateWhere(range);
     const events = await this.prisma.event.findMany({
-      where: { processed: false, ...(eventDate ? { eventDate } : {}) },
+      where: {
+        status: {
+          in: [LeaveRequestStatus.PENDING, LeaveRequestStatus.IN_REVIEW],
+        },
+        ...(eventDate ? { eventDate } : {}),
+      },
       orderBy: { createdAt: 'asc' },
       select: {
         id: true,

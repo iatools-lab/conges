@@ -206,7 +206,7 @@ const quickActions = [
   {
     icon: <CalendarDays className="size-5" />,
     label: "Lire le calendrier",
-    to: "/manager/calendrier",
+    to: "/manager/planning",
   },
   {
     icon: <CalendarDays className="size-5" />,
@@ -430,12 +430,12 @@ export function ManagerDashboard() {
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-6">
         <KpiLink
-          to="/manager/calendrier"
+          to="/manager/planning"
           label="Total congés"
           value={stats.totalLeaves}
           suffix="j"
           tone="green"
-          hint="Source : calendrier équipe"
+          hint="Source : vue globale des congés"
         />
         <KpiLink
           to="/manager/demandes"
@@ -452,14 +452,14 @@ export function ManagerDashboard() {
           hint="Source : demandes"
         />
         <KpiLink
-          to="/manager/calendrier"
+          to="/manager/planning"
           label="Absences prochaines 7j"
           value={stats.upcomingAbsences7d}
           tone="yellow"
           hint="Source : calendrier"
         />
         <KpiLink
-          to="/manager/calendrier"
+          to="/manager/planning"
           label="Employés absents ce mois"
           value={stats.absentEmployees}
           tone="green"
