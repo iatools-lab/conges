@@ -52,6 +52,7 @@ const TRACKED_REQUEST_STATUSES = [
   LeaveRequestStatus.CANCELLED,
 ];
 const PAID_BALANCE_CODES = ['CP', 'ANC', 'ENF', 'PASSIF'] as const;
+const MATERNITY_CODE = 'MAT';
 
 type NormalizedHistoryImportRow = {
   reference: string;
@@ -1086,7 +1087,7 @@ export class RhGlobalViewService {
       startDateIso: request.startDate.toISOString().slice(0, 10),
       endDateIso: request.endDate.toISOString().slice(0, 10),
       days: this.roundDays(request.days),
-      type: request.leaveType.name,
+      type: this.toParentLeaveTypeLabel(request.leaveType),
       leaveTypeCode: request.leaveType.code,
       leaveTypeCategory: request.leaveType.category,
       canAdjustPlannedDays:
@@ -1149,6 +1150,31 @@ export class RhGlobalViewService {
           .toUpperCase() as (typeof PAID_BALANCE_CODES)[number],
       )
     );
+  }
+
+  private toParentLeaveTypeLabel(leaveType: {
+    code: string;
+    name: string;
+    category: LeaveCategory;
+  }) {
+    const code = leaveType.code.trim().toUpperCase();
+
+    if (this.isPaidBalanceLeaveType(leaveType)) return 'Congés payés';
+    if (
+      code === MATERNITY_CODE ||
+      leaveType.category === LeaveCategory.CONGE_MATERNITE
+    ) {
+      return 'Congé maternité';
+    }
+    if (
+      leaveType.category === LeaveCategory.CONGE_SPECIAL ||
+      leaveType.category === LeaveCategory.CONGE_PATERNITE ||
+      leaveType.category === LeaveCategory.CONGE_MALADIE
+    ) {
+      return 'Congés spéciaux';
+    }
+
+    return leaveType.name;
   }
 
   private isPlannedRequest(request: {

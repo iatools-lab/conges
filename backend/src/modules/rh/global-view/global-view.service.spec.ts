@@ -1,6 +1,7 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import {
   AuditAction,
+  LeaveCategory,
   LeaveRequestStatus,
   NotificationType,
   RoleType,
@@ -426,6 +427,89 @@ describe('RhGlobalViewService', () => {
       expect.objectContaining({ to: 'employee@upowa.org' }),
     ]);
     expect(result.totals.employees).toBe(0);
+  });
+
+  it('exposes parent leave type labels in RH request tables', async () => {
+    const { prisma, service } = createHarness();
+    prisma.leaveRequest.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: 'request-paid',
+          reference: 'CP-2026-001',
+          startDate: new Date('2026-06-01T00:00:00.000Z'),
+          endDate: new Date('2026-06-02T00:00:00.000Z'),
+          days: 2,
+          status: LeaveRequestStatus.PENDING,
+          submittedAt: new Date('2026-05-01T00:00:00.000Z'),
+          leaveType: {
+            code: 'ANC',
+            name: 'Ancienneté',
+            category: LeaveCategory.CONGE_PAYE,
+          },
+          owner: {
+            id: 'employee-1',
+            nom: 'Employee',
+            prenom: 'Paid',
+            department: { code: 'OPS', name: 'Operations' },
+            n1: { nom: 'Manager', prenom: 'One' },
+          },
+        },
+        {
+          id: 'request-special',
+          reference: 'PAT-2026-001',
+          startDate: new Date('2026-07-01T00:00:00.000Z'),
+          endDate: new Date('2026-07-03T00:00:00.000Z'),
+          days: 3,
+          status: LeaveRequestStatus.APPROVED,
+          submittedAt: new Date('2026-06-01T00:00:00.000Z'),
+          leaveType: {
+            code: 'PAT',
+            name: 'Congé paternité',
+            category: LeaveCategory.CONGE_PATERNITE,
+          },
+          owner: {
+            id: 'employee-2',
+            nom: 'Employee',
+            prenom: 'Special',
+            department: { code: 'OPS', name: 'Operations' },
+            n1: null,
+          },
+        },
+        {
+          id: 'request-maternity',
+          reference: 'MAT-2026-001',
+          startDate: new Date('2026-08-01T00:00:00.000Z'),
+          endDate: new Date('2026-10-01T00:00:00.000Z'),
+          days: 90,
+          status: LeaveRequestStatus.IN_REVIEW,
+          submittedAt: new Date('2026-07-01T00:00:00.000Z'),
+          leaveType: {
+            code: 'MAT',
+            name: 'Congé maternité',
+            category: LeaveCategory.CONGE_MATERNITE,
+          },
+          owner: {
+            id: 'employee-3',
+            nom: 'Employee',
+            prenom: 'Maternity',
+            department: { code: 'OPS', name: 'Operations' },
+            n1: null,
+          },
+        },
+      ]);
+    prisma.user.findMany.mockResolvedValue([]);
+    prisma.department.findMany.mockResolvedValue([
+      { code: 'OPS', name: 'Operations' },
+    ]);
+
+    const result = await service.findSummary({ year: '2026' });
+
+    expect(result.planifications.map((row) => row.type)).toEqual([
+      'Congés payés',
+      'Congés spéciaux',
+      'Congé maternité',
+    ]);
   });
 
   it('imports approved historical leave requests and syncs balances', async () => {

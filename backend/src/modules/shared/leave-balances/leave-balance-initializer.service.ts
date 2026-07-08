@@ -10,6 +10,7 @@ type InitializeYearParams = {
   userIds?: string[];
   leaveTypeIds?: string[];
   client?: PrismaClientLike;
+  refreshExisting?: boolean;
 };
 
 @Injectable()
@@ -86,6 +87,8 @@ export class LeaveBalanceInitializerService {
       ),
     );
 
+    const refreshExisting = params.refreshExisting === true;
+
     await Promise.all(
       data.map((balance) =>
         client.leaveBalance.upsert({
@@ -102,7 +105,7 @@ export class LeaveBalanceInitializerService {
             taken: 0,
             scheduled: 0,
           },
-          update: { acquired: balance.acquired },
+          update: refreshExisting ? { acquired: balance.acquired } : {},
         }),
       ),
     );
@@ -118,8 +121,8 @@ export class LeaveBalanceInitializerService {
       leaveTypes: leaveTypes.length,
       expected: data.length,
       created,
-      updated: data.length - created,
-      skipped: 0,
+      updated: refreshExisting ? data.length - created : 0,
+      skipped: refreshExisting ? 0 : data.length - created,
     };
   }
 
@@ -127,8 +130,14 @@ export class LeaveBalanceInitializerService {
     userId: string,
     year: number,
     client: PrismaClientLike = this.prisma,
+    refreshExisting = false,
   ) {
-    return this.initializeYear({ year, userIds: [userId], client });
+    return this.initializeYear({
+      year,
+      userIds: [userId],
+      client,
+      refreshExisting,
+    });
   }
 
   async refreshUserEntitlements(
@@ -155,7 +164,7 @@ export class LeaveBalanceInitializerService {
     ).sort((left, right) => left - right);
 
     for (const year of years) {
-      await this.initializeUserYear(userId, year, client);
+      await this.initializeUserYear(userId, year, client, true);
     }
 
     return { userId, years };

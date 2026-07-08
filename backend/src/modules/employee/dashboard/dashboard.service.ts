@@ -145,8 +145,8 @@ export class EmployeeDashboardService {
       throw new NotFoundException('Employé introuvable');
     }
 
-    await this.leaveBalanceSync.syncUserYear(userId, year);
     await this.ensureActiveBalances(user, year);
+    await this.leaveBalanceSync.syncUserYear(userId, year);
 
     const balances = await this.prisma.leaveBalance.findMany({
       where: { userId, year },
@@ -298,11 +298,10 @@ export class EmployeeDashboardService {
             scheduled: 0,
           },
           update: {
-            acquired: this.leaveEntitlements.getAcquiredDays({
-              leaveType,
-              user,
-              year,
-            }),
+            // Lecture non destructive : ne jamais recalculer un droit acquis
+            // existant depuis le tableau de bord. Les recalculs explicites sont
+            // déclenchés par RH lors d'une mise à jour de l'employé ou via
+            // l'action "Initialiser / synchroniser les soldes".
           },
         }),
       ),

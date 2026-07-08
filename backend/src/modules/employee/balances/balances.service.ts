@@ -20,10 +20,6 @@ const SPECIAL_POOL_CAP_DAYS = 12;
 const PAID_SOURCE_CODES = new Set(['CP', 'ANC', 'ENF', 'PASSIF']);
 const EXCLUDED_SPECIAL_CODES = new Set(['PASSIF', 'MAT', 'SS']);
 
-function isPaidSourceCode(code: string): boolean {
-  return PAID_SOURCE_CODES.has(code.trim().toUpperCase());
-}
-
 @Injectable()
 export class EmployeeBalancesService {
   constructor(
@@ -54,12 +50,9 @@ export class EmployeeBalancesService {
       throw new NotFoundException('Employé introuvable');
     }
 
-    // Sync taken/scheduled from existing requests
-    await this.leaveBalanceSync.syncUserYear(userId, year);
-
     // Ensure every active leave type has an initialized balance row with
-    // correct acquired days (creates missing rows, refreshes acquired on
-    // existing ones without touching taken/scheduled which syncUserYear owns).
+    // correct acquired days. In production this read path must not overwrite
+    // existing acquired days, because RH may have migrated or corrected them.
     const activeLeaveTypes = await this.prisma.leaveType.findMany({
       where: { active: true },
       select: {
@@ -160,13 +153,16 @@ export class EmployeeBalancesService {
             scheduled: this.roundDays(scheduledAgg._sum.days ?? 0),
           },
           update: {
-            acquired,
             taken,
             scheduled: this.roundDays(scheduledAgg._sum.days ?? 0),
           },
         });
       }),
     );
+
+    // Keep taken/scheduled aligned with requests after missing rows have been
+    // created with their computed entitlement.
+    await this.leaveBalanceSync.syncUserYear(userId, year);
 
     const balances = await this.prisma.leaveBalance.findMany({
       where: { userId, year },
@@ -191,39 +187,9 @@ export class EmployeeBalancesService {
       },
     });
 
-    // Compute previous year's remaining balance for carryover
-    // For paid sources (CP/ANC/ENF), carryover = previous year's remaining balance
-    // This allows negative balances to be carried forward automatically.
-    const prevYearBalances = await this.prisma.leaveBalance.findMany({
-      where: {
-        userId,
-        year: year - 1,
-        leaveType: { code: { in: ['CP', 'ANC', 'ENF'] } },
-      },
-      select: {
-        acquired: true,
-        taken: true,
-        scheduled: true,
-        carryover: true,
-        leaveType: { select: { code: true } },
-      },
-    });
-    const prevYearRemainingByCode = new Map<string, number>();
-    for (const pb of prevYearBalances) {
-      const rem = this.roundDays(
-        pb.acquired + pb.carryover - pb.taken - pb.scheduled,
-      );
-      prevYearRemainingByCode.set(pb.leaveType.code, rem);
-    }
-
     const rows = balances.map((balance) => {
       const code = balance.leaveType.code;
-      // For paid sources (CP/ANC/ENF), use previous year's remaining as effective carryover
-      let effectiveCarryover = balance.carryover;
-      if (isPaidSourceCode(code)) {
-        effectiveCarryover = prevYearRemainingByCode.get(code) ?? 0;
-      }
-      const acquired = this.roundDays(balance.acquired + effectiveCarryover);
+      const acquired = this.roundDays(balance.acquired + balance.carryover);
       const taken = this.roundDays(balance.taken);
       const scheduled = this.roundDays(balance.scheduled);
       const remaining = this.roundDays(acquired - taken - scheduled);

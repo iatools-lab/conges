@@ -8,6 +8,78 @@ import {
 import { EmployeeBalancesService } from './balances.service';
 
 describe('EmployeeBalancesService', () => {
+  it('does not overwrite existing paid acquired days when reading balances', async () => {
+    const cpType = {
+      id: 'type-cp',
+      code: 'CP',
+      name: 'Congés payés',
+      category: LeaveCategory.CONGE_PAYE,
+      defaultDays: 24,
+    };
+    const prisma = {
+      user: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'employee-1',
+          status: UserStatus.ACTIVE,
+          sexe: Sexe.M,
+          dateEmbauche: new Date('2025-04-10T00:00:00.000Z'),
+          passifInitial: 0,
+          children: [],
+          events: [],
+        }),
+      },
+      leaveType: {
+        findMany: jest.fn().mockResolvedValue([cpType]),
+      },
+      leaveRequest: {
+        aggregate: jest.fn().mockResolvedValue({ _sum: { days: 0 } }),
+      },
+      leaveBalance: {
+        findUnique: jest.fn().mockResolvedValue({ takenAdjustment: 0 }),
+        upsert: jest.fn().mockResolvedValue({}),
+        findMany: jest
+          .fn()
+          .mockResolvedValueOnce([
+            {
+              id: 'balance-cp',
+              acquired: 18,
+              taken: 0,
+              scheduled: 0,
+              carryover: 0,
+              leaveType: cpType,
+            },
+          ])
+          .mockResolvedValueOnce([]),
+      },
+    } as any;
+    const leaveEntitlements = {
+      getAcquiredDays: jest.fn().mockReturnValue(24),
+      getBalanceLabel: jest.fn((leaveType) => leaveType.name),
+    } as any;
+    const leaveBalanceSync = {
+      syncUserYear: jest.fn().mockResolvedValue(undefined),
+    } as any;
+    const service = new EmployeeBalancesService(
+      prisma,
+      leaveEntitlements,
+      leaveBalanceSync,
+    );
+
+    const result = await service.findBalances('employee-1', '2026');
+
+    expect(prisma.leaveBalance.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.not.objectContaining({ acquired: 24 }),
+      }),
+    );
+    expect(result.paidDetails?.[0]).toMatchObject({
+      code: 'CP',
+      acquired: 18,
+      remaining: 18,
+    });
+    expect(result.totals).toMatchObject({ acquired: 18, remaining: 18 });
+  });
+
   it('uses one shared 12-day balance while returning every special leave type', async () => {
     const leaveTypes = [
       {

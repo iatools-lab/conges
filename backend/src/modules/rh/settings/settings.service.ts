@@ -266,6 +266,7 @@ export class RhSettingsService implements OnModuleInit {
     const result = await this.leaveBalanceInitializer.initializeYear({
       year: dto.year,
       leaveTypeIds: dto.leaveTypeIds,
+      refreshExisting: true,
     });
 
     if (!result.leaveTypes) {
