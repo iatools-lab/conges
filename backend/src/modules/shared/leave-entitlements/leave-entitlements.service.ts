@@ -1,5 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { EventType, LeaveCategory, Sexe } from '@prisma/client';
+import {
+  getCurrentLeaveYear,
+  getLeaveYear,
+  getLeaveYearRange,
+} from '../../../common/leave-year';
 
 type EntitlementUser = {
   sexe: Sexe;
@@ -101,9 +106,9 @@ export class LeaveEntitlementsService {
   ) {
     const firstAnniversary = this.addUtcYears(hireDate, 1);
     const referenceDate =
-      year === today.getUTCFullYear()
+      year === getCurrentLeaveYear(today)
         ? today
-        : new Date(Date.UTC(year, 11, 31, 23, 59, 59, 999));
+        : getLeaveYearRange(year).endInclusive;
     const normalizedAnnualDays = Math.max(annualDays, 0);
 
     // Les congés payés s'acquièrent dès l'embauche au prorata mensuel.
@@ -163,7 +168,7 @@ export class LeaveEntitlementsService {
       (event) =>
         event.type === EventType.BIRTH &&
         event.processed &&
-        event.eventDate.getUTCFullYear() === year,
+        getLeaveYear(event.eventDate) === year,
     ).length;
 
     return validatedBirthsInYear * daysPerValidatedBirth;
@@ -180,7 +185,7 @@ export class LeaveEntitlementsService {
       (event) =>
         event.type === EventType.BIRTH &&
         event.processed &&
-        event.eventDate.getUTCFullYear() === year,
+        getLeaveYear(event.eventDate) === year,
     ).length;
 
     return validatedBirthEvents * daysPerValidatedBirth;
@@ -230,11 +235,11 @@ export class LeaveEntitlementsService {
 
   private getReferenceDate(year: number) {
     const today = new Date();
-    const currentYear = today.getUTCFullYear();
+    const currentYear = getCurrentLeaveYear(today);
 
     if (year === currentYear) return today;
 
-    return new Date(Date.UTC(year, 11, 31));
+    return getLeaveYearRange(year).endInclusive;
   }
 
   private addUtcYears(date: Date, years: number) {

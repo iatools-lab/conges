@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Badge, Button, Card, CardHeader, StatCard } from "@/components/ui-kit";
 import { apiFetch } from "@/lib/api";
+import { leaveYearForDate } from "@/lib/leave-year";
 import {
   AlertCircle,
   CheckCircle2,
@@ -75,7 +76,7 @@ type DeleteLeaveTypeResponse = {
   };
 };
 
-const currentYear = new Date().getFullYear();
+const currentYear = leaveYearForDate();
 const yearOptions = [currentYear, currentYear + 1, currentYear - 1];
 
 const categoryOptions: { value: LeaveCategory; label: string }[] = [

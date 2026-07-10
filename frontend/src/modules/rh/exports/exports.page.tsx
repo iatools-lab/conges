@@ -10,6 +10,7 @@ import {
 } from "@/components/DateRangeFilter";
 import { Badge, Button, Card, CardHeader, StatCard } from "@/components/ui-kit";
 import { apiFetch } from "@/lib/api";
+import { leaveYearForDate } from "@/lib/leave-year";
 import {
   Calendar,
   Clock,
@@ -140,7 +141,7 @@ function downloadGeneratedExport(exportFile: GeneratedExport) {
 
 export function RhExports() {
   const queryClient = useQueryClient();
-  const [year, setYear] = useState(String(new Date().getFullYear()));
+  const [year, setYear] = useState(String(leaveYearForDate()));
   const [search, setSearch] = useState("");
   const [dateRange, setDateRange] = useState<DateRangeValue>(() => allDateRange());
 

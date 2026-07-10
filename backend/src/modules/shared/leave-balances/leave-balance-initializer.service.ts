@@ -2,8 +2,15 @@ import { Injectable } from '@nestjs/common';
 import { EventType, Prisma, UserStatus } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { LeaveEntitlementsService } from '../leave-entitlements/leave-entitlements.service';
+import {
+  getCurrentLeaveYear,
+  getLeaveYearsForPeriod,
+} from '../../../common/leave-year';
 
 type PrismaClientLike = PrismaService | Prisma.TransactionClient;
+
+const PAID_DEBT_SOURCE_CODES = ['CP', 'ANC', 'ENF', 'PASSIF'];
+const PAID_DEBT_CARRYOVER_TARGET_CODE = 'CP';
 
 type InitializeYearParams = {
   year: number;
@@ -57,17 +64,33 @@ export class LeaveBalanceInitializerService {
       }),
     ]);
 
+    const debtCarryoverByUserId = await this.getPaidDebtCarryoverByUserId(
+      client,
+      employees.map((employee) => employee.id),
+      params.year,
+    );
+
     const data = employees.flatMap((employee) =>
-      leaveTypes.map((leaveType) => ({
-        userId: employee.id,
-        leaveTypeId: leaveType.id,
-        year: params.year,
-        acquired: this.leaveEntitlements.getAcquiredDays({
-          leaveType,
-          user: employee,
+      leaveTypes.map((leaveType) => {
+        const code = leaveType.code.trim().toUpperCase();
+        const debtCarryover =
+          code === PAID_DEBT_CARRYOVER_TARGET_CODE
+            ? (debtCarryoverByUserId.get(employee.id) ?? 0)
+            : 0;
+
+        return {
+          leaveTypeCode: code,
+          userId: employee.id,
+          leaveTypeId: leaveType.id,
           year: params.year,
-        }),
-      })),
+          acquired: this.leaveEntitlements.getAcquiredDays({
+            leaveType,
+            user: employee,
+            year: params.year,
+          }),
+          carryover: debtCarryover,
+        };
+      }),
     );
     const existingBalances = data.length
       ? await client.leaveBalance.findMany({
@@ -90,7 +113,7 @@ export class LeaveBalanceInitializerService {
     const refreshExisting = params.refreshExisting === true;
 
     await Promise.all(
-      data.map((balance) =>
+      data.map(({ leaveTypeCode, ...balance }) =>
         client.leaveBalance.upsert({
           where: {
             userId_leaveTypeId_year: {
@@ -101,11 +124,17 @@ export class LeaveBalanceInitializerService {
           },
           create: {
             ...balance,
-            carryover: 0,
             taken: 0,
             scheduled: 0,
           },
-          update: refreshExisting ? { acquired: balance.acquired } : {},
+          update: refreshExisting
+            ? {
+                acquired: balance.acquired,
+                ...(leaveTypeCode === PAID_DEBT_CARRYOVER_TARGET_CODE
+                  ? { carryover: balance.carryover }
+                  : {}),
+              }
+            : {},
         }),
       ),
     );
@@ -152,14 +181,16 @@ export class LeaveBalanceInitializerService {
       }),
       client.leaveRequest.findMany({
         where: { ownerId: userId },
-        select: { startDate: true },
+        select: { startDate: true, endDate: true },
       }),
     ]);
     const years = Array.from(
       new Set([
-        new Date().getUTCFullYear(),
+        getCurrentLeaveYear(),
         ...balances.map((balance) => balance.year),
-        ...requests.map((request) => request.startDate.getUTCFullYear()),
+        ...requests.flatMap((request) =>
+          getLeaveYearsForPeriod(request.startDate, request.endDate),
+        ),
       ]),
     ).sort((left, right) => left - right);
 
@@ -170,7 +201,119 @@ export class LeaveBalanceInitializerService {
     return { userId, years };
   }
 
+  async refreshPaidDebtCarryover(
+    userId: string,
+    targetYear: number,
+    client: PrismaClientLike = this.prisma,
+  ) {
+    const [user, leaveType, debtCarryoverByUserId] = await Promise.all([
+      client.user.findUnique({
+        where: { id: userId },
+        select: {
+          id: true,
+          sexe: true,
+          dateEmbauche: true,
+          passifInitial: true,
+          children: { select: { dateNaissance: true } },
+          events: {
+            where: { type: EventType.BIRTH, processed: true },
+            select: { type: true, eventDate: true, processed: true },
+          },
+        },
+      }),
+      client.leaveType.findUnique({
+        where: { code: PAID_DEBT_CARRYOVER_TARGET_CODE },
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          category: true,
+          defaultDays: true,
+        },
+      }),
+      this.getPaidDebtCarryoverByUserId(client, [userId], targetYear),
+    ]);
+
+    if (!user || !leaveType) {
+      return { userId, year: targetYear, updated: false, carryover: 0 };
+    }
+
+    const carryover = debtCarryoverByUserId.get(userId) ?? 0;
+    await client.leaveBalance.upsert({
+      where: {
+        userId_leaveTypeId_year: {
+          userId,
+          leaveTypeId: leaveType.id,
+          year: targetYear,
+        },
+      },
+      create: {
+        userId,
+        leaveTypeId: leaveType.id,
+        year: targetYear,
+        acquired: this.leaveEntitlements.getAcquiredDays({
+          leaveType,
+          user,
+          year: targetYear,
+        }),
+        carryover,
+        taken: 0,
+        scheduled: 0,
+      },
+      update: { carryover },
+    });
+
+    return { userId, year: targetYear, updated: true, carryover };
+  }
+
   private balanceKey(userId: string, leaveTypeId: string) {
     return `${userId}:${leaveTypeId}`;
+  }
+
+  private async getPaidDebtCarryoverByUserId(
+    client: PrismaClientLike,
+    userIds: string[],
+    year: number,
+  ) {
+    if (!userIds.length) return new Map<string, number>();
+
+    const previousYear = year - 1;
+    const previousBalances = await client.leaveBalance.findMany({
+      where: {
+        userId: { in: userIds },
+        year: previousYear,
+        leaveType: { code: { in: PAID_DEBT_SOURCE_CODES } },
+      },
+      select: {
+        userId: true,
+        acquired: true,
+        carryover: true,
+        taken: true,
+        scheduled: true,
+      },
+    });
+    const remainingByUserId = new Map<string, number>();
+    for (const balance of previousBalances) {
+      remainingByUserId.set(
+        balance.userId,
+        this.roundDays(
+          (remainingByUserId.get(balance.userId) ?? 0) +
+            balance.acquired +
+            balance.carryover -
+            balance.taken -
+            balance.scheduled,
+        ),
+      );
+    }
+
+    return new Map(
+      [...remainingByUserId.entries()]
+        .filter(([, remaining]) => remaining < 0)
+        .map(([userId, remaining]) => [userId, remaining]),
+    );
+  }
+
+  private roundDays(value: number) {
+    return Math.round(Number(value ?? 0) * 10) / 10;
   }
 }

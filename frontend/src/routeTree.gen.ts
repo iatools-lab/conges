@@ -55,6 +55,13 @@ import { Route as AdminParametresRouteImport } from './modules/routing/admin.par
 import { Route as AdminLogsRouteImport } from './modules/routing/admin.logs'
 import { Route as AdminFeriesRouteImport } from './modules/routing/admin.feries'
 import { Route as AdminDepartementsRouteImport } from './modules/routing/admin.departements'
+import { Route as RhAnalyticsTendancesRouteImport } from './modules/routing/rh.analytics.tendances'
+import { Route as RhAnalyticsSpeciauxEvenementsRouteImport } from './modules/routing/rh.analytics.speciaux-evenements'
+import { Route as RhAnalyticsSoldesRouteImport } from './modules/routing/rh.analytics.soldes'
+import { Route as RhAnalyticsManagementRouteImport } from './modules/routing/rh.analytics.management'
+import { Route as RhAnalyticsEffectifsRouteImport } from './modules/routing/rh.analytics.effectifs'
+import { Route as RhAnalyticsCongesRouteImport } from './modules/routing/rh.analytics.conges'
+import { Route as RhAnalyticsAlertesRouteImport } from './modules/routing/rh.analytics.alertes'
 
 const VerifyOtpRoute = VerifyOtpRouteImport.update({
   id: '/verify-otp',
@@ -286,6 +293,42 @@ const AdminDepartementsRoute = AdminDepartementsRouteImport.update({
   path: '/admin/departements',
   getParentRoute: () => rootRouteImport,
 } as any)
+const RhAnalyticsTendancesRoute = RhAnalyticsTendancesRouteImport.update({
+  id: '/rh/analytics/tendances',
+  path: '/rh/analytics/tendances',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RhAnalyticsSpeciauxEvenementsRoute =
+  RhAnalyticsSpeciauxEvenementsRouteImport.update({
+    id: '/rh/analytics/speciaux-evenements',
+    path: '/rh/analytics/speciaux-evenements',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const RhAnalyticsSoldesRoute = RhAnalyticsSoldesRouteImport.update({
+  id: '/rh/analytics/soldes',
+  path: '/rh/analytics/soldes',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RhAnalyticsManagementRoute = RhAnalyticsManagementRouteImport.update({
+  id: '/rh/analytics/management',
+  path: '/rh/analytics/management',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RhAnalyticsEffectifsRoute = RhAnalyticsEffectifsRouteImport.update({
+  id: '/rh/analytics/effectifs',
+  path: '/rh/analytics/effectifs',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RhAnalyticsCongesRoute = RhAnalyticsCongesRouteImport.update({
+  id: '/rh/analytics/conges',
+  path: '/rh/analytics/conges',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RhAnalyticsAlertesRoute = RhAnalyticsAlertesRouteImport.update({
+  id: '/rh/analytics/alertes',
+  path: '/rh/analytics/alertes',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -334,6 +377,13 @@ export interface FileRoutesByFullPath {
   '/rh/speciaux': typeof RhSpeciauxRoute
   '/manager/': typeof ManagerIndexRoute
   '/rh/': typeof RhIndexRoute
+  '/rh/analytics/alertes': typeof RhAnalyticsAlertesRoute
+  '/rh/analytics/conges': typeof RhAnalyticsCongesRoute
+  '/rh/analytics/effectifs': typeof RhAnalyticsEffectifsRoute
+  '/rh/analytics/management': typeof RhAnalyticsManagementRoute
+  '/rh/analytics/soldes': typeof RhAnalyticsSoldesRoute
+  '/rh/analytics/speciaux-evenements': typeof RhAnalyticsSpeciauxEvenementsRoute
+  '/rh/analytics/tendances': typeof RhAnalyticsTendancesRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -382,6 +432,13 @@ export interface FileRoutesByTo {
   '/rh/speciaux': typeof RhSpeciauxRoute
   '/manager': typeof ManagerIndexRoute
   '/rh': typeof RhIndexRoute
+  '/rh/analytics/alertes': typeof RhAnalyticsAlertesRoute
+  '/rh/analytics/conges': typeof RhAnalyticsCongesRoute
+  '/rh/analytics/effectifs': typeof RhAnalyticsEffectifsRoute
+  '/rh/analytics/management': typeof RhAnalyticsManagementRoute
+  '/rh/analytics/soldes': typeof RhAnalyticsSoldesRoute
+  '/rh/analytics/speciaux-evenements': typeof RhAnalyticsSpeciauxEvenementsRoute
+  '/rh/analytics/tendances': typeof RhAnalyticsTendancesRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -431,6 +488,13 @@ export interface FileRoutesById {
   '/rh/speciaux': typeof RhSpeciauxRoute
   '/manager/': typeof ManagerIndexRoute
   '/rh/': typeof RhIndexRoute
+  '/rh/analytics/alertes': typeof RhAnalyticsAlertesRoute
+  '/rh/analytics/conges': typeof RhAnalyticsCongesRoute
+  '/rh/analytics/effectifs': typeof RhAnalyticsEffectifsRoute
+  '/rh/analytics/management': typeof RhAnalyticsManagementRoute
+  '/rh/analytics/soldes': typeof RhAnalyticsSoldesRoute
+  '/rh/analytics/speciaux-evenements': typeof RhAnalyticsSpeciauxEvenementsRoute
+  '/rh/analytics/tendances': typeof RhAnalyticsTendancesRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -481,6 +545,13 @@ export interface FileRouteTypes {
     | '/rh/speciaux'
     | '/manager/'
     | '/rh/'
+    | '/rh/analytics/alertes'
+    | '/rh/analytics/conges'
+    | '/rh/analytics/effectifs'
+    | '/rh/analytics/management'
+    | '/rh/analytics/soldes'
+    | '/rh/analytics/speciaux-evenements'
+    | '/rh/analytics/tendances'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -529,6 +600,13 @@ export interface FileRouteTypes {
     | '/rh/speciaux'
     | '/manager'
     | '/rh'
+    | '/rh/analytics/alertes'
+    | '/rh/analytics/conges'
+    | '/rh/analytics/effectifs'
+    | '/rh/analytics/management'
+    | '/rh/analytics/soldes'
+    | '/rh/analytics/speciaux-evenements'
+    | '/rh/analytics/tendances'
   id:
     | '__root__'
     | '/'
@@ -577,6 +655,13 @@ export interface FileRouteTypes {
     | '/rh/speciaux'
     | '/manager/'
     | '/rh/'
+    | '/rh/analytics/alertes'
+    | '/rh/analytics/conges'
+    | '/rh/analytics/effectifs'
+    | '/rh/analytics/management'
+    | '/rh/analytics/soldes'
+    | '/rh/analytics/speciaux-evenements'
+    | '/rh/analytics/tendances'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -626,6 +711,13 @@ export interface RootRouteChildren {
   RhSpeciauxRoute: typeof RhSpeciauxRoute
   ManagerIndexRoute: typeof ManagerIndexRoute
   RhIndexRoute: typeof RhIndexRoute
+  RhAnalyticsAlertesRoute: typeof RhAnalyticsAlertesRoute
+  RhAnalyticsCongesRoute: typeof RhAnalyticsCongesRoute
+  RhAnalyticsEffectifsRoute: typeof RhAnalyticsEffectifsRoute
+  RhAnalyticsManagementRoute: typeof RhAnalyticsManagementRoute
+  RhAnalyticsSoldesRoute: typeof RhAnalyticsSoldesRoute
+  RhAnalyticsSpeciauxEvenementsRoute: typeof RhAnalyticsSpeciauxEvenementsRoute
+  RhAnalyticsTendancesRoute: typeof RhAnalyticsTendancesRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -952,6 +1044,55 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminDepartementsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/rh/analytics/tendances': {
+      id: '/rh/analytics/tendances'
+      path: '/rh/analytics/tendances'
+      fullPath: '/rh/analytics/tendances'
+      preLoaderRoute: typeof RhAnalyticsTendancesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/rh/analytics/speciaux-evenements': {
+      id: '/rh/analytics/speciaux-evenements'
+      path: '/rh/analytics/speciaux-evenements'
+      fullPath: '/rh/analytics/speciaux-evenements'
+      preLoaderRoute: typeof RhAnalyticsSpeciauxEvenementsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/rh/analytics/soldes': {
+      id: '/rh/analytics/soldes'
+      path: '/rh/analytics/soldes'
+      fullPath: '/rh/analytics/soldes'
+      preLoaderRoute: typeof RhAnalyticsSoldesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/rh/analytics/management': {
+      id: '/rh/analytics/management'
+      path: '/rh/analytics/management'
+      fullPath: '/rh/analytics/management'
+      preLoaderRoute: typeof RhAnalyticsManagementRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/rh/analytics/effectifs': {
+      id: '/rh/analytics/effectifs'
+      path: '/rh/analytics/effectifs'
+      fullPath: '/rh/analytics/effectifs'
+      preLoaderRoute: typeof RhAnalyticsEffectifsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/rh/analytics/conges': {
+      id: '/rh/analytics/conges'
+      path: '/rh/analytics/conges'
+      fullPath: '/rh/analytics/conges'
+      preLoaderRoute: typeof RhAnalyticsCongesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/rh/analytics/alertes': {
+      id: '/rh/analytics/alertes'
+      path: '/rh/analytics/alertes'
+      fullPath: '/rh/analytics/alertes'
+      preLoaderRoute: typeof RhAnalyticsAlertesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -1002,6 +1143,13 @@ const rootRouteChildren: RootRouteChildren = {
   RhSpeciauxRoute: RhSpeciauxRoute,
   ManagerIndexRoute: ManagerIndexRoute,
   RhIndexRoute: RhIndexRoute,
+  RhAnalyticsAlertesRoute: RhAnalyticsAlertesRoute,
+  RhAnalyticsCongesRoute: RhAnalyticsCongesRoute,
+  RhAnalyticsEffectifsRoute: RhAnalyticsEffectifsRoute,
+  RhAnalyticsManagementRoute: RhAnalyticsManagementRoute,
+  RhAnalyticsSoldesRoute: RhAnalyticsSoldesRoute,
+  RhAnalyticsSpeciauxEvenementsRoute: RhAnalyticsSpeciauxEvenementsRoute,
+  RhAnalyticsTendancesRoute: RhAnalyticsTendancesRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

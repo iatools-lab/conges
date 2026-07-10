@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { RhAlertsModule } from './alerts/alerts.module';
+import { RhAnalyticsModule } from './analytics/analytics.module';
 import { RhAuditModule } from './audit/audit.module';
 import { RhChildrenModule } from './children/children.module';
 import { RhDashboardModule } from './dashboard/dashboard.module';
@@ -16,6 +17,7 @@ import { RhSpecialLeavesModule } from './special-leaves/special-leaves.module';
 @Module({
   imports: [
     RhDashboardModule,
+    RhAnalyticsModule,
     RhGlobalViewModule,
     RhHolidaysModule,
     RhHierarchyModule,

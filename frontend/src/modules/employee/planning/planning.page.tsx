@@ -26,6 +26,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge, Button, Card, CardHeader } from "@/components/ui-kit";
 import { apiFetch } from "@/lib/api";
+import { leaveYearForIsoDate } from "@/lib/leave-year";
 import { useAuthSession } from "@/modules/auth/session";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -206,7 +207,7 @@ function planCoversDay(plan: Plan, year: number, month: number, day: number) {
 }
 
 function planYear(plan: Plan) {
-  return toDate(plan.startDate).getUTCFullYear();
+  return leaveYearForIsoDate(plan.startDate.slice(0, 10));
 }
 
 function MonthMini({ year, month, plans }: { year: number; month: number; plans: Plan[] }) {

@@ -4,6 +4,7 @@ import { readSheet } from "read-excel-file/browser";
 import { AppShell } from "@/components/AppShell";
 import { Badge, Button, Card, CardHeader, StatCard } from "@/components/ui-kit";
 import { apiFetch } from "@/lib/api";
+import { leaveYearForDate } from "@/lib/leave-year";
 import { useAuthSession } from "@/modules/auth/session";
 import { Download, FileUp, RotateCcw, Search, Trash2, UploadCloud } from "lucide-react";
 import { toast } from "sonner";
@@ -166,7 +167,7 @@ export function RhLeaveBalancesPage() {
   const queryClient = useQueryClient();
   const { session } = useAuthSession();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [year, setYear] = useState(String(new Date().getFullYear()));
+  const [year, setYear] = useState(String(leaveYearForDate()));
   const [search, setSearch] = useState("");
   const [previewRows, setPreviewRows] = useState<ImportRow[]>(emptyRows);
   const [lastResult, setLastResult] = useState<ImportResponse | null>(null);

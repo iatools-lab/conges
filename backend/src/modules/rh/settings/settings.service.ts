@@ -9,6 +9,7 @@ import { EventType, LeaveCategory, Prisma, UserStatus } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { LeaveEntitlementsService } from '../../shared/leave-entitlements/leave-entitlements.service';
 import { LeaveBalanceInitializerService } from '../../shared/leave-balances/leave-balance-initializer.service';
+import { getCurrentLeaveYear } from '../../../common/leave-year';
 import {
   CreateRhLeaveTypeDto,
   InitializeRhBalancesDto,
@@ -136,7 +137,7 @@ export class RhSettingsService implements OnModuleInit {
 
   async onModuleInit() {
     await this.ensureDefaultLeaveTypes();
-    await this.initializeBalances({ year: new Date().getUTCFullYear() });
+    await this.initializeBalances({ year: getCurrentLeaveYear() });
   }
 
   async findSettings(yearValue?: string) {
@@ -341,7 +342,7 @@ export class RhSettingsService implements OnModuleInit {
     ]);
 
     const years = new Set<number>([
-      new Date().getUTCFullYear(),
+      getCurrentLeaveYear(),
       ...existingYears.map((item) => item.year),
     ]);
 
@@ -419,7 +420,7 @@ export class RhSettingsService implements OnModuleInit {
   }
 
   private parseYear(value: string | undefined) {
-    if (!value) return new Date().getUTCFullYear();
+    if (!value) return getCurrentLeaveYear();
 
     const year = Number(value);
     if (!Number.isInteger(year) || year < 2000 || year > 2100) {

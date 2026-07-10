@@ -25,6 +25,10 @@ import { LeaveBalanceSyncService } from '../../shared/leave-balances/leave-balan
 import { LeaveBalanceInitializerService } from '../../shared/leave-balances/leave-balance-initializer.service';
 import { overlapDateWhere, resolveDateRange } from '../../../common/date-range';
 import { countWorkingDays as countBusinessDays } from '../../../common/working-days';
+import {
+  getLeaveYear,
+  getLeaveYearsForPeriod,
+} from '../../../common/leave-year';
 
 const employeeLeaveRequestSelect = {
   id: true,
@@ -56,6 +60,7 @@ const employeeLeaveRequestSelect = {
 type EmployeeLeaveRequest = Prisma.LeaveRequestGetPayload<{
   select: typeof employeeLeaveRequestSelect;
 }>;
+type PrismaClientLike = PrismaService | Prisma.TransactionClient;
 
 const editableStatuses: LeaveRequestStatus[] = [
   LeaveRequestStatus.DRAFT,
@@ -171,7 +176,7 @@ export class EmployeeLeaveRequestsService {
       userId: user.id,
       requestedCode: dto.leaveTypeCode,
       requestedSubtypeCode: dto.leaveSubtypeCode,
-      year: startDate.getUTCFullYear(),
+      year: getLeaveYear(startDate),
       requestedDays: days,
     });
     this.ensurePaidLeaveTakingAllowed({
@@ -189,7 +194,7 @@ export class EmployeeLeaveRequestsService {
     await this.ensureSufficientBalance({
       userId: user.id,
       leaveTypeId: leaveSelection.leaveType.id,
-      year: startDate.getUTCFullYear(),
+      year: getLeaveYear(startDate),
       requestedDays: days,
       skipCheck: leaveSelection.poolCode !== null,
     });
@@ -199,7 +204,7 @@ export class EmployeeLeaveRequestsService {
       leaveTypeId: leaveSelection.leaveType.id,
       leaveTypeCode: leaveSelection.leaveType.code,
       userSexe: user.sexe,
-      year: startDate.getUTCFullYear(),
+      year: getLeaveYear(startDate),
       requestedDays: days,
     });
 
@@ -248,6 +253,12 @@ export class EmployeeLeaveRequestsService {
           },
         });
 
+        await this.initializeAffectedLeaveYears(
+          user.id,
+          created.startDate,
+          created.endDate,
+          transaction,
+        );
         await this.leaveBalanceSync.syncForRequest(created.id, transaction);
 
         return { request: created, emails };
@@ -278,8 +289,8 @@ export class EmployeeLeaveRequestsService {
       : existing.endDate;
     const days = await this.countWorkingDays(startDate, endDate);
     if (days <= 0) throw new BadRequestException('Période invalide');
-    const startYear = startDate.getUTCFullYear();
-    const existingYear = existing.startDate.getUTCFullYear();
+    const startYear = getLeaveYear(startDate);
+    const existingYear = getLeaveYear(existing.startDate);
     const draftPoolCredit =
       this.reservesBalance(existing) && existingYear === startYear
         ? existing.days
@@ -401,14 +412,27 @@ export class EmployeeLeaveRequestsService {
             })
           : [];
 
-        await this.leaveBalanceSync.syncForKeys(
-          [
-            {
-              userId: user.id,
-              leaveTypeId: existing.leaveTypeId,
-              year: existing.startDate.getUTCFullYear(),
-            },
-          ],
+        await Promise.all([
+          this.initializeAffectedLeaveYears(
+            user.id,
+            existing.startDate,
+            existing.endDate,
+            transaction,
+          ),
+          this.initializeAffectedLeaveYears(
+            user.id,
+            request.startDate,
+            request.endDate,
+            transaction,
+          ),
+        ]);
+        await this.leaveBalanceSync.syncForRequestSnapshot(
+          {
+            userId: user.id,
+            leaveTypeId: existing.leaveTypeId,
+            startDate: existing.startDate,
+            endDate: existing.endDate,
+          },
           transaction,
         );
         await this.leaveBalanceSync.syncForRequest(request.id, transaction);
@@ -445,7 +469,7 @@ export class EmployeeLeaveRequestsService {
     await this.ensureSufficientBalance({
       userId: user.id,
       leaveTypeId: existing.leaveTypeId,
-      year: existing.startDate.getUTCFullYear(),
+      year: getLeaveYear(existing.startDate),
       requestedDays: existing.days,
       balanceCredit: this.reservesBalance(existing) ? existing.days : 0,
       skipCheck: this.poolCodeFromLeaveType(existing.leaveType) !== null,
@@ -456,7 +480,7 @@ export class EmployeeLeaveRequestsService {
       leaveTypeId: existing.leaveTypeId,
       leaveTypeCode: existing.leaveType.code,
       userSexe: user.sexe,
-      year: existing.startDate.getUTCFullYear(),
+      year: getLeaveYear(existing.startDate),
       requestedDays: existing.days,
       balanceCredit: this.reservesBalance(existing) ? existing.days : 0,
     });
@@ -495,6 +519,12 @@ export class EmployeeLeaveRequestsService {
           },
         });
 
+        await this.initializeAffectedLeaveYears(
+          user.id,
+          request.startDate,
+          request.endDate,
+          transaction,
+        );
         await this.leaveBalanceSync.syncForRequest(request.id, transaction);
 
         return { updated: request, emails };
@@ -519,13 +549,12 @@ export class EmployeeLeaveRequestsService {
       select: employeeLeaveRequestSelect,
     });
 
-    await this.leaveBalanceSync.syncForKeys([
-      {
-        userId: user.id,
-        leaveTypeId: existing.leaveTypeId,
-        year: existing.startDate.getUTCFullYear(),
-      },
-    ]);
+    await this.initializeAffectedLeaveYears(
+      user.id,
+      updated.startDate,
+      updated.endDate,
+    );
+    await this.leaveBalanceSync.syncForRequest(updated.id);
 
     return this.toResponse(updated);
   }
@@ -540,13 +569,17 @@ export class EmployeeLeaveRequestsService {
     }
 
     await this.prisma.leaveRequest.delete({ where: { id } });
-    await this.leaveBalanceSync.syncForKeys([
-      {
-        userId: user.id,
-        leaveTypeId: existing.leaveTypeId,
-        year: existing.startDate.getUTCFullYear(),
-      },
-    ]);
+    await this.initializeAffectedLeaveYears(
+      user.id,
+      existing.startDate,
+      existing.endDate,
+    );
+    await this.leaveBalanceSync.syncForRequestSnapshot({
+      userId: user.id,
+      leaveTypeId: existing.leaveTypeId,
+      startDate: existing.startDate,
+      endDate: existing.endDate,
+    });
 
     return { id, deleted: true };
   }
@@ -826,6 +859,19 @@ export class EmployeeLeaveRequestsService {
           ? 'Congés payés (total annuel)'
           : 'Congés spéciaux (plafond 12 jours)',
     };
+  }
+
+  private async initializeAffectedLeaveYears(
+    userId: string,
+    startDate: Date,
+    endDate: Date,
+    client: PrismaClientLike = this.prisma,
+  ) {
+    await Promise.all(
+      getLeaveYearsForPeriod(startDate, endDate).map((year) =>
+        this.leaveBalanceInitializer.initializeUserYear(userId, year, client),
+      ),
+    );
   }
 
   private async ensureSufficientBalance(params: {

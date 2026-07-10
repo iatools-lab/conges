@@ -237,6 +237,7 @@ describe("NewRequestForm", () => {
     await user.click(screen.getByRole("button", { name: /nouvelle demande/i }));
     await waitFor(() => expect(apiFetch).toHaveBeenCalled());
     expect(screen.getByText(/justificatif \(optionnel\)/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/précision du congé/i)).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText(/date de début/i), {
       target: { value: "2026-06-01" },
@@ -250,11 +251,11 @@ describe("NewRequestForm", () => {
 
     expect(onSubmit).toHaveBeenCalledWith({
       leaveTypeCode: "SPECIAL",
-      leaveSubtypeCode: "PAT",
       startDate: "2026-06-01",
       endDate: "2026-06-03",
       reason: undefined,
       draft: undefined,
+      proof: undefined,
     });
   });
 });

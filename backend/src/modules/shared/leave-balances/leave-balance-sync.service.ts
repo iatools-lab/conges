@@ -1,6 +1,14 @@
 import { Injectable } from '@nestjs/common';
-import { LeaveRequestStatus, Prisma } from '@prisma/client';
+import { EventType, LeaveRequestStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { LeaveEntitlementsService } from '../leave-entitlements/leave-entitlements.service';
+import { LeaveBalanceInitializerService } from './leave-balance-initializer.service';
+import {
+  getLeaveYearRange,
+  getLeaveYearsForPeriod,
+  splitPeriodByLeaveYear,
+} from '../../../common/leave-year';
+import { countWorkingDays } from '../../../common/working-days';
 
 type PrismaClientLike = PrismaService | Prisma.TransactionClient;
 
@@ -10,9 +18,20 @@ type BalanceKey = {
   year: number;
 };
 
+type RequestSnapshot = {
+  userId: string;
+  leaveTypeId: string;
+  startDate: Date;
+  endDate: Date;
+};
+
 @Injectable()
 export class LeaveBalanceSyncService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly leaveEntitlements: LeaveEntitlementsService,
+    private readonly leaveBalanceInitializer: LeaveBalanceInitializerService,
+  ) {}
 
   async syncForRequest(
     requestId: string,
@@ -24,17 +43,35 @@ export class LeaveBalanceSyncService {
         ownerId: true,
         leaveTypeId: true,
         startDate: true,
+        endDate: true,
       },
     });
 
     if (!request) return;
 
-    await this.syncForKey(
+    await this.syncForRequestSnapshot(
       {
         userId: request.ownerId,
         leaveTypeId: request.leaveTypeId,
-        year: request.startDate.getUTCFullYear(),
+        startDate: request.startDate,
+        endDate: request.endDate,
       },
+      client,
+    );
+  }
+
+  async syncForRequestSnapshot(
+    request: RequestSnapshot,
+    client: PrismaClientLike = this.prisma,
+  ) {
+    await this.syncForKeys(
+      getLeaveYearsForPeriod(request.startDate, request.endDate).map(
+        (year) => ({
+          userId: request.userId,
+          leaveTypeId: request.leaveTypeId,
+          year,
+        }),
+      ),
       client,
     );
   }
@@ -53,22 +90,42 @@ export class LeaveBalanceSyncService {
     );
 
     await Promise.all(uniqueKeys.map((key) => this.syncForKey(key, client)));
+    await Promise.all(
+      this.nextYearDebtKeys(uniqueKeys).map((key) =>
+        this.leaveBalanceInitializer.refreshPaidDebtCarryover(
+          key.userId,
+          key.year,
+          client,
+        ),
+      ),
+    );
   }
 
   async syncYear(year: number, client: PrismaClientLike = this.prisma) {
-    const yearStart = new Date(Date.UTC(year, 0, 1));
-    const nextYearStart = new Date(Date.UTC(year + 1, 0, 1));
+    const range = getLeaveYearRange(year);
     const requests = await client.leaveRequest.findMany({
-      where: { startDate: { gte: yearStart, lt: nextYearStart } },
-      select: { ownerId: true, leaveTypeId: true, startDate: true },
+      where: {
+        startDate: { lt: range.endExclusive },
+        endDate: { gte: range.start },
+      },
+      select: {
+        ownerId: true,
+        leaveTypeId: true,
+        startDate: true,
+        endDate: true,
+      },
     });
 
     await this.syncForKeys(
-      requests.map((request) => ({
-        userId: request.ownerId,
-        leaveTypeId: request.leaveTypeId,
-        year: request.startDate.getUTCFullYear(),
-      })),
+      requests.flatMap((request) =>
+        getLeaveYearsForPeriod(request.startDate, request.endDate).map(
+          (leaveYear) => ({
+            userId: request.ownerId,
+            leaveTypeId: request.leaveTypeId,
+            year: leaveYear,
+          }),
+        ),
+      ),
       client,
     );
   }
@@ -78,84 +135,131 @@ export class LeaveBalanceSyncService {
     year: number,
     client: PrismaClientLike = this.prisma,
   ) {
-    const yearStart = new Date(Date.UTC(year, 0, 1));
-    const nextYearStart = new Date(Date.UTC(year + 1, 0, 1));
+    const range = getLeaveYearRange(year);
     const requests = await client.leaveRequest.findMany({
       where: {
         ownerId: userId,
-        startDate: { gte: yearStart, lt: nextYearStart },
+        startDate: { lt: range.endExclusive },
+        endDate: { gte: range.start },
       },
-      select: { ownerId: true, leaveTypeId: true, startDate: true },
+      select: {
+        ownerId: true,
+        leaveTypeId: true,
+        startDate: true,
+        endDate: true,
+      },
     });
 
     await this.syncForKeys(
-      requests.map((request) => ({
-        userId: request.ownerId,
-        leaveTypeId: request.leaveTypeId,
-        year: request.startDate.getUTCFullYear(),
-      })),
+      requests.flatMap((request) =>
+        getLeaveYearsForPeriod(request.startDate, request.endDate).map(
+          (leaveYear) => ({
+            userId: request.ownerId,
+            leaveTypeId: request.leaveTypeId,
+            year: leaveYear,
+          }),
+        ),
+      ),
       client,
     );
   }
 
   private async syncForKey(key: BalanceKey, client: PrismaClientLike) {
-    const yearStart = new Date(Date.UTC(key.year, 0, 1));
-    const nextYearStart = new Date(Date.UTC(key.year + 1, 0, 1));
+    const range = getLeaveYearRange(key.year);
     const now = new Date();
     const today = new Date(
       Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
     );
-    const [approved, scheduled, existingBalance] = await Promise.all([
-      client.leaveRequest.aggregate({
-        where: {
-          ownerId: key.userId,
-          leaveTypeId: key.leaveTypeId,
-          startDate: { gte: yearStart, lt: nextYearStart },
-          status: LeaveRequestStatus.APPROVED,
-          endDate: { lt: today },
-        },
-        _sum: { days: true },
-      }),
-      client.leaveRequest.aggregate({
-        where: {
-          ownerId: key.userId,
-          leaveTypeId: key.leaveTypeId,
-          startDate: { gte: yearStart, lt: nextYearStart },
-          OR: [
-            {
-              status: LeaveRequestStatus.APPROVED,
-              endDate: { gte: today },
-            },
-            {
-              status: {
-                in: [LeaveRequestStatus.PENDING, LeaveRequestStatus.IN_REVIEW],
-              },
-            },
-            {
-              status: LeaveRequestStatus.DRAFT,
-              submittedAt: null,
-            },
-          ],
-        },
-        _sum: { days: true },
-      }),
-      client.leaveBalance.findUnique({
-        where: {
-          userId_leaveTypeId_year: {
-            userId: key.userId,
+    const [requests, holidays, existingBalance, user, leaveType] =
+      await Promise.all([
+        client.leaveRequest.findMany({
+          where: {
+            ownerId: key.userId,
             leaveTypeId: key.leaveTypeId,
-            year: key.year,
+            startDate: { lt: range.endExclusive },
+            endDate: { gte: range.start },
           },
-        },
-        select: { takenAdjustment: true },
-      }),
-    ]);
+          select: {
+            startDate: true,
+            endDate: true,
+            status: true,
+            submittedAt: true,
+          },
+        }),
+        client.publicHoliday.findMany({
+          where: {
+            country: 'CM',
+            OR: [
+              { date: { gte: range.start, lt: range.endExclusive } },
+              { recurring: true },
+            ],
+          },
+          select: { date: true, recurring: true },
+        }),
+        client.leaveBalance.findUnique({
+          where: {
+            userId_leaveTypeId_year: {
+              userId: key.userId,
+              leaveTypeId: key.leaveTypeId,
+              year: key.year,
+            },
+          },
+          select: { acquired: true, takenAdjustment: true },
+        }),
+        client.user.findUnique({
+          where: { id: key.userId },
+          select: {
+            id: true,
+            sexe: true,
+            dateEmbauche: true,
+            passifInitial: true,
+            children: { select: { dateNaissance: true } },
+            events: {
+              where: { type: EventType.BIRTH, processed: true },
+              select: { type: true, eventDate: true, processed: true },
+            },
+          },
+        }),
+        client.leaveType.findUnique({
+          where: { id: key.leaveTypeId },
+          select: {
+            id: true,
+            code: true,
+            name: true,
+            category: true,
+            defaultDays: true,
+          },
+        }),
+      ]);
     const takenAdjustment = this.toNumber(
       existingBalance?.takenAdjustment ?? 0,
     );
     const taken = this.toNumber(
-      this.toNumber(approved._sum.days) + takenAdjustment,
+      requests
+        .filter((request) => this.isTakenRequest(request, today))
+        .reduce(
+          (total, request) =>
+            total + this.daysInLeaveYear(request, key.year, holidays),
+          0,
+        ) + takenAdjustment,
     );
+    const scheduled = this.toNumber(
+      requests
+        .filter((request) => this.isScheduledRequest(request, today))
+        .reduce(
+          (total, request) =>
+            total + this.daysInLeaveYear(request, key.year, holidays),
+          0,
+        ),
+    );
+    const acquired =
+      user && leaveType
+        ? this.leaveEntitlements.getAcquiredDays({
+            leaveType,
+            user,
+            year: key.year,
+          })
+        : (existingBalance?.acquired ?? 0);
 
     await client.leaveBalance.upsert({
       where: {
@@ -169,17 +273,71 @@ export class LeaveBalanceSyncService {
         userId: key.userId,
         leaveTypeId: key.leaveTypeId,
         year: key.year,
-        acquired: 0,
+        acquired,
         carryover: 0,
         taken,
         takenAdjustment,
-        scheduled: this.toNumber(scheduled._sum.days),
+        scheduled,
       },
       update: {
         taken,
-        scheduled: this.toNumber(scheduled._sum.days),
+        scheduled,
       },
     });
+  }
+
+  private nextYearDebtKeys(keys: BalanceKey[]) {
+    return Array.from(
+      new Map(
+        keys.map((key) => [
+          `${key.userId}:${key.year + 1}`,
+          { userId: key.userId, year: key.year + 1 },
+        ]),
+      ).values(),
+    );
+  }
+
+  private isTakenRequest(
+    request: { status: LeaveRequestStatus; endDate: Date },
+    today: Date,
+  ) {
+    return (
+      request.status === LeaveRequestStatus.APPROVED && request.endDate < today
+    );
+  }
+
+  private isScheduledRequest(
+    request: {
+      status: LeaveRequestStatus;
+      endDate: Date;
+      submittedAt: Date | null;
+    },
+    today: Date,
+  ) {
+    return (
+      (request.status === LeaveRequestStatus.APPROVED &&
+        request.endDate >= today) ||
+      request.status === LeaveRequestStatus.PENDING ||
+      request.status === LeaveRequestStatus.IN_REVIEW ||
+      (request.status === LeaveRequestStatus.DRAFT && !request.submittedAt)
+    );
+  }
+
+  private daysInLeaveYear(
+    request: { startDate: Date; endDate: Date },
+    year: number,
+    holidays: { date: Date; recurring: boolean }[],
+  ) {
+    return this.toNumber(
+      splitPeriodByLeaveYear(request.startDate, request.endDate)
+        .filter((segment) => segment.year === year)
+        .reduce(
+          (total, segment) =>
+            total +
+            countWorkingDays(segment.startDate, segment.endDate, holidays),
+          0,
+        ),
+    );
   }
 
   private toNumber(value: number | null | undefined) {

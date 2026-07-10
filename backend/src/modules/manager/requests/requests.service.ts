@@ -23,6 +23,7 @@ import {
 import { EmailService } from '../../shared/notifications/email.service';
 import { LeaveBalanceSyncService } from '../../shared/leave-balances/leave-balance-sync.service';
 import { overlapDateWhere, resolveDateRange } from '../../../common/date-range';
+import { getLeaveYear } from '../../../common/leave-year';
 
 type BadgeTone =
   | 'valid'
@@ -165,7 +166,7 @@ export class ManagerRequestsService {
       if (previousDecision) {
         const balanceByKey = await this.findBalances(
           [existing],
-          existing.startDate.getUTCFullYear(),
+          getLeaveYear(existing.startDate),
         );
         return this.toResponse(
           existing,
@@ -289,7 +290,7 @@ export class ManagerRequestsService {
 
     const balanceByKey = await this.findBalances(
       [updated],
-      updated.startDate.getUTCFullYear(),
+      getLeaveYear(updated.startDate),
     );
 
     if (applied && existing.owner.email) {

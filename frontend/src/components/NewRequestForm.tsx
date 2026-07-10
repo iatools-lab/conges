@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui-kit";
 import { apiFetch } from "@/lib/api";
+import { leaveYearForIsoDate } from "@/lib/leave-year";
 import { countWorkingDays, endDateForWorkingDays, type HolidayRule } from "@/lib/working-days";
 import type { AuthSession } from "@/modules/auth/session";
 import { Plus } from "lucide-react";
@@ -48,6 +49,9 @@ const EXCLUDED_SPECIAL_CODES = new Set(["PASSIF", "MAT", "SS"]);
 
 type BalancesResponse = {
   rows: BalanceRow[];
+  totals?: {
+    remaining: number;
+  };
   specialTotals?: {
     remaining: number;
   };
@@ -87,10 +91,7 @@ export function NewRequestForm({
   const [proofError, setProofError] = useState(false);
   const [holidaysLoading, setHolidaysLoading] = useState(false);
 
-  const requestYear = useMemo(
-    () => (startDate ? Number.parseInt(startDate.slice(0, 4), 10) : new Date().getFullYear()),
-    [startDate],
-  );
+  const requestYear = useMemo(() => leaveYearForIsoDate(startDate), [startDate]);
   const isMaternitySelection = normalizeCode(leaveTypeCode) === MATERNITY_CODE;
   const isPayeSelection = normalizeCode(leaveTypeCode) === POOL_PAYE_CODE;
   const selectedLeaveType = useMemo(
@@ -98,15 +99,11 @@ export function NewRequestForm({
     [leaveTypeCode, leaveTypes],
   );
   const subtypeOptions = useMemo(() => selectedLeaveType?.children ?? [], [selectedLeaveType]);
-  const selectedSubtype = subtypeOptions.find((type) => type.code === leaveSubtypeCode);
   const isSpecialSelection =
     normalizeCode(leaveTypeCode) === POOL_SPECIAL_CODE ||
-    isSpecialLeaveSelection(selectedLeaveType) ||
-    isSpecialLeaveSelection(selectedSubtype);
+    isSpecialLeaveSelection(selectedLeaveType);
   const proofRequired =
-    !isSpecialSelection &&
-    !isMaternitySelection &&
-    (selectedSubtype?.requiresProof ?? selectedLeaveType?.requiresProof ?? false);
+    !isSpecialSelection && !isMaternitySelection && (selectedLeaveType?.requiresProof ?? false);
 
   const requestedDays = useMemo(
     () => countWorkingDays(startDate, endDate, holidays),
@@ -183,6 +180,9 @@ export function NewRequestForm({
         }, {});
         if (response.specialTotals) {
           nextMap[POOL_SPECIAL_CODE] = response.specialTotals.remaining;
+        }
+        if (response.totals) {
+          nextMap[POOL_PAYE_CODE] = response.totals.remaining;
         }
         setBalanceByCode(nextMap);
       })
@@ -268,7 +268,6 @@ export function NewRequestForm({
             }
             onSubmit({
               leaveTypeCode,
-              leaveSubtypeCode: leaveSubtypeCode || undefined,
               startDate: String(formData.get("startDate") ?? ""),
               endDate: String(formData.get("endDate") ?? ""),
               reason: String(formData.get("reason") ?? "").trim() || undefined,
@@ -316,24 +315,6 @@ export function NewRequestForm({
               ))}
             </select>
           </Field>
-
-          {subtypeOptions.length > 0 && (
-            <Field label="Précision du congé">
-              <select
-                required
-                name="leaveSubtypeCode"
-                value={leaveSubtypeCode}
-                onChange={(event) => setLeaveSubtypeCode(event.target.value)}
-                className="w-full rounded-md border px-3 py-2 text-sm bg-background"
-              >
-                {subtypeOptions.map((type) => (
-                  <option key={type.code} value={type.code}>
-                    {type.name}
-                  </option>
-                ))}
-              </select>
-            </Field>
-          )}
 
           <div className="grid grid-cols-2 gap-3">
             <Field label="Date de début">
@@ -462,6 +443,10 @@ function getAvailableDaysForSelection(
   const normalized = normalizeCode(leaveTypeCode);
 
   if (normalized === POOL_PAYE_CODE) {
+    if (typeof balanceByCode[POOL_PAYE_CODE] === "number") {
+      return roundDays(balanceByCode[POOL_PAYE_CODE]);
+    }
+
     return roundDays(
       Object.entries(balanceByCode)
         .filter(([code]) => isPaidSourceCode(code))

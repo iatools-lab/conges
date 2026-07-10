@@ -1,20 +1,56 @@
-import { LeaveRequestStatus } from '@prisma/client';
+import { LeaveCategory, LeaveRequestStatus, Sexe } from '@prisma/client';
 import { LeaveBalanceSyncService } from './leave-balance-sync.service';
 
 function createHarness() {
   const prisma = {
     leaveRequest: {
       findUnique: jest.fn(),
-      findMany: jest.fn(),
-      aggregate: jest.fn(),
+      findMany: jest.fn().mockResolvedValue([]),
+    },
+    publicHoliday: {
+      findMany: jest.fn().mockResolvedValue([]),
     },
     leaveBalance: {
       findUnique: jest.fn().mockResolvedValue(null),
       upsert: jest.fn(),
     },
+    user: {
+      findUnique: jest.fn().mockResolvedValue({
+        id: 'employee-1',
+        sexe: Sexe.M,
+        dateEmbauche: new Date('2020-01-01T00:00:00.000Z'),
+        passifInitial: 0,
+        children: [],
+        events: [],
+      }),
+    },
+    leaveType: {
+      findUnique: jest.fn().mockResolvedValue({
+        id: 'type-1',
+        code: 'CP',
+        name: 'Congés payés',
+        category: LeaveCategory.CONGE_PAYE,
+        defaultDays: 24,
+      }),
+    },
+  } as any;
+  const leaveEntitlements = {
+    getAcquiredDays: jest.fn().mockReturnValue(24),
+  } as any;
+  const leaveBalanceInitializer = {
+    refreshPaidDebtCarryover: jest.fn().mockResolvedValue({}),
   } as any;
 
-  return { prisma, service: new LeaveBalanceSyncService(prisma) };
+  return {
+    prisma,
+    leaveEntitlements,
+    leaveBalanceInitializer,
+    service: new LeaveBalanceSyncService(
+      prisma,
+      leaveEntitlements,
+      leaveBalanceInitializer,
+    ),
+  };
 }
 
 describe('LeaveBalanceSyncService', () => {
@@ -24,51 +60,115 @@ describe('LeaveBalanceSyncService', () => {
       ownerId: 'employee-1',
       leaveTypeId: 'type-1',
       startDate: new Date('2026-06-01T00:00:00.000Z'),
+      endDate: new Date('2026-08-11T00:00:00.000Z'),
     });
-    prisma.leaveRequest.aggregate
-      .mockResolvedValueOnce({ _sum: { days: 4 } })
-      .mockResolvedValueOnce({ _sum: { days: 7 } });
+    prisma.leaveRequest.findMany.mockResolvedValue([
+      {
+        startDate: new Date('2026-06-01T00:00:00.000Z'),
+        endDate: new Date('2026-06-04T00:00:00.000Z'),
+        status: LeaveRequestStatus.APPROVED,
+        submittedAt: new Date('2026-05-01T00:00:00.000Z'),
+      },
+      {
+        startDate: new Date('2026-08-03T00:00:00.000Z'),
+        endDate: new Date('2026-08-07T00:00:00.000Z'),
+        status: LeaveRequestStatus.APPROVED,
+        submittedAt: new Date('2026-05-01T00:00:00.000Z'),
+      },
+      {
+        startDate: new Date('2026-08-10T00:00:00.000Z'),
+        endDate: new Date('2026-08-11T00:00:00.000Z'),
+        status: LeaveRequestStatus.PENDING,
+        submittedAt: new Date('2026-05-01T00:00:00.000Z'),
+      },
+    ]);
 
     await service.syncForRequest('request-1');
 
-    expect(prisma.leaveRequest.aggregate).toHaveBeenNthCalledWith(1, {
-      where: expect.objectContaining({ status: LeaveRequestStatus.APPROVED }),
-      _sum: { days: true },
-    });
-    expect(prisma.leaveRequest.aggregate).toHaveBeenNthCalledWith(2, {
+    expect(prisma.leaveRequest.findMany).toHaveBeenCalledWith({
       where: expect.objectContaining({
-        OR: [
-          {
-            status: LeaveRequestStatus.APPROVED,
-            endDate: { gte: expect.any(Date) },
-          },
-          {
-            status: {
-              in: [LeaveRequestStatus.PENDING, LeaveRequestStatus.IN_REVIEW],
-            },
-          },
-          {
-            status: LeaveRequestStatus.DRAFT,
-            submittedAt: null,
-          },
-        ],
+        ownerId: 'employee-1',
+        leaveTypeId: 'type-1',
+        startDate: { lt: new Date('2027-04-01T00:00:00.000Z') },
+        endDate: { gte: new Date('2026-04-01T00:00:00.000Z') },
       }),
-      _sum: { days: true },
+      select: {
+        startDate: true,
+        endDate: true,
+        status: true,
+        submittedAt: true,
+      },
     });
     expect(prisma.leaveBalance.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
-        create: expect.objectContaining({ taken: 4, scheduled: 7 }),
+        create: expect.objectContaining({
+          acquired: 24,
+          taken: 4,
+          scheduled: 7,
+        }),
         update: { taken: 4, scheduled: 7 },
+      }),
+    );
+  });
+
+  it('splits a planned request that crosses March 31 between two leave years', async () => {
+    const { prisma, service } = createHarness();
+    const crossingRequest = {
+      startDate: new Date('2027-03-28T00:00:00.000Z'),
+      endDate: new Date('2027-04-04T00:00:00.000Z'),
+      status: LeaveRequestStatus.DRAFT,
+      submittedAt: null,
+    };
+    prisma.leaveRequest.findUnique.mockResolvedValue({
+      ownerId: 'employee-1',
+      leaveTypeId: 'type-1',
+      startDate: crossingRequest.startDate,
+      endDate: crossingRequest.endDate,
+    });
+    prisma.leaveRequest.findMany.mockResolvedValue([crossingRequest]);
+
+    await service.syncForRequest('request-crossing');
+
+    expect(prisma.leaveBalance.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          userId_leaveTypeId_year: {
+            userId: 'employee-1',
+            leaveTypeId: 'type-1',
+            year: 2026,
+          },
+        },
+        update: { taken: 0, scheduled: 3 },
+      }),
+    );
+    expect(prisma.leaveBalance.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          userId_leaveTypeId_year: {
+            userId: 'employee-1',
+            leaveTypeId: 'type-1',
+            year: 2027,
+          },
+        },
+        update: { taken: 0, scheduled: 2 },
       }),
     );
   });
 
   it('keeps the RH taken-days adjustment during synchronization', async () => {
     const { prisma, service } = createHarness();
-    prisma.leaveBalance.findUnique.mockResolvedValue({ takenAdjustment: -2 });
-    prisma.leaveRequest.aggregate
-      .mockResolvedValueOnce({ _sum: { days: 10 } })
-      .mockResolvedValueOnce({ _sum: { days: 0 } });
+    prisma.leaveBalance.findUnique.mockResolvedValue({
+      acquired: 24,
+      takenAdjustment: -2,
+    });
+    prisma.leaveRequest.findMany.mockResolvedValue([
+      {
+        startDate: new Date('2026-06-01T00:00:00.000Z'),
+        endDate: new Date('2026-06-12T00:00:00.000Z'),
+        status: LeaveRequestStatus.APPROVED,
+        submittedAt: new Date('2026-05-01T00:00:00.000Z'),
+      },
+    ]);
 
     await service.syncForKeys([
       { userId: 'employee-1', leaveTypeId: 'type-1', year: 2026 },
@@ -83,7 +183,6 @@ describe('LeaveBalanceSyncService', () => {
 
   it('deduplicates balance keys before syncing', async () => {
     const { prisma, service } = createHarness();
-    prisma.leaveRequest.aggregate.mockResolvedValue({ _sum: { days: 0 } });
 
     await service.syncForKeys([
       { userId: 'employee-1', leaveTypeId: 'type-1', year: 2026 },
@@ -91,5 +190,21 @@ describe('LeaveBalanceSyncService', () => {
     ]);
 
     expect(prisma.leaveBalance.upsert).toHaveBeenCalledTimes(1);
+  });
+
+  it('refreshes the next leave year paid debt carryover after synchronization', async () => {
+    const { prisma, leaveBalanceInitializer, service } = createHarness();
+
+    await service.syncForKeys([
+      { userId: 'employee-1', leaveTypeId: 'type-1', year: 2026 },
+      { userId: 'employee-1', leaveTypeId: 'type-1', year: 2026 },
+    ]);
+
+    expect(
+      leaveBalanceInitializer.refreshPaidDebtCarryover,
+    ).toHaveBeenCalledTimes(1);
+    expect(
+      leaveBalanceInitializer.refreshPaidDebtCarryover,
+    ).toHaveBeenCalledWith('employee-1', 2027, prisma);
   });
 });

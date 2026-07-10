@@ -16,6 +16,7 @@ import {
 import { findDirectorGeneralId } from '../../shared/hierarchy/default-manager';
 import { MAX_PASSIVE_LEAVE_DAYS } from '../../shared/leave-entitlements/leave-entitlements.service';
 import { LeaveBalanceInitializerService } from '../../shared/leave-balances/leave-balance-initializer.service';
+import { getCurrentLeaveYear } from '../../../common/leave-year';
 
 const employeeSelect = {
   id: true,
@@ -259,7 +260,7 @@ export class RhEmployeesService {
 
     await this.leaveBalanceInitializer.initializeUserYear(
       employee.id,
-      new Date().getUTCFullYear(),
+      getCurrentLeaveYear(),
       client,
     );
 

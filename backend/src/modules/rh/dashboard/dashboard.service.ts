@@ -81,7 +81,6 @@ export class RhDashboardService {
       activeConflicts,
       pendingRequests,
       pendingEvents,
-      takenLeaves,
       departments,
       unassignedEmployees,
       leaves,
@@ -140,15 +139,6 @@ export class RhDashboardService {
           },
         },
       }),
-      this.prisma.leaveRequest.aggregate({
-        where: {
-          status: LeaveRequestStatus.APPROVED,
-          ...overlapDateWhere(range),
-          owner: { status: { not: UserStatus.INACTIVE } },
-          leaveType: { code: { in: [...PAID_POOL_CODES] } },
-        },
-        _sum: { days: true },
-      }),
       this.prisma.department.findMany({
         orderBy: { name: 'asc' },
         select: {
@@ -179,7 +169,7 @@ export class RhDashboardService {
     const acquiredDays = this.toNumber(balances._sum.acquired);
     const carryoverDays = this.toNumber(balances._sum.carryover);
     const plannedDays = this.toNumber(balances._sum.scheduled);
-    const takenDays = this.toNumber(takenLeaves._sum.days);
+    const takenDays = this.toNumber(balances._sum.taken);
     const remainingLiability = this.roundDays(
       Math.max(acquiredDays + carryoverDays - takenDays - plannedDays, 0),
     );

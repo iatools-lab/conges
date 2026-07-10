@@ -2,6 +2,7 @@ import { AppShell } from "@/components/AppShell";
 import { Button, Card, CardHeader } from "@/components/ui-kit";
 import { AlertCircle, Info, RefreshCw } from "lucide-react";
 import { apiFetch } from "@/lib/api";
+import { leaveYearForDate } from "@/lib/leave-year";
 import { useAuthSession } from "@/modules/auth/session";
 import { useQuery } from "@tanstack/react-query";
 
@@ -129,7 +130,7 @@ export function Solde() {
       )}
 
       <Card>
-        <CardHeader title={`Détail des congés payés ${data?.year ?? new Date().getFullYear()}`} />
+        <CardHeader title={`Détail des congés payés ${data?.year ?? leaveYearForDate()}`} />
         {isLoading ? (
           <div className="px-5 py-8 text-sm text-muted-foreground">Chargement des soldes...</div>
         ) : (

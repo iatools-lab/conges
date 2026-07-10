@@ -1,5 +1,10 @@
 import { BadRequestException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import {
+  getCurrentLeaveYear,
+  getLeaveYear,
+  getLeaveYearRange,
+} from './leave-year';
 
 type DateRangeInput = {
   dateFrom?: string | null;
@@ -39,29 +44,31 @@ export function resolveDateRange(
     dateFrom = input.dateFrom ? parseIsoDate(input.dateFrom, 'dateFrom') : null;
     dateTo = input.dateTo ? parseIsoDate(input.dateTo, 'dateTo') : null;
   } else if (input.year || input.month) {
-    const year = parseYear(input.year, now.getUTCFullYear());
+    const year = parseYear(input.year, getCurrentLeaveYear(now));
     month = input.month ? parseMonth(input.month) : null;
     if (month) {
       dateFrom = new Date(Date.UTC(year, month - 1, 1));
       dateTo = new Date(Date.UTC(year, month, 0));
     } else {
-      dateFrom = new Date(Date.UTC(year, 0, 1));
-      dateTo = new Date(Date.UTC(year, 11, 31));
+      const range = getLeaveYearRange(year);
+      dateFrom = range.start;
+      dateTo = range.endInclusive;
     }
   } else if (defaultMode === 'month') {
     month = now.getUTCMonth() + 1;
     dateFrom = new Date(Date.UTC(now.getUTCFullYear(), month - 1, 1));
     dateTo = new Date(Date.UTC(now.getUTCFullYear(), month, 0));
   } else if (defaultMode === 'year') {
-    dateFrom = new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
-    dateTo = new Date(Date.UTC(now.getUTCFullYear(), 11, 31));
+    const range = getLeaveYearRange(getCurrentLeaveYear(now));
+    dateFrom = range.start;
+    dateTo = range.endInclusive;
   }
 
   if (dateFrom && dateTo && dateFrom > dateTo) {
     throw new BadRequestException('dateFrom doit etre avant ou egal a dateTo');
   }
 
-  const year = dateFrom?.getUTCFullYear() ?? now.getUTCFullYear();
+  const year = dateFrom ? getLeaveYear(dateFrom) : getCurrentLeaveYear(now);
 
   return {
     dateFrom,

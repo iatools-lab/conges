@@ -59,18 +59,21 @@ describe('EmployeeBalancesService', () => {
     const leaveBalanceSync = {
       syncUserYear: jest.fn().mockResolvedValue(undefined),
     } as any;
+    const leaveBalanceInitializer = {
+      initializeUserYear: jest.fn().mockResolvedValue({}),
+    } as any;
     const service = new EmployeeBalancesService(
       prisma,
       leaveEntitlements,
       leaveBalanceSync,
+      leaveBalanceInitializer,
     );
 
     const result = await service.findBalances('employee-1', '2026');
 
-    expect(prisma.leaveBalance.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        update: expect.not.objectContaining({ acquired: 24 }),
-      }),
+    expect(leaveBalanceInitializer.initializeUserYear).toHaveBeenCalledWith(
+      'employee-1',
+      2026,
     );
     expect(result.paidDetails?.[0]).toMatchObject({
       code: 'CP',
@@ -170,10 +173,14 @@ describe('EmployeeBalancesService', () => {
     const leaveBalanceSync = {
       syncUserYear: jest.fn().mockResolvedValue(undefined),
     } as any;
+    const leaveBalanceInitializer = {
+      initializeUserYear: jest.fn().mockResolvedValue({}),
+    } as any;
     const service = new EmployeeBalancesService(
       prisma,
       leaveEntitlements,
       leaveBalanceSync,
+      leaveBalanceInitializer,
     );
 
     const result = await service.findBalances('employee-1', '2026');
@@ -191,6 +198,98 @@ describe('EmployeeBalancesService', () => {
       taken: 3,
       scheduled: 2,
       remaining: 7,
+    });
+  });
+
+  it('spreads paid consumption by business order and keeps debt on the paid total only', async () => {
+    const paidTypes = [
+      {
+        id: 'type-anc',
+        code: 'ANC',
+        name: 'Ancienneté',
+        category: LeaveCategory.CONGE_PAYE,
+        defaultDays: 3,
+      },
+      {
+        id: 'type-cp',
+        code: 'CP',
+        name: 'Congés payés',
+        category: LeaveCategory.CONGE_PAYE,
+        defaultDays: 4,
+      },
+      {
+        id: 'type-enf',
+        code: 'ENF',
+        name: 'Congé enfant',
+        category: LeaveCategory.CONGE_PAYE,
+        defaultDays: 2,
+      },
+      {
+        id: 'type-passif',
+        code: 'PASSIF',
+        name: 'Passif',
+        category: LeaveCategory.CONGE_PAYE,
+        defaultDays: 1,
+      },
+    ];
+    const prisma = {
+      user: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'employee-1',
+          status: UserStatus.ACTIVE,
+          sexe: Sexe.F,
+          dateEmbauche: new Date('2020-01-15T00:00:00.000Z'),
+          passifInitial: 0,
+          children: [],
+          events: [],
+        }),
+      },
+      leaveBalance: {
+        findMany: jest.fn().mockResolvedValue(
+          paidTypes.map((leaveType) => ({
+            id: `balance-${leaveType.code}`,
+            acquired: leaveType.defaultDays,
+            taken: leaveType.code === 'ANC' ? 14 : 0,
+            scheduled: 0,
+            carryover: 0,
+            leaveType,
+          })),
+        ),
+      },
+    } as any;
+    const leaveEntitlements = {
+      getBalanceLabel: jest.fn((leaveType) => leaveType.name),
+    } as any;
+    const leaveBalanceSync = {
+      syncUserYear: jest.fn().mockResolvedValue(undefined),
+    } as any;
+    const leaveBalanceInitializer = {
+      initializeUserYear: jest.fn().mockResolvedValue({}),
+    } as any;
+    const service = new EmployeeBalancesService(
+      prisma,
+      leaveEntitlements,
+      leaveBalanceSync,
+      leaveBalanceInitializer,
+    );
+
+    const result = await service.findBalances('employee-1', '2026');
+
+    expect(result.paidDetails).toEqual([
+      expect.objectContaining({ code: 'ANC', taken: 3, remaining: 0 }),
+      expect.objectContaining({ code: 'CP', taken: 4, remaining: 0 }),
+      expect.objectContaining({ code: 'ENF', taken: 2, remaining: 0 }),
+      expect.objectContaining({ code: 'PASSIF', taken: 1, remaining: 0 }),
+    ]);
+    expect(result.totals).toEqual({
+      acquired: 10,
+      taken: 14,
+      scheduled: 0,
+      remaining: -4,
+    });
+    expect(result.paidRows[0]).toMatchObject({
+      code: 'PAYE',
+      remaining: -4,
     });
   });
 });

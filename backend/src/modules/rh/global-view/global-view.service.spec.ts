@@ -25,6 +25,7 @@ const request = {
   status: LeaveRequestStatus.IN_REVIEW,
   ownerId: 'employee-1',
   startDate: new Date('2026-06-01T00:00:00.000Z'),
+  endDate: new Date('2026-06-03T00:00:00.000Z'),
   leaveTypeId: 'type-1',
   owner: {
     id: 'employee-1',

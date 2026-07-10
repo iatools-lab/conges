@@ -24,6 +24,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { apiFetch } from "@/lib/api";
+import { leaveYearForDate } from "@/lib/leave-year";
 import {
   AlertCircle,
   Building2,
@@ -126,7 +127,7 @@ type PlannedDaysAdjustmentResponse = {
   endDate: string;
 };
 
-const currentYear = new Date().getFullYear();
+const currentYear = leaveYearForDate();
 const monthLabels = [
   "Jan",
   "Fév",

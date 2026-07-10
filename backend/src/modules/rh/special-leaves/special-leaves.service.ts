@@ -27,7 +27,17 @@ import {
   overlapDateWhere,
   resolveDateRange,
 } from '../../../common/date-range';
-import { endDateForWorkingDays } from '../../../common/working-days';
+import {
+  getCurrentLeaveYear,
+  getLeaveYear,
+  getLeaveYearRange,
+  getLeaveYearsForPeriod,
+  splitPeriodByLeaveYear,
+} from '../../../common/leave-year';
+import {
+  countWorkingDays,
+  endDateForWorkingDays,
+} from '../../../common/working-days';
 
 type BadgeTone = 'valid' | 'pending' | 'rejected' | 'draft' | 'neutral';
 type PrismaClientLike = PrismaService | Prisma.TransactionClient;
@@ -421,6 +431,7 @@ export class RhSpecialLeavesService {
         id: true,
         ownerId: true,
         startDate: true,
+        endDate: true,
         leaveTypeId: true,
         reason: true,
         leaveType: {
@@ -509,16 +520,18 @@ export class RhSpecialLeavesService {
       this.ensureDateRange(request.startDate, request.endDate);
 
       await Promise.all([
-        this.syncBalanceForLeaveType(
+        this.syncBalanceForLeaveTypeForPeriod(
           transaction,
           existing.ownerId,
-          existing.startDate.getUTCFullYear(),
+          existing.startDate,
+          existing.endDate,
           existing.leaveType,
         ),
-        this.syncBalanceForLeaveType(
+        this.syncBalanceForLeaveTypeForPeriod(
           transaction,
           request.ownerId,
-          request.startDate.getUTCFullYear(),
+          request.startDate,
+          request.endDate,
           request.leaveType,
         ),
       ]);
@@ -527,12 +540,13 @@ export class RhSpecialLeavesService {
         this.syncBirthEventDecisionAndBalances(transaction, request),
         existing.id === request.id &&
         (existing.ownerId !== request.ownerId ||
-          existing.startDate.getUTCFullYear() !==
-            request.startDate.getUTCFullYear())
-          ? this.syncBirthLeaveBalances(
+          existing.startDate.getTime() !== request.startDate.getTime() ||
+          existing.endDate.getTime() !== request.endDate.getTime())
+          ? this.syncBirthLeaveBalancesForPeriod(
               transaction,
               existing.ownerId,
-              existing.startDate.getUTCFullYear(),
+              existing.startDate,
+              existing.endDate,
             )
           : Promise.resolve(),
       ]);
@@ -620,10 +634,11 @@ export class RhSpecialLeavesService {
       select: specialLeaveSelect,
     });
 
-    await this.syncBalanceForLeaveType(
+    await this.syncBalanceForLeaveTypeForPeriod(
       transaction,
       request.ownerId,
-      schedule.startDate.getUTCFullYear(),
+      request.startDate,
+      request.endDate,
       request.leaveType,
     );
     await this.syncBirthEventDecisionAndBalances(transaction, request);
@@ -789,10 +804,11 @@ export class RhSpecialLeavesService {
         );
       }
 
-      await this.syncBirthLeaveBalances(
+      await this.syncBirthLeaveBalancesForPeriod(
         transaction,
         updated.user.id,
-        updated.eventDate.getUTCFullYear(),
+        updated.eventDate,
+        updated.eventDate,
       );
 
       await transaction.auditLog.create({
@@ -1100,15 +1116,28 @@ export class RhSpecialLeavesService {
     await this.syncSingleLeaveTypeBalance(client, userId, year, leaveType.id);
   }
 
+  private async syncBalanceForLeaveTypeForPeriod(
+    client: PrismaClientLike,
+    userId: string,
+    startDate: Date,
+    endDate: Date,
+    leaveType: { id: string; code: string; category: LeaveCategory },
+  ) {
+    await Promise.all(
+      getLeaveYearsForPeriod(startDate, endDate).map((year) =>
+        this.syncBalanceForLeaveType(client, userId, year, leaveType),
+      ),
+    );
+  }
+
   private async syncSingleLeaveTypeBalance(
     client: PrismaClientLike,
     userId: string,
     year: number,
     leaveTypeId: string,
   ) {
-    const yearStart = new Date(Date.UTC(year, 0, 1));
-    const nextYearStart = new Date(Date.UTC(year + 1, 0, 1));
-    const [user, leaveType, approved, scheduled] = await Promise.all([
+    const range = getLeaveYearRange(year);
+    const [user, leaveType, requests, holidays] = await Promise.all([
       client.user.findUnique({
         where: { id: userId },
         select: {
@@ -1130,64 +1159,31 @@ export class RhSpecialLeavesService {
           defaultDays: true,
         },
       }),
-      client.leaveRequest.aggregate({
+      client.leaveRequest.findMany({
         where: {
           ownerId: userId,
           leaveTypeId,
-          startDate: { gte: yearStart, lt: nextYearStart },
-          status: LeaveRequestStatus.APPROVED,
+          startDate: { lt: range.endExclusive },
+          endDate: { gte: range.start },
         },
-        _sum: { days: true },
-      }),
-      client.leaveRequest.aggregate({
-        where: {
-          ownerId: userId,
-          leaveTypeId,
-          startDate: { gte: yearStart, lt: nextYearStart },
-          status: {
-            in: [LeaveRequestStatus.PENDING, LeaveRequestStatus.IN_REVIEW],
-          },
+        select: {
+          startDate: true,
+          endDate: true,
+          status: true,
+          submittedAt: true,
         },
-        _sum: { days: true },
       }),
+      this.findHolidaysForLeaveYear(client, year),
     ]);
 
     if (!user || !leaveType) return;
-    const takenAdjustment = await this.getTakenAdjustment(
+    await this.upsertLeaveTypeBalance({
       client,
-      userId,
-      leaveTypeId,
+      user,
+      leaveType,
       year,
-    );
-    const taken = this.toNumber(
-      this.toNumber(approved._sum.days) + takenAdjustment,
-    );
-
-    await client.leaveBalance.upsert({
-      where: { userId_leaveTypeId_year: { userId, leaveTypeId, year } },
-      create: {
-        userId,
-        leaveTypeId,
-        year,
-        acquired: this.leaveEntitlements.getAcquiredDays({
-          leaveType,
-          user,
-          year,
-        }),
-        carryover: 0,
-        taken,
-        takenAdjustment,
-        scheduled: this.toNumber(scheduled._sum.days),
-      },
-      update: {
-        acquired: this.leaveEntitlements.getAcquiredDays({
-          leaveType,
-          user,
-          year,
-        }),
-        taken,
-        scheduled: this.toNumber(scheduled._sum.days),
-      },
+      requests,
+      holidays,
     });
   }
 
@@ -1197,9 +1193,8 @@ export class RhSpecialLeavesService {
     year: number,
     leaveTypeId: string,
   ) {
-    const yearStart = new Date(Date.UTC(year, 0, 1));
-    const nextYearStart = new Date(Date.UTC(year + 1, 0, 1));
-    const [user, leaveType, approved, scheduled] = await Promise.all([
+    const range = getLeaveYearRange(year);
+    const [user, leaveType, requests, holidays] = await Promise.all([
       client.user.findUnique({
         where: { id: userId },
         select: {
@@ -1221,44 +1216,97 @@ export class RhSpecialLeavesService {
           defaultDays: true,
         },
       }),
-      client.leaveRequest.aggregate({
+      client.leaveRequest.findMany({
         where: {
           ownerId: userId,
-          startDate: { gte: yearStart, lt: nextYearStart },
-          status: LeaveRequestStatus.APPROVED,
+          startDate: { lt: range.endExclusive },
+          endDate: { gte: range.start },
           leaveType: { category: LeaveCategory.CONGE_SPECIAL },
         },
-        _sum: { days: true },
-      }),
-      client.leaveRequest.aggregate({
-        where: {
-          ownerId: userId,
-          startDate: { gte: yearStart, lt: nextYearStart },
-          status: {
-            in: [LeaveRequestStatus.PENDING, LeaveRequestStatus.IN_REVIEW],
-          },
-          leaveType: { category: LeaveCategory.CONGE_SPECIAL },
+        select: {
+          startDate: true,
+          endDate: true,
+          status: true,
+          submittedAt: true,
         },
-        _sum: { days: true },
       }),
+      this.findHolidaysForLeaveYear(client, year),
     ]);
 
     if (!user || !leaveType) return;
+    await this.upsertLeaveTypeBalance({
+      client,
+      user,
+      leaveType,
+      year,
+      requests,
+      holidays,
+    });
+  }
+
+  private async upsertLeaveTypeBalance(params: {
+    client: PrismaClientLike;
+    user: {
+      id: string;
+      sexe: Sexe;
+      dateEmbauche: Date;
+      passifInitial: number;
+      children: { dateNaissance: Date }[];
+      events: { type: EventType; eventDate: Date; processed: boolean }[];
+    };
+    leaveType: {
+      id: string;
+      code: string;
+      name: string;
+      category: LeaveCategory;
+      defaultDays: number;
+    };
+    year: number;
+    requests: {
+      startDate: Date;
+      endDate: Date;
+      status: LeaveRequestStatus;
+      submittedAt: Date | null;
+    }[];
+    holidays: { date: Date; recurring: boolean }[];
+  }) {
+    const { client, user, leaveType, year, requests, holidays } = params;
     const takenAdjustment = await this.getTakenAdjustment(
       client,
-      userId,
-      leaveTypeId,
+      user.id,
+      leaveType.id,
       year,
     );
     const taken = this.toNumber(
-      this.toNumber(approved._sum.days) + takenAdjustment,
+      requests
+        .filter((request) => this.isTakenRequest(request, this.todayUtc()))
+        .reduce(
+          (total, request) =>
+            total + this.daysInLeaveYear(request, year, holidays),
+          0,
+        ) + takenAdjustment,
+    );
+    const scheduled = this.toNumber(
+      requests
+        .filter((request) => this.isScheduledRequest(request, this.todayUtc()))
+        .reduce(
+          (total, request) =>
+            total + this.daysInLeaveYear(request, year, holidays),
+          0,
+        ),
     );
 
     await client.leaveBalance.upsert({
-      where: { userId_leaveTypeId_year: { userId, leaveTypeId, year } },
+      where: {
+        userId_leaveTypeId_year: {
+          userId: user.id,
+          leaveTypeId: leaveType.id,
+          year,
+        },
+      },
       create: {
-        userId,
-        leaveTypeId,
+        userId: user.id,
+        leaveTypeId: leaveType.id,
         year,
         acquired: this.leaveEntitlements.getAcquiredDays({
           leaveType,
@@ -1268,11 +1316,16 @@ export class RhSpecialLeavesService {
         carryover: 0,
         taken,
         takenAdjustment,
-        scheduled: this.toNumber(scheduled._sum.days),
+        scheduled,
       },
       update: {
+        acquired: this.leaveEntitlements.getAcquiredDays({
+          leaveType,
+          user,
+          year,
+        }),
         taken,
-        scheduled: this.toNumber(scheduled._sum.days),
+        scheduled,
       },
     });
   }
@@ -1334,10 +1387,24 @@ export class RhSpecialLeavesService {
       );
     }
 
-    await this.syncBirthLeaveBalances(
+    await this.syncBirthLeaveBalancesForPeriod(
       client,
       request.ownerId,
-      request.startDate.getUTCFullYear(),
+      request.startDate,
+      request.endDate,
+    );
+  }
+
+  private async syncBirthLeaveBalancesForPeriod(
+    client: PrismaClientLike,
+    userId: string,
+    startDate: Date,
+    endDate: Date,
+  ) {
+    await Promise.all(
+      getLeaveYearsForPeriod(startDate, endDate).map((year) =>
+        this.syncBirthLeaveBalances(client, userId, year),
+      ),
     );
   }
 
@@ -1374,29 +1441,23 @@ export class RhSpecialLeavesService {
 
     await Promise.all(
       leaveTypes.map(async (leaveType) => {
-        const yearStart = new Date(Date.UTC(year, 0, 1));
-        const nextYearStart = new Date(Date.UTC(year + 1, 0, 1));
-        const [approved, scheduled] = await Promise.all([
-          client.leaveRequest.aggregate({
+        const range = getLeaveYearRange(year);
+        const [requests, holidays] = await Promise.all([
+          client.leaveRequest.findMany({
             where: {
               ownerId: userId,
               leaveTypeId: leaveType.id,
-              startDate: { gte: yearStart, lt: nextYearStart },
-              status: LeaveRequestStatus.APPROVED,
+              startDate: { lt: range.endExclusive },
+              endDate: { gte: range.start },
             },
-            _sum: { days: true },
-          }),
-          client.leaveRequest.aggregate({
-            where: {
-              ownerId: userId,
-              leaveTypeId: leaveType.id,
-              startDate: { gte: yearStart, lt: nextYearStart },
-              status: {
-                in: [LeaveRequestStatus.PENDING, LeaveRequestStatus.IN_REVIEW],
-              },
+            select: {
+              startDate: true,
+              endDate: true,
+              status: true,
+              submittedAt: true,
             },
-            _sum: { days: true },
           }),
+          this.findHolidaysForLeaveYear(client, year),
         ]);
         const takenAdjustment = await this.getTakenAdjustment(
           client,
@@ -1405,7 +1466,24 @@ export class RhSpecialLeavesService {
           year,
         );
         const taken = this.toNumber(
-          this.toNumber(approved._sum.days) + takenAdjustment,
+          requests
+            .filter((request) => this.isTakenRequest(request, this.todayUtc()))
+            .reduce(
+              (total, request) =>
+                total + this.daysInLeaveYear(request, year, holidays),
+              0,
+            ) + takenAdjustment,
+        );
+        const scheduled = this.toNumber(
+          requests
+            .filter((request) =>
+              this.isScheduledRequest(request, this.todayUtc()),
+            )
+            .reduce(
+              (total, request) =>
+                total + this.daysInLeaveYear(request, year, holidays),
+              0,
+            ),
         );
 
         await client.leaveBalance.upsert({
@@ -1428,7 +1506,7 @@ export class RhSpecialLeavesService {
             carryover: 0,
             taken,
             takenAdjustment,
-            scheduled: this.toNumber(scheduled._sum.days),
+            scheduled,
           },
           update: {
             acquired: this.leaveEntitlements.getAcquiredDays({
@@ -1437,10 +1515,77 @@ export class RhSpecialLeavesService {
               year,
             }),
             taken,
-            scheduled: this.toNumber(scheduled._sum.days),
+            scheduled,
           },
         });
       }),
+    );
+  }
+
+  private async findHolidaysForLeaveYear(
+    client: PrismaClientLike,
+    year: number,
+  ) {
+    const range = getLeaveYearRange(year);
+    return client.publicHoliday.findMany({
+      where: {
+        country: 'CM',
+        OR: [
+          { recurring: true },
+          { date: { gte: range.start, lt: range.endExclusive } },
+        ],
+      },
+      select: { date: true, recurring: true },
+    });
+  }
+
+  private todayUtc() {
+    const now = new Date();
+    return new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+    );
+  }
+
+  private isTakenRequest(
+    request: { status: LeaveRequestStatus; endDate: Date },
+    today: Date,
+  ) {
+    return (
+      request.status === LeaveRequestStatus.APPROVED && request.endDate < today
+    );
+  }
+
+  private isScheduledRequest(
+    request: {
+      status: LeaveRequestStatus;
+      endDate: Date;
+      submittedAt: Date | null;
+    },
+    today: Date,
+  ) {
+    return (
+      (request.status === LeaveRequestStatus.APPROVED &&
+        request.endDate >= today) ||
+      request.status === LeaveRequestStatus.PENDING ||
+      request.status === LeaveRequestStatus.IN_REVIEW ||
+      (request.status === LeaveRequestStatus.DRAFT && !request.submittedAt)
+    );
+  }
+
+  private daysInLeaveYear(
+    request: { startDate: Date; endDate: Date },
+    year: number,
+    holidays: { date: Date; recurring: boolean }[],
+  ) {
+    return this.toNumber(
+      splitPeriodByLeaveYear(request.startDate, request.endDate)
+        .filter((segment) => segment.year === year)
+        .reduce(
+          (total, segment) =>
+            total +
+            countWorkingDays(segment.startDate, segment.endDate, holidays),
+          0,
+        ),
     );
   }
 
@@ -1743,7 +1888,7 @@ export class RhSpecialLeavesService {
   }
 
   private async generateReference(client: PrismaClientLike, startDate: Date) {
-    const year = startDate.getUTCFullYear();
+    const year = getLeaveYear(startDate);
     const count = await client.leaveRequest.count({
       where: {
         reference: { startsWith: `CS-${year}-` },
@@ -1762,7 +1907,7 @@ export class RhSpecialLeavesService {
   }
 
   private parseYear(value: string | undefined) {
-    if (!value) return new Date().getUTCFullYear();
+    if (!value) return getCurrentLeaveYear();
 
     const year = Number(value);
     if (!Number.isInteger(year) || year < 2000 || year > 2100) {

@@ -4,6 +4,7 @@ import { readSheet } from "read-excel-file/browser";
 import { AppShell } from "@/components/AppShell";
 import { Badge, Button, Card, StatCard } from "@/components/ui-kit";
 import { apiFetch } from "@/lib/api";
+import { leaveYearForDate } from "@/lib/leave-year";
 import {
   Dialog,
   DialogContent,
@@ -342,7 +343,7 @@ function LiabilityCard({
 export function Passif() {
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [year, setYear] = useState(String(new Date().getFullYear()));
+  const [year, setYear] = useState(String(leaveYearForDate()));
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"" | LiabilityTone>("");
 

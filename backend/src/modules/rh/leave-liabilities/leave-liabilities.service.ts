@@ -14,6 +14,7 @@ import {
   ImportRhLeaveLiabilityRowDto,
   UpdateRhLeaveLiabilityDto,
 } from './dto/rh-leave-liability.dto';
+import { getCurrentLeaveYear } from '../../../common/leave-year';
 
 const PASSIVE_LEAVE_CODE = 'PASSIF';
 const PASSIVE_LEAVE_YEARS = [2025, 2026, 2027] as const;
@@ -356,7 +357,7 @@ export class RhLeaveLiabilitiesService {
   }
 
   private parseYear(value: string | undefined) {
-    if (!value) return new Date().getUTCFullYear();
+    if (!value) return getCurrentLeaveYear();
 
     const year = Number(value);
     if (!Number.isInteger(year) || year < 2000 || year > 2100) {

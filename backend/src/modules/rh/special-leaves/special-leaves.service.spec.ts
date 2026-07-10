@@ -85,6 +85,7 @@ function createHarness() {
       count: jest.fn(),
       create: jest.fn(),
       findFirst: jest.fn(),
+      findMany: jest.fn(),
       aggregate: jest.fn(),
     },
     leaveBalance: {
@@ -125,6 +126,7 @@ function createHarness() {
   prisma.publicHoliday.findMany.mockResolvedValue([]);
   prisma.leaveRequest.count.mockResolvedValue(0);
   prisma.leaveRequest.findFirst.mockResolvedValue(null);
+  prisma.leaveRequest.findMany.mockResolvedValue([]);
   prisma.leaveRequest.aggregate.mockResolvedValue({ _sum: { days: 0 } });
   prisma.leaveBalance.upsert.mockResolvedValue({});
   prisma.event.findFirst.mockResolvedValue(null);

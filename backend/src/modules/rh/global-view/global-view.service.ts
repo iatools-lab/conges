@@ -32,6 +32,10 @@ import { EmailService } from '../../shared/notifications/email.service';
 import { LeaveBalanceSyncService } from '../../shared/leave-balances/leave-balance-sync.service';
 import { LeaveBalanceInitializerService } from '../../shared/leave-balances/leave-balance-initializer.service';
 import { overlapDateWhere, resolveDateRange } from '../../../common/date-range';
+import {
+  getCurrentLeaveYear,
+  getLeaveYearsForPeriod,
+} from '../../../common/leave-year';
 import { endDateForWorkingDays } from '../../../common/working-days';
 type BadgeTone =
   | 'valid'
@@ -42,6 +46,7 @@ type BadgeTone =
   | 'planned';
 
 type ImportedLeaveHistoryCategory = 'pris' | 'planifier';
+type PrismaClientLike = PrismaService | Prisma.TransactionClient;
 
 const TRACKED_REQUEST_STATUSES = [
   LeaveRequestStatus.DRAFT,
@@ -290,6 +295,12 @@ export class RhGlobalViewService {
         },
       });
 
+      await this.initializeAffectedLeaveYears(
+        updated.ownerId,
+        updated.startDate,
+        updated.endDate,
+        transaction,
+      );
       await this.leaveBalanceSync.syncForRequest(updated.id, transaction);
       await transaction.auditLog.create({
         data: {
@@ -341,6 +352,7 @@ export class RhGlobalViewService {
         submittedAt: true,
         ownerId: true,
         startDate: true,
+        endDate: true,
         leaveTypeId: true,
         owner: {
           select: {
@@ -441,6 +453,12 @@ export class RhGlobalViewService {
         },
       });
 
+      await this.initializeAffectedLeaveYears(
+        existing.ownerId,
+        existing.startDate,
+        existing.endDate,
+        transaction,
+      );
       await this.leaveBalanceSync.syncForRequest(existing.id, transaction);
 
       const recipients = Array.from(
@@ -744,10 +762,18 @@ export class RhGlobalViewService {
         const isTakenImport = row.category === 'pris';
         const now = new Date();
 
-        await this.leaveBalanceInitializer.initializeUserYear(
-          employee.id,
-          row.startDate.getUTCFullYear(),
-          transaction,
+        const rowLeaveYears = getLeaveYearsForPeriod(
+          row.startDate,
+          row.endDate,
+        );
+        await Promise.all(
+          rowLeaveYears.map((year) =>
+            this.leaveBalanceInitializer.initializeUserYear(
+              employee.id,
+              year,
+              transaction,
+            ),
+          ),
         );
 
         const imported = await transaction.leaveRequest.create({
@@ -813,11 +839,15 @@ export class RhGlobalViewService {
           },
         });
 
-        balanceKeys.push({
-          userId: imported.ownerId,
-          leaveTypeId: imported.leaveTypeId,
-          year: imported.startDate.getUTCFullYear(),
-        });
+        balanceKeys.push(
+          ...getLeaveYearsForPeriod(imported.startDate, imported.endDate).map(
+            (year) => ({
+              userId: imported.ownerId,
+              leaveTypeId: imported.leaveTypeId,
+              year,
+            }),
+          ),
+        );
         importedRows.push({
           id: imported.id,
           reference: imported.reference,
@@ -1413,7 +1443,7 @@ export class RhGlobalViewService {
   }
 
   private parseYear(value: string | undefined) {
-    if (!value) return new Date().getUTCFullYear();
+    if (!value) return getCurrentLeaveYear();
 
     const year = Number(value);
     if (!Number.isInteger(year) || year < 2000 || year > 2100) {
@@ -1421,6 +1451,19 @@ export class RhGlobalViewService {
     }
 
     return year;
+  }
+
+  private async initializeAffectedLeaveYears(
+    userId: string,
+    startDate: Date,
+    endDate: Date,
+    client: PrismaClientLike = this.prisma,
+  ) {
+    await Promise.all(
+      getLeaveYearsForPeriod(startDate, endDate).map((year) =>
+        this.leaveBalanceInitializer.initializeUserYear(userId, year, client),
+      ),
+    );
   }
 
   private normalizeDepartment(value: string | undefined) {
@@ -1531,6 +1574,7 @@ export class RhGlobalViewService {
         reference: true,
         ownerId: true,
         startDate: true,
+        endDate: true,
         leaveTypeId: true,
         owner: {
           select: {
@@ -1569,6 +1613,12 @@ export class RhGlobalViewService {
           },
         });
 
+        await this.initializeAffectedLeaveYears(
+          request.ownerId,
+          request.startDate,
+          request.endDate,
+          transaction,
+        );
         await this.leaveBalanceSync.syncForRequest(request.id, transaction);
 
         const recipients = Array.from(

@@ -170,13 +170,10 @@ export class AdminHolidaysService implements OnModuleInit {
           }),
         ),
       );
-      await this.leaveBalanceSync.syncForKeys(
-        changes.map((request) => ({
-          userId: request.ownerId,
-          leaveTypeId: request.leaveTypeId,
-          year: request.startDate.getUTCFullYear(),
-        })),
-        transaction,
+      await Promise.all(
+        changes.map((request) =>
+          this.leaveBalanceSync.syncForRequest(request.id, transaction),
+        ),
       );
     });
   }

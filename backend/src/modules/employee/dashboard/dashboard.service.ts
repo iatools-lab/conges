@@ -57,89 +57,55 @@ export class EmployeeDashboardService {
     const year = range.year;
     const today = new Date();
 
-    const [
-      user,
-      specialLeaves,
-      paidTaken,
-      paidScheduled,
-      nextAbsence,
-      pendingRequests,
-    ] = await Promise.all([
-      this.prisma.user.findUnique({
-        where: { id: userId },
-        select: dashboardUserSelect,
-      }),
-      this.prisma.leaveRequest.aggregate({
-        where: {
-          ownerId: userId,
-          status: LeaveRequestStatus.APPROVED,
-          ...overlapDateWhere(range),
-          leaveType: {
-            category: {
-              in: [
-                LeaveCategory.CONGE_SPECIAL,
-                LeaveCategory.CONGE_PATERNITE,
-                LeaveCategory.CONGE_MALADIE,
-              ],
-            },
-          },
-        },
-        _sum: { days: true },
-      }),
-      this.prisma.leaveRequest.aggregate({
-        where: {
-          ownerId: userId,
-          status: LeaveRequestStatus.APPROVED,
-          ...overlapDateWhere(range),
-          leaveType: { code: { in: Array.from(PAID_POOL_CODES) } },
-        },
-        _sum: { days: true },
-      }),
-      this.prisma.leaveRequest.aggregate({
-        where: {
-          ownerId: userId,
-          ...overlapDateWhere(range),
-          leaveType: { code: { in: Array.from(PAID_POOL_CODES) } },
-          OR: [
-            {
-              status: {
-                in: [LeaveRequestStatus.PENDING, LeaveRequestStatus.IN_REVIEW],
+    const [user, specialLeaves, nextAbsence, pendingRequests] =
+      await Promise.all([
+        this.prisma.user.findUnique({
+          where: { id: userId },
+          select: dashboardUserSelect,
+        }),
+        this.prisma.leaveRequest.aggregate({
+          where: {
+            ownerId: userId,
+            status: LeaveRequestStatus.APPROVED,
+            ...overlapDateWhere(range),
+            leaveType: {
+              category: {
+                in: [
+                  LeaveCategory.CONGE_SPECIAL,
+                  LeaveCategory.CONGE_PATERNITE,
+                  LeaveCategory.CONGE_MALADIE,
+                ],
               },
             },
-            {
-              status: LeaveRequestStatus.DRAFT,
-              submittedAt: null,
-            },
-          ],
-        },
-        _sum: { days: true },
-      }),
-      this.prisma.leaveRequest.findFirst({
-        where: {
-          ownerId: userId,
-          status: LeaveRequestStatus.APPROVED,
-          AND: [{ startDate: { gte: today } }, overlapDateWhere(range)],
-        },
-        orderBy: [{ startDate: 'asc' }, { reference: 'asc' }],
-        select: {
-          id: true,
-          reference: true,
-          startDate: true,
-          endDate: true,
-          days: true,
-          status: true,
-          leaveType: { select: { code: true, name: true } },
-        },
-      }),
-      this.prisma.leaveRequest.count({
-        where: {
-          ownerId: userId,
-          status: {
-            in: [LeaveRequestStatus.PENDING, LeaveRequestStatus.IN_REVIEW],
           },
-        },
-      }),
-    ]);
+          _sum: { days: true },
+        }),
+        this.prisma.leaveRequest.findFirst({
+          where: {
+            ownerId: userId,
+            status: LeaveRequestStatus.APPROVED,
+            AND: [{ startDate: { gte: today } }, overlapDateWhere(range)],
+          },
+          orderBy: [{ startDate: 'asc' }, { reference: 'asc' }],
+          select: {
+            id: true,
+            reference: true,
+            startDate: true,
+            endDate: true,
+            days: true,
+            status: true,
+            leaveType: { select: { code: true, name: true } },
+          },
+        }),
+        this.prisma.leaveRequest.count({
+          where: {
+            ownerId: userId,
+            status: {
+              in: [LeaveRequestStatus.PENDING, LeaveRequestStatus.IN_REVIEW],
+            },
+          },
+        }),
+      ]);
 
     if (!user || user.status === UserStatus.INACTIVE) {
       throw new NotFoundException('Employé introuvable');
@@ -166,8 +132,12 @@ export class EmployeeDashboardService {
       (sum, balance) => sum + balance.acquired + balance.carryover,
       0,
     );
-    const taken = this.toNumber(paidTaken._sum.days);
-    const scheduled = this.toNumber(paidScheduled._sum.days);
+    const taken = this.toNumber(
+      paidBalances.reduce((sum, balance) => sum + balance.taken, 0),
+    );
+    const scheduled = this.toNumber(
+      paidBalances.reduce((sum, balance) => sum + balance.scheduled, 0),
+    );
     const annualDays = balances
       .filter(
         (balance) =>
@@ -222,7 +192,7 @@ export class EmployeeDashboardService {
         poste: user.poste,
       },
       stats: {
-        availableDays: this.roundDays(Math.max(total - taken - scheduled, 0)),
+        availableDays: this.roundDays(total - taken - scheduled),
         annualDays: this.roundDays(annualDays),
         takenDays: this.roundDays(taken),
         scheduledDays: this.roundDays(scheduled),

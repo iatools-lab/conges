@@ -3,6 +3,10 @@ import { AuditAction, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { GenerateRhExportDto } from './dto/rh-export.dto';
 import { fieldDateWhere, resolveDateRange } from '../../../common/date-range';
+import {
+  getCurrentLeaveYear,
+  getLeaveYearRange,
+} from '../../../common/leave-year';
 
 type ExportTemplateId =
   | 'monthly-balances'
@@ -158,7 +162,7 @@ export class RhExportsService {
 
   async generate(templateId: string, dto: GenerateRhExportDto) {
     const template = this.getTemplate(templateId);
-    const year = dto.year ?? new Date().getUTCFullYear();
+    const year = dto.year ?? getCurrentLeaveYear();
     const generatedAt = new Date();
     const content = await this.buildExportContent(template.id, year);
     const filename = this.buildFilename(template.id, year, generatedAt);
@@ -265,7 +269,10 @@ export class RhExportsService {
   private async buildLeaveJournal(year: number) {
     const { yearStart, nextYearStart } = this.getYearRange(year);
     const requests = await this.prisma.leaveRequest.findMany({
-      where: { startDate: { gte: yearStart, lt: nextYearStart } },
+      where: {
+        startDate: { lt: nextYearStart },
+        endDate: { gte: yearStart },
+      },
       orderBy: [{ startDate: 'asc' }, { reference: 'asc' }],
       select: leaveRequestExportSelect,
     });
@@ -292,7 +299,8 @@ export class RhExportsService {
     const requests = await this.prisma.leaveRequest.findMany({
       where: {
         status: 'APPROVED',
-        startDate: { gte: yearStart, lt: nextYearStart },
+        startDate: { lt: nextYearStart },
+        endDate: { gte: yearStart },
       },
       orderBy: [{ owner: { nom: 'asc' } }, { startDate: 'asc' }],
       select: leaveRequestExportSelect,
@@ -334,7 +342,10 @@ export class RhExportsService {
     });
     const requests = await this.prisma.leaveRequest.groupBy({
       by: ['status'],
-      where: { startDate: { gte: yearStart, lt: nextYearStart } },
+      where: {
+        startDate: { lt: nextYearStart },
+        endDate: { gte: yearStart },
+      },
       _sum: { days: true },
       _count: { id: true },
     });
@@ -404,10 +415,13 @@ export class RhExportsService {
   }
 
   private async buildAbsenceAudit(year: number) {
-    const yearStart = new Date(Date.UTC(year - 2, 0, 1));
-    const nextYearStart = new Date(Date.UTC(year + 1, 0, 1));
+    const yearStart = this.getYearRange(year - 2).yearStart;
+    const nextYearStart = this.getYearRange(year).nextYearStart;
     const requests = await this.prisma.leaveRequest.findMany({
-      where: { startDate: { gte: yearStart, lt: nextYearStart } },
+      where: {
+        startDate: { lt: nextYearStart },
+        endDate: { gte: yearStart },
+      },
       orderBy: [{ startDate: 'asc' }, { reference: 'asc' }],
       select: leaveRequestExportSelect,
     });
@@ -541,9 +555,10 @@ export class RhExportsService {
   }
 
   private getYearRange(year: number) {
+    const range = getLeaveYearRange(year);
     return {
-      yearStart: new Date(Date.UTC(year, 0, 1)),
-      nextYearStart: new Date(Date.UTC(year + 1, 0, 1)),
+      yearStart: range.start,
+      nextYearStart: range.endExclusive,
     };
   }
 

@@ -19,6 +19,10 @@ import { LeaveEntitlementsService } from '../../shared/leave-entitlements/leave-
 import { LeaveBalanceSyncService } from '../../shared/leave-balances/leave-balance-sync.service';
 import { overlapDateWhere, resolveDateRange } from '../../../common/date-range';
 import {
+  getLeaveYearRange,
+  getLeaveYearsForPeriod,
+} from '../../../common/leave-year';
+import {
   expandHolidayDateKeys,
   utcDateKey,
 } from '../../../common/working-days';
@@ -86,8 +90,7 @@ export class ManagerDashboardService {
     const monthStart = range.dateFrom ?? new Date(Date.UTC(year, month - 1, 1));
     const nextMonthStart =
       range.endExclusive ?? new Date(Date.UTC(year, month, 1));
-    const yearStart = new Date(Date.UTC(year, 0, 1));
-    const nextYearStart = new Date(Date.UTC(year + 1, 0, 1));
+    const leaveYearRange = getLeaveYearRange(year);
     const ownerWhere = this.buildManagedOwnerWhere(manager);
     const actionOwnerWhere = this.buildActionOwnerWhere(manager);
     const scopedDepartments = this.getManagedDepartments(manager);
@@ -241,7 +244,7 @@ export class ManagerDashboardService {
     ).length;
 
     const teamIds = sortedTeam.map((member) => member.id);
-    await this.syncVisibleTeamBalances(ownerWhere, yearStart, nextYearStart);
+    await this.syncVisibleTeamBalances(ownerWhere, leaveYearRange);
     await this.ensureTeamActiveBalances(sortedTeam, year);
 
     const rawBalances = teamIds.length
@@ -526,23 +529,32 @@ export class ManagerDashboardService {
 
   private async syncVisibleTeamBalances(
     ownerWhere: Prisma.UserWhereInput,
-    yearStart: Date,
-    nextYearStart: Date,
+    range: ReturnType<typeof getLeaveYearRange>,
   ) {
     const requests = await this.prisma.leaveRequest.findMany({
       where: {
         owner: ownerWhere,
-        startDate: { gte: yearStart, lt: nextYearStart },
+        startDate: { lt: range.endExclusive },
+        endDate: { gte: range.start },
       },
-      select: { ownerId: true, leaveTypeId: true, startDate: true },
+      select: {
+        ownerId: true,
+        leaveTypeId: true,
+        startDate: true,
+        endDate: true,
+      },
     });
 
     await this.leaveBalanceSync.syncForKeys(
-      requests.map((request) => ({
-        userId: request.ownerId,
-        leaveTypeId: request.leaveTypeId,
-        year: request.startDate.getUTCFullYear(),
-      })),
+      requests.flatMap((request) =>
+        getLeaveYearsForPeriod(request.startDate, request.endDate).map(
+          (leaveYear) => ({
+            userId: request.ownerId,
+            leaveTypeId: request.leaveTypeId,
+            year: leaveYear,
+          }),
+        ),
+      ),
     );
   }
 

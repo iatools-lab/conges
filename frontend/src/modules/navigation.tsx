@@ -94,6 +94,20 @@ const rhGroups: NavigationGroup[] = [
     ],
   },
   {
+    id: "analytics",
+    label: "Analytics RH",
+    icon: <BarChart3 className="size-4" />,
+    items: [
+      item(rhModule, "analytics-workforce", <Users className="size-4" />),
+      item(rhModule, "analytics-leaves", <CalendarDays className="size-4" />),
+      item(rhModule, "analytics-alerts", <ShieldAlert className="size-4" />),
+      item(rhModule, "analytics-trends", <BarChart3 className="size-4" />),
+      item(rhModule, "analytics-management", <UserCog className="size-4" />),
+      item(rhModule, "analytics-balances", <Wallet className="size-4" />),
+      item(rhModule, "analytics-special-events", <Star className="size-4" />),
+    ],
+  },
+  {
     id: "personnel",
     label: "Gestion du personnel",
     icon: <Users className="size-4" />,

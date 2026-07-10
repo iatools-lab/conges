@@ -29,7 +29,8 @@ describe('LeaveBalanceInitializerService', () => {
       leaveBalance: {
         findMany: jest
           .fn()
-          .mockResolvedValue([
+          .mockResolvedValueOnce([])
+          .mockResolvedValueOnce([
             { userId: 'employee-1', leaveTypeId: 'type-cp' },
           ]),
         upsert: jest.fn().mockResolvedValue({}),
@@ -83,7 +84,8 @@ describe('LeaveBalanceInitializerService', () => {
       leaveBalance: {
         findMany: jest
           .fn()
-          .mockResolvedValue([
+          .mockResolvedValueOnce([])
+          .mockResolvedValueOnce([
             { userId: 'employee-1', leaveTypeId: 'type-cp' },
           ]),
         upsert: jest.fn().mockResolvedValue({}),
@@ -106,11 +108,72 @@ describe('LeaveBalanceInitializerService', () => {
 
     expect(prisma.leaveBalance.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
-        update: { acquired: 24 },
+        update: { acquired: 24, carryover: 0 },
       }),
     );
     expect(result).toEqual(
       expect.objectContaining({ created: 0, updated: 1, skipped: 0 }),
+    );
+  });
+
+  it('creates next-year CP with a negative carryover when the previous paid total is overdrawn', async () => {
+    const prisma = {
+      user: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'employee-1',
+            sexe: 'M',
+            dateEmbauche: new Date('2020-04-10T00:00:00.000Z'),
+            passifInitial: 0,
+            children: [],
+            events: [],
+          },
+        ]),
+      },
+      leaveType: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'type-cp',
+            code: 'CP',
+            name: 'Congés payés',
+            category: 'CONGE_PAYE',
+            defaultDays: 24,
+          },
+        ]),
+      },
+      leaveBalance: {
+        findMany: jest
+          .fn()
+          .mockResolvedValueOnce([
+            {
+              userId: 'employee-1',
+              acquired: 24,
+              carryover: 0,
+              taken: 28,
+              scheduled: 0,
+            },
+          ])
+          .mockResolvedValueOnce([]),
+        upsert: jest.fn().mockResolvedValue({}),
+      },
+    } as any;
+    const leaveEntitlements = {
+      getAcquiredDays: jest.fn().mockReturnValue(24),
+    } as any;
+    const service = new LeaveBalanceInitializerService(
+      prisma,
+      leaveEntitlements,
+    );
+
+    await service.initializeUserYear('employee-1', 2027);
+
+    expect(prisma.leaveBalance.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          year: 2027,
+          carryover: -4,
+        }),
+      }),
     );
   });
 
@@ -120,11 +183,12 @@ describe('LeaveBalanceInitializerService', () => {
         findMany: jest.fn().mockResolvedValue([{ year: 2024 }, { year: 2025 }]),
       },
       leaveRequest: {
-        findMany: jest
-          .fn()
-          .mockResolvedValue([
-            { startDate: new Date('2023-04-10T00:00:00.000Z') },
-          ]),
+        findMany: jest.fn().mockResolvedValue([
+          {
+            startDate: new Date('2023-04-10T00:00:00.000Z'),
+            endDate: new Date('2023-04-14T00:00:00.000Z'),
+          },
+        ]),
       },
     } as any;
     const service = new LeaveBalanceInitializerService(prisma, {} as any);

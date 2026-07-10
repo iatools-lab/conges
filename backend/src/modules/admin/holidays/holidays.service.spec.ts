@@ -37,7 +37,7 @@ describe('AdminHolidaysService', () => {
       $transaction: jest.fn(async (callback) => callback(transaction)),
     } as any;
     const leaveBalanceSync = {
-      syncForKeys: jest.fn().mockResolvedValue(undefined),
+      syncForRequest: jest.fn().mockResolvedValue(undefined),
     } as any;
     const service = new AdminHolidaysService(prisma, leaveBalanceSync);
 
@@ -55,14 +55,8 @@ describe('AdminHolidaysService', () => {
         endDate: new Date('2026-06-03T00:00:00.000Z'),
       },
     });
-    expect(leaveBalanceSync.syncForKeys).toHaveBeenCalledWith(
-      [
-        {
-          userId: 'employee-1',
-          leaveTypeId: 'type-1',
-          year: 2026,
-        },
-      ],
+    expect(leaveBalanceSync.syncForRequest).toHaveBeenCalledWith(
+      'request-1',
       transaction,
     );
   });

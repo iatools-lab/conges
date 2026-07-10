@@ -21,6 +21,12 @@ import {
 import { EmailService } from '../../shared/notifications/email.service';
 import { LeaveEntitlementsService } from '../../shared/leave-entitlements/leave-entitlements.service';
 import { fieldDateWhere, resolveDateRange } from '../../../common/date-range';
+import {
+  getLeaveYear,
+  getLeaveYearRange,
+  splitPeriodByLeaveYear,
+} from '../../../common/leave-year';
+import { countWorkingDays } from '../../../common/working-days';
 
 export const EVENT_PROOF_MAX_BYTES = 3 * 1024 * 1024;
 
@@ -272,7 +278,7 @@ export class EmployeeEventsService {
       await this.syncEventBalances(
         transaction,
         event.user,
-        event.eventDate.getUTCFullYear(),
+        getLeaveYear(event.eventDate),
       );
 
       await transaction.auditLog.create({
@@ -403,31 +409,33 @@ export class EmployeeEventsService {
       },
     });
 
-    const yearStart = new Date(Date.UTC(year, 0, 1));
-    const nextYearStart = new Date(Date.UTC(year + 1, 0, 1));
-
     await Promise.all(
       leaveTypes.map(async (leaveType) => {
-        const [approved, scheduled, existingBalance] = await Promise.all([
-          client.leaveRequest.aggregate({
+        const range = getLeaveYearRange(year);
+        const [requests, holidays, existingBalance] = await Promise.all([
+          client.leaveRequest.findMany({
             where: {
               ownerId: user.id,
               leaveTypeId: leaveType.id,
-              startDate: { gte: yearStart, lt: nextYearStart },
-              status: LeaveRequestStatus.APPROVED,
+              startDate: { lt: range.endExclusive },
+              endDate: { gte: range.start },
             },
-            _sum: { days: true },
+            select: {
+              startDate: true,
+              endDate: true,
+              status: true,
+              submittedAt: true,
+            },
           }),
-          client.leaveRequest.aggregate({
+          client.publicHoliday.findMany({
             where: {
-              ownerId: user.id,
-              leaveTypeId: leaveType.id,
-              startDate: { gte: yearStart, lt: nextYearStart },
-              status: {
-                in: [LeaveRequestStatus.PENDING, LeaveRequestStatus.IN_REVIEW],
-              },
+              country: 'CM',
+              OR: [
+                { recurring: true },
+                { date: { gte: range.start, lt: range.endExclusive } },
+              ],
             },
-            _sum: { days: true },
+            select: { date: true, recurring: true },
           }),
           client.leaveBalance.findUnique({
             where: {
@@ -444,7 +452,24 @@ export class EmployeeEventsService {
           existingBalance?.takenAdjustment ?? 0,
         );
         const taken = this.toNumber(
-          this.toNumber(approved._sum.days) + takenAdjustment,
+          requests
+            .filter((request) => this.isTakenRequest(request, this.todayUtc()))
+            .reduce(
+              (total, request) =>
+                total + this.daysInLeaveYear(request, year, holidays),
+              0,
+            ) + takenAdjustment,
+        );
+        const scheduled = this.toNumber(
+          requests
+            .filter((request) =>
+              this.isScheduledRequest(request, this.todayUtc()),
+            )
+            .reduce(
+              (total, request) =>
+                total + this.daysInLeaveYear(request, year, holidays),
+              0,
+            ),
         );
 
         await client.leaveBalance.upsert({
@@ -467,7 +492,7 @@ export class EmployeeEventsService {
             carryover: 0,
             taken,
             takenAdjustment,
-            scheduled: this.toNumber(scheduled._sum.days),
+            scheduled,
           },
           update: {
             acquired: this.leaveEntitlements.getAcquiredDays({
@@ -476,10 +501,60 @@ export class EmployeeEventsService {
               year,
             }),
             taken,
-            scheduled: this.toNumber(scheduled._sum.days),
+            scheduled,
           },
         });
       }),
+    );
+  }
+
+  private todayUtc() {
+    const now = new Date();
+    return new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+    );
+  }
+
+  private isTakenRequest(
+    request: { status: LeaveRequestStatus; endDate: Date },
+    today: Date,
+  ) {
+    return (
+      request.status === LeaveRequestStatus.APPROVED && request.endDate < today
+    );
+  }
+
+  private isScheduledRequest(
+    request: {
+      status: LeaveRequestStatus;
+      endDate: Date;
+      submittedAt: Date | null;
+    },
+    today: Date,
+  ) {
+    return (
+      (request.status === LeaveRequestStatus.APPROVED &&
+        request.endDate >= today) ||
+      request.status === LeaveRequestStatus.PENDING ||
+      request.status === LeaveRequestStatus.IN_REVIEW ||
+      (request.status === LeaveRequestStatus.DRAFT && !request.submittedAt)
+    );
+  }
+
+  private daysInLeaveYear(
+    request: { startDate: Date; endDate: Date },
+    year: number,
+    holidays: { date: Date; recurring: boolean }[],
+  ) {
+    return this.toNumber(
+      splitPeriodByLeaveYear(request.startDate, request.endDate)
+        .filter((segment) => segment.year === year)
+        .reduce(
+          (total, segment) =>
+            total +
+            countWorkingDays(segment.startDate, segment.endDate, holidays),
+          0,
+        ),
     );
   }
 

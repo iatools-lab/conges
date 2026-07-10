@@ -3,22 +3,31 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import {
-  EventType,
-  LeaveCategory,
-  LeaveRequestStatus,
-  UserStatus,
-} from '@prisma/client';
+import { EventType, LeaveCategory, UserStatus } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { LeaveEntitlementsService } from '../../shared/leave-entitlements/leave-entitlements.service';
 import { LeaveBalanceSyncService } from '../../shared/leave-balances/leave-balance-sync.service';
+import { LeaveBalanceInitializerService } from '../../shared/leave-balances/leave-balance-initializer.service';
+import { getCurrentLeaveYear } from '../../../common/leave-year';
 
 const POOL_PAYE_CODE = 'PAYE';
 const POOL_SPECIAL_CODE = 'SPECIAL';
 const MATERNITY_CODE = 'MAT';
 const SPECIAL_POOL_CAP_DAYS = 12;
 const PAID_SOURCE_CODES = new Set(['CP', 'ANC', 'ENF', 'PASSIF']);
+const PAID_CONSUMPTION_ORDER = ['ANC', 'CP', 'ENF', 'PASSIF'] as const;
 const EXCLUDED_SPECIAL_CODES = new Set(['PASSIF', 'MAT', 'SS']);
+
+type BalanceDisplayRow = {
+  id: string;
+  source: string;
+  code: string;
+  category: LeaveCategory;
+  acquired: number;
+  taken: number;
+  scheduled: number;
+  remaining: number;
+};
 
 @Injectable()
 export class EmployeeBalancesService {
@@ -26,6 +35,7 @@ export class EmployeeBalancesService {
     private readonly prisma: PrismaService,
     private readonly leaveEntitlements: LeaveEntitlementsService,
     private readonly leaveBalanceSync: LeaveBalanceSyncService,
+    private readonly leaveBalanceInitializer: LeaveBalanceInitializerService,
   ) {}
 
   async findBalances(userId: string, yearValue?: string) {
@@ -53,112 +63,7 @@ export class EmployeeBalancesService {
     // Ensure every active leave type has an initialized balance row with
     // correct acquired days. In production this read path must not overwrite
     // existing acquired days, because RH may have migrated or corrected them.
-    const activeLeaveTypes = await this.prisma.leaveType.findMany({
-      where: { active: true },
-      select: {
-        id: true,
-        code: true,
-        name: true,
-        category: true,
-        defaultDays: true,
-      },
-    });
-
-    const yearStart = new Date(Date.UTC(year, 0, 1));
-    const nextYearStart = new Date(Date.UTC(year + 1, 0, 1));
-    const now = new Date();
-    const today = new Date(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
-    );
-
-    await Promise.all(
-      activeLeaveTypes.map(async (leaveType) => {
-        const acquired = this.leaveEntitlements.getAcquiredDays({
-          leaveType,
-          user,
-          year,
-        });
-
-        const [approvedAgg, scheduledAgg, existingBalance] = await Promise.all([
-          this.prisma.leaveRequest.aggregate({
-            where: {
-              ownerId: userId,
-              leaveTypeId: leaveType.id,
-              startDate: { gte: yearStart, lt: nextYearStart },
-              status: LeaveRequestStatus.APPROVED,
-              endDate: { lt: today },
-            },
-            _sum: { days: true },
-          }),
-          this.prisma.leaveRequest.aggregate({
-            where: {
-              ownerId: userId,
-              leaveTypeId: leaveType.id,
-              startDate: { gte: yearStart, lt: nextYearStart },
-              OR: [
-                {
-                  status: LeaveRequestStatus.APPROVED,
-                  endDate: { gte: today },
-                },
-                {
-                  status: {
-                    in: [
-                      LeaveRequestStatus.PENDING,
-                      LeaveRequestStatus.IN_REVIEW,
-                    ],
-                  },
-                },
-                {
-                  status: LeaveRequestStatus.DRAFT,
-                  submittedAt: null,
-                },
-              ],
-            },
-            _sum: { days: true },
-          }),
-          this.prisma.leaveBalance.findUnique({
-            where: {
-              userId_leaveTypeId_year: {
-                userId,
-                leaveTypeId: leaveType.id,
-                year,
-              },
-            },
-            select: { takenAdjustment: true },
-          }),
-        ]);
-        const takenAdjustment = this.roundDays(
-          existingBalance?.takenAdjustment ?? 0,
-        );
-        const taken = this.roundDays(
-          (approvedAgg._sum.days ?? 0) + takenAdjustment,
-        );
-
-        await this.prisma.leaveBalance.upsert({
-          where: {
-            userId_leaveTypeId_year: {
-              userId,
-              leaveTypeId: leaveType.id,
-              year,
-            },
-          },
-          create: {
-            userId,
-            leaveTypeId: leaveType.id,
-            year,
-            acquired,
-            carryover: 0,
-            taken,
-            takenAdjustment,
-            scheduled: this.roundDays(scheduledAgg._sum.days ?? 0),
-          },
-          update: {
-            taken,
-            scheduled: this.roundDays(scheduledAgg._sum.days ?? 0),
-          },
-        });
-      }),
-    );
+    await this.leaveBalanceInitializer.initializeUserYear(userId, year);
 
     // Keep taken/scheduled aligned with requests after missing rows have been
     // created with their computed entitlement.
@@ -206,12 +111,13 @@ export class EmployeeBalancesService {
       };
     });
 
-    const paidDetails = rows.filter((row) => this.isPaidPoolRow(row));
+    const rawPaidDetails = rows.filter((row) => this.isPaidPoolRow(row));
+    const paidDetails = this.allocatePaidConsumption(rawPaidDetails);
     const specialDetails = rows.filter((row) => this.isSpecialPoolRow(row));
     const maternityRows = rows.filter((row) => this.isMaternityRow(row));
 
     // Use sumRowsRaw (no Math.max) for paid totals to allow negative balances
-    const paidTotals = this.sumRowsRaw(paidDetails);
+    const paidTotals = this.sumRowsRaw(rawPaidDetails);
     const rawSpecialTotals = this.sumRows(specialDetails);
     const specialTotals = {
       acquired: specialDetails.length ? SPECIAL_POOL_CAP_DAYS : 0,
@@ -298,7 +204,7 @@ export class EmployeeBalancesService {
   }
 
   private parseYear(value?: string) {
-    const year = value ? Number(value) : new Date().getUTCFullYear();
+    const year = value ? Number(value) : getCurrentLeaveYear();
 
     if (!Number.isInteger(year) || year < 2000 || year > 2100) {
       throw new BadRequestException('Année invalide');
@@ -309,6 +215,47 @@ export class EmployeeBalancesService {
 
   private roundDays(value: number) {
     return Math.round(value * 10) / 10;
+  }
+
+  private allocatePaidConsumption(rows: BalanceDisplayRow[]) {
+    const totalTaken = this.roundDays(
+      rows.reduce((sum, row) => sum + row.taken, 0),
+    );
+    const totalScheduled = this.roundDays(
+      rows.reduce((sum, row) => sum + row.scheduled, 0),
+    );
+    let remainingTaken = totalTaken;
+    let remainingScheduled = totalScheduled;
+
+    return [...rows]
+      .sort(
+        (left, right) =>
+          this.paidConsumptionRank(left.code) -
+          this.paidConsumptionRank(right.code),
+      )
+      .map((row) => {
+        const capacity = Math.max(row.acquired, 0);
+        const taken = Math.min(capacity, remainingTaken);
+        remainingTaken = this.roundDays(remainingTaken - taken);
+        const scheduled = Math.min(capacity - taken, remainingScheduled);
+        remainingScheduled = this.roundDays(remainingScheduled - scheduled);
+
+        return {
+          ...row,
+          taken: this.roundDays(taken),
+          scheduled: this.roundDays(scheduled),
+          remaining: this.roundDays(Math.max(capacity - taken - scheduled, 0)),
+        };
+      });
+  }
+
+  private paidConsumptionRank(code: string) {
+    const normalized = code.trim().toUpperCase();
+    const index = PAID_CONSUMPTION_ORDER.indexOf(
+      normalized as (typeof PAID_CONSUMPTION_ORDER)[number],
+    );
+
+    return index === -1 ? Number.MAX_SAFE_INTEGER : index;
   }
 
   private isPaidPoolRow(row: { code: string }) {

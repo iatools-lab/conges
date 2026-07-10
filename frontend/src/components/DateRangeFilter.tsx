@@ -1,5 +1,6 @@
 import { CalendarDays, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui-kit";
+import { leaveYearForDate, leaveYearRange as buildLeaveYearRange } from "@/lib/leave-year";
 
 export type DateRangeValue = {
   dateFrom: string;
@@ -27,23 +28,16 @@ export function monthRange(year: number, monthIndex: number): DateRangeValue {
 }
 
 export function currentYearRange(date = new Date()): DateRangeValue {
-  const year = date.getFullYear();
+  const year = leaveYearForDate(date);
   return yearRange(year);
 }
 
 export function yearRange(year: number): DateRangeValue {
-  return {
-    dateFrom: `${year}-01-01`,
-    dateTo: `${year}-12-31`,
-  };
+  return buildLeaveYearRange(year);
 }
 
 export function previousYearRange(date = new Date()): DateRangeValue {
-  const year = date.getFullYear() - 1;
-  return {
-    dateFrom: `${year}-01-01`,
-    dateTo: `${year}-12-31`,
-  };
+  return yearRange(leaveYearForDate(date) - 1);
 }
 
 export function allDateRange(): DateRangeValue {
