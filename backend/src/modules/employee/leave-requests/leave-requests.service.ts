@@ -186,10 +186,6 @@ export class EmployeeLeaveRequestsService {
       startDate,
     });
     const attachment = this.toAttachment(proof);
-    this.assertRequiredProof(
-      this.requiresProof(leaveSelection),
-      Boolean(attachment),
-    );
 
     await this.ensureSufficientBalance({
       userId: user.id,
@@ -327,19 +323,6 @@ export class EmployeeLeaveRequestsService {
       startDate,
     });
     const attachment = this.toAttachment(proof);
-    const proofRequired =
-      leaveSelection?.leaveType.requiresProof ??
-      existing.leaveType.requiresProof;
-    this.assertRequiredProof(
-      proofRequired &&
-        !this.isSpecialSelection(
-          leaveSelection ?? {
-            leaveType: existing.leaveType,
-            poolCode: this.poolCodeFromLeaveType(existing.leaveType),
-          },
-        ),
-      Boolean(attachment) || (existing.attachments?.length ?? 0) > 0,
-    );
     const effectiveYear = startYear;
     const balanceCredit =
       this.reservesBalance(existing) &&
@@ -454,11 +437,6 @@ export class EmployeeLeaveRequestsService {
         'Cette planification ne peut pas être soumise',
       );
     }
-    this.assertRequiredProof(
-      existing.leaveType.requiresProof &&
-        !this.isTypeInPool(existing.leaveType, SPECIAL_POOL_CODE),
-      (existing.attachments?.length ?? 0) > 0,
-    );
     this.ensurePaidLeaveTakingAllowed({
       poolCode: this.poolCodeFromLeaveType(existing.leaveType),
       leaveTypeCode: existing.leaveType.code,
@@ -1346,14 +1324,6 @@ export class EmployeeLeaveRequestsService {
     return Math.round(value * 10) / 10;
   }
 
-  private assertRequiredProof(required: boolean, hasProof: boolean) {
-    if (required && !hasProof) {
-      throw new BadRequestException(
-        'Un justificatif est obligatoire pour ce type de congé',
-      );
-    }
-  }
-
   private toAttachment(file?: UploadedLeaveProof) {
     if (!file) return undefined;
     if (!ALLOWED_PROOF_MIME_TYPES.has(file.mimetype)) {
@@ -1388,31 +1358,6 @@ export class EmployeeLeaveRequestsService {
       (leaveType.category === LeaveCategory.CONGE_SPECIAL ||
         leaveType.category === LeaveCategory.CONGE_PATERNITE ||
         leaveType.category === LeaveCategory.CONGE_MALADIE)
-    );
-  }
-
-  private requiresProof(selection: {
-    leaveType: {
-      code: string;
-      category: LeaveCategory;
-      requiresProof: boolean;
-    };
-    poolCode: string | null;
-  }) {
-    return (
-      selection.leaveType.requiresProof &&
-      !this.isSpecialSelection(selection) &&
-      selection.leaveType.code.trim().toUpperCase() !== MATERNITY_CODE
-    );
-  }
-
-  private isSpecialSelection(selection: {
-    leaveType: { code: string; category: LeaveCategory };
-    poolCode: string | null;
-  }) {
-    return (
-      selection.poolCode === SPECIAL_POOL_CODE ||
-      this.isTypeInPool(selection.leaveType, SPECIAL_POOL_CODE)
     );
   }
 

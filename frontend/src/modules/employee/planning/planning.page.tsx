@@ -10,7 +10,6 @@ import {
 import {
   LeaveTypeOption,
   NewRequestForm,
-  isSpecialLeaveSelection,
   type NewRequestPayload,
 } from "@/components/NewRequestForm";
 import { RowActions } from "@/components/RowActions";
@@ -345,13 +344,6 @@ export function Planifier() {
     [editLeaveTypeCode, leaveTypes],
   );
   const editSubtypeOptions = selectedEditLeaveType?.children ?? [];
-  const selectedEditSubtype = editSubtypeOptions.find((type) => type.code === editLeaveSubtypeCode);
-  const editProofRequired =
-    editLeaveTypeCode.trim().toUpperCase() !== "SPECIAL" &&
-    !isSpecialLeaveSelection(selectedEditLeaveType) &&
-    !isSpecialLeaveSelection(selectedEditSubtype) &&
-    (selectedEditSubtype?.requiresProof ?? selectedEditLeaveType?.requiresProof ?? false);
-
   const createDirectRequest = useMutation({
     mutationFn: (payload: NewRequestPayload) =>
       apiFetch<LeaveRequestRow>("/employee/leave-requests", {
@@ -938,16 +930,10 @@ export function Planifier() {
 
             <label className="grid gap-1.5 text-sm">
               <span className="text-xs font-medium text-muted-foreground">
-                Justificatif{" "}
-                {editingRequest?.hasProof
-                  ? "(remplacer, optionnel)"
-                  : editProofRequired
-                    ? "(obligatoire)"
-                    : "(optionnel)"}
+                Justificatif {editingRequest?.hasProof ? "(remplacer, optionnel)" : "(optionnel)"}
               </span>
               <input
                 type="file"
-                required={editProofRequired && !editingRequest?.hasProof}
                 accept="application/pdf,image/jpeg,image/png,image/webp"
                 onChange={(event) => setEditProof(event.target.files?.[0])}
                 className="w-full rounded-md border px-3 py-2 text-sm bg-background"
@@ -974,13 +960,7 @@ export function Planifier() {
               <Button type="button" variant="outline" onClick={() => setEditingRequest(null)}>
                 Annuler
               </Button>
-              <Button
-                type="submit"
-                disabled={
-                  updateRequest.isPending ||
-                  (editProofRequired && !editingRequest?.hasProof && !editProof)
-                }
-              >
+              <Button type="submit" disabled={updateRequest.isPending}>
                 {updateRequest.isPending ? "Envoi..." : "Renvoyer la demande"}
               </Button>
             </DialogFooter>

@@ -88,7 +88,6 @@ export function NewRequestForm({
   const [holidays, setHolidays] = useState<HolidayRule[]>([]);
   const [holidayError, setHolidayError] = useState("");
   const [proof, setProof] = useState<File | undefined>();
-  const [proofError, setProofError] = useState(false);
   const [holidaysLoading, setHolidaysLoading] = useState(false);
 
   const requestYear = useMemo(() => leaveYearForIsoDate(startDate), [startDate]);
@@ -99,11 +98,6 @@ export function NewRequestForm({
     [leaveTypeCode, leaveTypes],
   );
   const subtypeOptions = useMemo(() => selectedLeaveType?.children ?? [], [selectedLeaveType]);
-  const isSpecialSelection =
-    normalizeCode(leaveTypeCode) === POOL_SPECIAL_CODE ||
-    isSpecialLeaveSelection(selectedLeaveType);
-  const proofRequired =
-    !isSpecialSelection && !isMaternitySelection && (selectedLeaveType?.requiresProof ?? false);
 
   const requestedDays = useMemo(
     () => countWorkingDays(startDate, endDate, holidays),
@@ -262,10 +256,6 @@ export function NewRequestForm({
             const formProof = formData.get("proof");
             const submittedProof =
               formProof instanceof File && formProof.size > 0 ? formProof : proof;
-            if (proofRequired && !submittedProof) {
-              setProofError(true);
-              return;
-            }
             onSubmit({
               leaveTypeCode,
               startDate: String(formData.get("startDate") ?? ""),
@@ -370,21 +360,17 @@ export function NewRequestForm({
             </div>
           </Field>
 
-          <Field label={`Justificatif${proofRequired ? " (obligatoire)" : " (optionnel)"}`}>
+          <Field label="Justificatif (optionnel)">
             <input
               type="file"
               name="proof"
               accept="application/pdf,image/jpeg,image/png,image/webp"
               onChange={(event) => {
                 setProof(event.target.files?.[0]);
-                setProofError(false);
               }}
               className="w-full rounded-md border px-3 py-2 text-sm bg-background file:mr-3 file:rounded file:border-0 file:bg-muted file:px-2 file:py-1 file:text-xs"
             />
             <span className="text-xs text-muted-foreground">PDF ou image, 5 Mo maximum.</span>
-            {proofError && (
-              <span className="text-xs text-destructive">Le justificatif est obligatoire.</span>
-            )}
           </Field>
 
           <Field label="Commentaire">
