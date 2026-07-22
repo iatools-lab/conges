@@ -101,9 +101,19 @@ export class LeaveBalanceInitializerService {
               leaveTypeId: balance.leaveTypeId,
             })),
           },
-          select: { userId: true, leaveTypeId: true },
+          select: {
+            userId: true,
+            leaveTypeId: true,
+            balanceAdjustment: true,
+          },
         })
       : [];
+    const existingBalanceByKey = new Map(
+      existingBalances.map((balance) => [
+        this.balanceKey(balance.userId, balance.leaveTypeId),
+        balance,
+      ]),
+    );
     const existingKeys = new Set(
       existingBalances.map((balance) =>
         this.balanceKey(balance.userId, balance.leaveTypeId),
@@ -113,8 +123,15 @@ export class LeaveBalanceInitializerService {
     const refreshExisting = params.refreshExisting === true;
 
     await Promise.all(
-      data.map(({ leaveTypeCode, ...balance }) =>
-        client.leaveBalance.upsert({
+      data.map(({ leaveTypeCode, ...balance }) => {
+        const existingBalance = existingBalanceByKey.get(
+          this.balanceKey(balance.userId, balance.leaveTypeId),
+        );
+        const balanceAdjustment = this.roundDays(
+          existingBalance?.balanceAdjustment ?? 0,
+        );
+
+        return client.leaveBalance.upsert({
           where: {
             userId_leaveTypeId_year: {
               userId: balance.userId,
@@ -124,6 +141,7 @@ export class LeaveBalanceInitializerService {
           },
           create: {
             ...balance,
+            balanceAdjustment: 0,
             taken: 0,
             scheduled: 0,
           },
@@ -131,12 +149,16 @@ export class LeaveBalanceInitializerService {
             ? {
                 acquired: balance.acquired,
                 ...(leaveTypeCode === PAID_DEBT_CARRYOVER_TARGET_CODE
-                  ? { carryover: balance.carryover }
+                  ? {
+                      carryover: this.roundDays(
+                        balance.carryover + balanceAdjustment,
+                      ),
+                    }
                   : {}),
               }
             : {},
-        }),
-      ),
+        });
+      }),
     );
 
     const created = data.filter(
@@ -238,7 +260,20 @@ export class LeaveBalanceInitializerService {
       return { userId, year: targetYear, updated: false, carryover: 0 };
     }
 
-    const carryover = debtCarryoverByUserId.get(userId) ?? 0;
+    const existingBalance = await client.leaveBalance.findUnique({
+      where: {
+        userId_leaveTypeId_year: {
+          userId,
+          leaveTypeId: leaveType.id,
+          year: targetYear,
+        },
+      },
+      select: { balanceAdjustment: true },
+    });
+    const carryover = this.roundDays(
+      (debtCarryoverByUserId.get(userId) ?? 0) +
+        (existingBalance?.balanceAdjustment ?? 0),
+    );
     await client.leaveBalance.upsert({
       where: {
         userId_leaveTypeId_year: {
@@ -257,6 +292,7 @@ export class LeaveBalanceInitializerService {
           year: targetYear,
         }),
         carryover,
+        balanceAdjustment: 0,
         taken: 0,
         scheduled: 0,
       },

@@ -96,6 +96,7 @@ function createHarness() {
 
   const leaveBalanceSync = {
     syncForRequest: jest.fn(),
+    syncForKeys: jest.fn(),
   } as any;
 
   prisma.user.findUnique.mockResolvedValue(manager);
@@ -106,10 +107,12 @@ function createHarness() {
     {
       userId: 'employee-1',
       leaveTypeId: 'type-1',
+      year: 2026,
       acquired: 20,
       carryover: 0,
       taken: 4,
       scheduled: 3,
+      leaveType: { code: 'CP', category: LeaveCategory.CONGE_PAYE },
     },
   ]);
   prisma.leaveRequest.updateMany.mockResolvedValue({ count: 1 });
@@ -188,6 +191,50 @@ describe('ManagerRequestsService', () => {
       }),
     );
     expect(result.rows[0].canDecide).toBe(false);
+  });
+
+  it('shows the paid leave pool balance in manager request rows', async () => {
+    const { prisma, leaveBalanceSync, service } = createHarness();
+    prisma.leaveRequest.findMany.mockResolvedValue([managerRequest()]);
+    prisma.leaveBalance.findMany.mockResolvedValue([
+      {
+        userId: 'employee-1',
+        leaveTypeId: 'type-1',
+        year: 2026,
+        acquired: 20,
+        carryover: 0,
+        taken: 4,
+        scheduled: 3,
+        leaveType: { code: 'CP', category: LeaveCategory.CONGE_PAYE },
+      },
+      {
+        userId: 'employee-1',
+        leaveTypeId: 'passif-type',
+        year: 2026,
+        acquired: 5,
+        carryover: 0,
+        taken: 0,
+        scheduled: 0,
+        leaveType: { code: 'PASSIF', category: LeaveCategory.CONGE_PAYE },
+      },
+      {
+        userId: 'employee-1',
+        leaveTypeId: 'mat-type',
+        year: 2026,
+        acquired: 90,
+        carryover: 0,
+        taken: 0,
+        scheduled: 0,
+        leaveType: { code: 'MAT', category: LeaveCategory.CONGE_MATERNITE },
+      },
+    ]);
+
+    const result = await service.findAll({ managerId: manager.id, year: 2026 });
+
+    expect(leaveBalanceSync.syncForKeys).toHaveBeenCalledWith([
+      { userId: 'employee-1', leaveTypeId: 'type-1', year: 2026 },
+    ]);
+    expect(result.rows[0].solde).toBe(18);
   });
 
   it('rejects manager decisions outside direct N+1 scope', async () => {

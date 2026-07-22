@@ -1,0 +1,2 @@
+ALTER TABLE "LeaveBalance"
+ADD COLUMN "balanceAdjustment" DOUBLE PRECISION NOT NULL DEFAULT 0;

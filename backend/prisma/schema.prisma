@@ -275,19 +275,20 @@ model LeaveType {
 }
 
 model LeaveBalance {
-  id              String    @id @default(cuid())
-  userId          String
-  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  leaveTypeId     String
-  leaveType       LeaveType @relation(fields: [leaveTypeId], references: [id])
-  year            Int // Année de référence
-  acquired        Float     @default(0) // Jours acquis
-  taken           Float     @default(0) // Jours pris
-  takenAdjustment Float     @default(0) // Correction RH persistante appliquée aux jours pris
-  scheduled       Float     @default(0) // Jours planifiés (approuvés non encore pris)
-  carryover       Float     @default(0) // Report année précédente
-  expiresAt       DateTime?
-  updatedAt       DateTime  @updatedAt
+  id                String    @id @default(cuid())
+  userId            String
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  leaveTypeId       String
+  leaveType         LeaveType @relation(fields: [leaveTypeId], references: [id])
+  year              Int // Année de référence
+  acquired          Float     @default(0) // Jours acquis
+  taken             Float     @default(0) // Jours pris
+  takenAdjustment   Float     @default(0) // Correction RH persistante appliquée aux jours pris
+  balanceAdjustment Float     @default(0) // Correction RH persistante appliquée au solde total
+  scheduled         Float     @default(0) // Jours planifiés (approuvés non encore pris)
+  carryover         Float     @default(0) // Report année précédente
+  expiresAt         DateTime?
+  updatedAt         DateTime  @updatedAt
 
   @@unique([userId, leaveTypeId, year])
   @@index([userId])

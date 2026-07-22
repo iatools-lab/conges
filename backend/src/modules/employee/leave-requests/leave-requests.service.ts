@@ -179,12 +179,6 @@ export class EmployeeLeaveRequestsService {
       year: getLeaveYear(startDate),
       requestedDays: days,
     });
-    this.ensurePaidLeaveTakingAllowed({
-      poolCode: leaveSelection.poolCode,
-      leaveTypeCode: leaveSelection.leaveType.code,
-      hireDate: user.dateEmbauche,
-      startDate,
-    });
     const attachment = this.toAttachment(proof);
 
     await this.ensureSufficientBalance({
@@ -314,14 +308,6 @@ export class EmployeeLeaveRequestsService {
       leaveSelection?.leaveType.id ?? existing.leaveTypeId;
     const effectiveLeaveTypeCode =
       leaveSelection?.leaveType.code ?? existing.leaveType.code;
-    this.ensurePaidLeaveTakingAllowed({
-      poolCode:
-        leaveSelection?.poolCode ??
-        this.poolCodeFromLeaveType(existing.leaveType),
-      leaveTypeCode: effectiveLeaveTypeCode,
-      hireDate: user.dateEmbauche,
-      startDate,
-    });
     const attachment = this.toAttachment(proof);
     const effectiveYear = startYear;
     const balanceCredit =
@@ -437,13 +423,6 @@ export class EmployeeLeaveRequestsService {
         'Cette planification ne peut pas être soumise',
       );
     }
-    this.ensurePaidLeaveTakingAllowed({
-      poolCode: this.poolCodeFromLeaveType(existing.leaveType),
-      leaveTypeCode: existing.leaveType.code,
-      hireDate: user.dateEmbauche,
-      startDate: existing.startDate,
-    });
-
     await this.ensureSufficientBalance({
       userId: user.id,
       leaveTypeId: existing.leaveTypeId,
@@ -902,31 +881,6 @@ export class EmployeeLeaveRequestsService {
     }
   }
 
-  private ensurePaidLeaveTakingAllowed(params: {
-    poolCode: string | null;
-    leaveTypeCode: string;
-    hireDate: Date;
-    startDate: Date;
-  }) {
-    if (!this.isPaidLeaveTakingSelection(params)) return;
-
-    const firstAnniversary = this.addUtcYears(params.hireDate, 1);
-    if (params.startDate >= firstAnniversary) return;
-
-    throw new BadRequestException(
-      `Les congés payés ne peuvent être pris qu'à partir du ${this.formatDate(firstAnniversary)} (un an après la date d'embauche).`,
-    );
-  }
-
-  private isPaidLeaveTakingSelection(params: {
-    poolCode: string | null;
-    leaveTypeCode: string;
-  }) {
-    const normalizedCode = params.leaveTypeCode.trim().toUpperCase();
-
-    return params.poolCode === PAID_POOL_CODE || normalizedCode === 'CP';
-  }
-
   private async findLeaveTypes() {
     const leaveTypes = await this.prisma.leaveType.findMany({
       where: { active: true },
@@ -1209,16 +1163,6 @@ export class EmployeeLeaveRequestsService {
 
   private toInputDate(date: Date) {
     return date.toISOString().slice(0, 10);
-  }
-
-  private addUtcYears(date: Date, years: number) {
-    return new Date(
-      Date.UTC(
-        date.getUTCFullYear() + years,
-        date.getUTCMonth(),
-        date.getUTCDate(),
-      ),
-    );
   }
 
   private fullName(user: { nom: string; prenom: string }) {

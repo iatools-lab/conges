@@ -88,6 +88,7 @@ function createHarness() {
   } as any;
   const leaveBalanceInitializer = {
     initializeUserYear: jest.fn(),
+    refreshPaidDebtCarryover: jest.fn(),
   } as any;
 
   prisma.user.findFirst.mockResolvedValue(rhUser);
@@ -211,6 +212,78 @@ describe('RhGlobalViewService', () => {
     );
     expect(result).toEqual(
       expect.objectContaining({ previousTaken: 30, taken: 20 }),
+    );
+  });
+
+  it('persists an RH correction to the total paid leave balance', async () => {
+    const { prisma, leaveBalanceSync, leaveBalanceInitializer, service } =
+      createHarness();
+    prisma.user.findUnique.mockResolvedValueOnce(rhUser).mockResolvedValueOnce({
+      id: 'employee-1',
+      matricule: 'EMP001',
+      nom: 'Employee',
+      prenom: 'Test',
+    });
+    prisma.leaveBalance.findMany.mockResolvedValue([
+      {
+        id: 'balance-cp',
+        acquired: 24,
+        carryover: 0,
+        balanceAdjustment: 0,
+        leaveType: { code: 'CP' },
+      },
+      {
+        id: 'balance-passif',
+        acquired: 4,
+        carryover: 0,
+        balanceAdjustment: 0,
+        leaveType: { code: 'PASSIF' },
+      },
+    ]);
+
+    const result = await service.updateTotalDays('employee-1', {
+      rhId: rhUser.id,
+      year: 2026,
+      total: 30,
+      comment: 'Régularisation RH du total',
+    });
+
+    expect(leaveBalanceInitializer.initializeUserYear).toHaveBeenCalledWith(
+      'employee-1',
+      2026,
+      prisma,
+    );
+    expect(leaveBalanceSync.syncUserYear).toHaveBeenCalledWith(
+      'employee-1',
+      2026,
+      prisma,
+    );
+    expect(prisma.leaveBalance.update).toHaveBeenCalledWith({
+      where: { id: 'balance-cp' },
+      data: { carryover: 2, balanceAdjustment: 2 },
+    });
+    expect(
+      leaveBalanceInitializer.refreshPaidDebtCarryover,
+    ).toHaveBeenCalledWith('employee-1', 2027, prisma);
+    expect(prisma.auditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          userId: rhUser.id,
+          entity: 'LeaveBalance',
+          entityId: 'employee-1',
+          metadata: expect.objectContaining({
+            source: 'rh_total_days_adjustment',
+            previousTotal: 28,
+            newTotal: 30,
+            adjustmentDelta: 2,
+            targetLeaveType: 'CP',
+            newBalanceAdjustment: 2,
+          }),
+        }),
+      }),
+    );
+    expect(result).toEqual(
+      expect.objectContaining({ previousTotal: 28, total: 30 }),
     );
   });
 

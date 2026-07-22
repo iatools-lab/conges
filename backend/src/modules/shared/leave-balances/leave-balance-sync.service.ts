@@ -25,6 +25,13 @@ type RequestSnapshot = {
   endDate: Date;
 };
 
+const BALANCE_TRACKED_REQUEST_STATUSES = [
+  LeaveRequestStatus.DRAFT,
+  LeaveRequestStatus.PENDING,
+  LeaveRequestStatus.IN_REVIEW,
+  LeaveRequestStatus.APPROVED,
+];
+
 @Injectable()
 export class LeaveBalanceSyncService {
   constructor(
@@ -176,6 +183,7 @@ export class LeaveBalanceSyncService {
           where: {
             ownerId: key.userId,
             leaveTypeId: key.leaveTypeId,
+            status: { in: BALANCE_TRACKED_REQUEST_STATUSES },
             startDate: { lt: range.endExclusive },
             endDate: { gte: range.start },
           },
@@ -275,6 +283,7 @@ export class LeaveBalanceSyncService {
         year: key.year,
         acquired,
         carryover: 0,
+        balanceAdjustment: 0,
         taken,
         takenAdjustment,
         scheduled,

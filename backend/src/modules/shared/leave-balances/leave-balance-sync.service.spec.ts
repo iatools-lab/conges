@@ -181,6 +181,61 @@ describe('LeaveBalanceSyncService', () => {
     );
   });
 
+  it('restores scheduled days when RH rejects a request approved by N+1', async () => {
+    const { prisma, service } = createHarness();
+    const requestSnapshot = {
+      ownerId: 'employee-1',
+      leaveTypeId: 'type-1',
+      startDate: new Date('2026-08-03T00:00:00.000Z'),
+      endDate: new Date('2026-08-07T00:00:00.000Z'),
+    };
+    prisma.leaveRequest.findUnique.mockResolvedValue(requestSnapshot);
+    prisma.leaveRequest.findMany
+      .mockResolvedValueOnce([
+        {
+          startDate: requestSnapshot.startDate,
+          endDate: requestSnapshot.endDate,
+          status: LeaveRequestStatus.IN_REVIEW,
+          submittedAt: new Date('2026-07-01T00:00:00.000Z'),
+        },
+      ])
+      .mockResolvedValueOnce([]);
+
+    await service.syncForRequest('request-1');
+    await service.syncForRequest('request-1');
+
+    expect(prisma.leaveRequest.findMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        status: {
+          in: [
+            LeaveRequestStatus.DRAFT,
+            LeaveRequestStatus.PENDING,
+            LeaveRequestStatus.IN_REVIEW,
+            LeaveRequestStatus.APPROVED,
+          ],
+        },
+      }),
+      select: {
+        startDate: true,
+        endDate: true,
+        status: true,
+        submittedAt: true,
+      },
+    });
+    expect(prisma.leaveBalance.upsert).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        update: { taken: 0, scheduled: 5 },
+      }),
+    );
+    expect(prisma.leaveBalance.upsert).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        update: { taken: 0, scheduled: 0 },
+      }),
+    );
+  });
+
   it('deduplicates balance keys before syncing', async () => {
     const { prisma, service } = createHarness();
 

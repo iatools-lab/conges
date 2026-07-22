@@ -79,7 +79,7 @@ type MonthlyLoadRow = {
 
 type ManagerPlanningResponse = {
   year: number;
-  manager: { id: string; fullName: string; email: string };
+  manager: { id: string; name: string };
   departments: DepartmentOption[];
   rows: BalanceRow[];
   planifications: PlanificationRow[];
@@ -473,7 +473,7 @@ export function ManagerPlanning() {
         <div className="flex flex-wrap items-center gap-2">
           <div className="inline-flex items-center gap-2 text-sm text-muted-foreground bg-muted/50 px-3 py-1.5 rounded-md">
             <Building2 className="size-4" />
-            Perimetre manager {data?.manager?.fullName ? `- ${data.manager.fullName}` : ""}
+            Perimetre manager {data?.manager?.name ? `- ${data.manager.name}` : ""}
           </div>
           <DateRangeFilter value={dateRange} onChange={applyDateRange} />
           <select

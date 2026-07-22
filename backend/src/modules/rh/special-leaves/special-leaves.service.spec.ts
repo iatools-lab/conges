@@ -90,11 +90,13 @@ function createHarness() {
     },
     leaveBalance: {
       findUnique: jest.fn().mockResolvedValue(null),
+      findMany: jest.fn(),
       upsert: jest.fn(),
     },
     event: {
       findFirst: jest.fn(),
       findUnique: jest.fn(),
+      findMany: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
     },
@@ -128,8 +130,10 @@ function createHarness() {
   prisma.leaveRequest.findFirst.mockResolvedValue(null);
   prisma.leaveRequest.findMany.mockResolvedValue([]);
   prisma.leaveRequest.aggregate.mockResolvedValue({ _sum: { days: 0 } });
+  prisma.leaveBalance.findMany.mockResolvedValue([]);
   prisma.leaveBalance.upsert.mockResolvedValue({});
   prisma.event.findFirst.mockResolvedValue(null);
+  prisma.event.findMany.mockResolvedValue([]);
   prisma.event.create.mockResolvedValue({ id: 'event-1' });
   prisma.event.update.mockResolvedValue({ id: 'event-1' });
   prisma.child.findFirst.mockResolvedValue({ id: 'child-1' });
@@ -179,6 +183,22 @@ function createHarness() {
 }
 
 describe('RhSpecialLeavesService', () => {
+  it('excludes employee form special-leave requests from the RH special leaves list', async () => {
+    const { prisma, service } = createHarness();
+
+    await service.findAll({ year: '2026' });
+
+    expect(prisma.leaveRequest.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          reference: { startsWith: 'CS-' },
+          leaveType: { category: { in: expect.any(Array) } },
+        }),
+      }),
+    );
+    expect(prisma.event.findMany).toHaveBeenCalled();
+  });
+
   it('imports a birth row for a male employee as paternity leave with computed days', async () => {
     const { prisma, service } = createHarness();
 

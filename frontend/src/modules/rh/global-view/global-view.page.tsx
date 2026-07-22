@@ -116,6 +116,14 @@ type TakenDaysAdjustmentResponse = {
   takenAdjustment: number;
 };
 
+type TotalDaysAdjustmentResponse = {
+  userId: string;
+  year: number;
+  previousTotal: number;
+  total: number;
+  adjustmentDelta: number;
+};
+
 type PlannedDaysAdjustmentResponse = {
   id: string;
   reference: string;
@@ -261,28 +269,41 @@ function BalanceRowActions({
   row,
   year,
   plannedRequests,
+  disabledTotal,
   disabledTaken,
   disabledPlanned,
+  onSaveTotal,
   onSaveTaken,
   onSavePlanned,
 }: {
   row: BalanceRow;
   year: number;
   plannedRequests: PlanificationRow[];
+  disabledTotal: boolean;
   disabledTaken: boolean;
   disabledPlanned: boolean;
+  onSaveTotal: (total: number, comment: string) => Promise<unknown>;
   onSaveTaken: (taken: number, comment: string) => Promise<unknown>;
   onSavePlanned: (requestId: string, days: number, comment: string) => Promise<unknown>;
 }) {
+  const [totalOpen, setTotalOpen] = useState(false);
   const [takenOpen, setTakenOpen] = useState(false);
   const [plannedOpen, setPlannedOpen] = useState(false);
+  const [total, setTotal] = useState(String(row.total));
   const [taken, setTaken] = useState(String(row.taken));
   const [plannedRequestId, setPlannedRequestId] = useState(plannedRequests[0]?.id ?? "");
   const selectedPlan =
     plannedRequests.find((request) => request.id === plannedRequestId) ?? plannedRequests[0];
   const [plannedDays, setPlannedDays] = useState(String(selectedPlan?.days ?? row.planned));
   const [comment, setComment] = useState("");
+  const [totalComment, setTotalComment] = useState("");
   const [plannedComment, setPlannedComment] = useState("");
+
+  const openTotalDialog = () => {
+    setTotal(String(row.total));
+    setTotalComment("");
+    setTotalOpen(true);
+  };
 
   const openTakenDialog = () => {
     setTaken(String(row.taken));
@@ -303,6 +324,12 @@ function BalanceRowActions({
       <RowActions
         actions={[
           {
+            label: "Ajuster le solde total",
+            icon: Pencil,
+            disabled: disabledTotal,
+            onSelect: openTotalDialog,
+          },
+          {
             label: "Ajuster les jours pris",
             icon: Pencil,
             disabled: disabledTaken,
@@ -316,6 +343,68 @@ function BalanceRowActions({
           },
         ]}
       />
+      <Dialog open={totalOpen} onOpenChange={setTotalOpen}>
+        <DialogContent className="sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle>Ajuster le solde total</DialogTitle>
+            <DialogDescription>
+              Corrigez le solde total de {row.employee} pour {year}. La correction sera appliquée
+              comme ajustement RH sur le report CP, sans modifier les jours pris ni planifiés.
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            className="grid gap-4"
+            onSubmit={async (event) => {
+              event.preventDefault();
+              const nextTotal = Number(total);
+              if (!Number.isFinite(nextTotal) || nextTotal < 0) {
+                toast.error("Le solde total doit être positif ou nul");
+                return;
+              }
+              await onSaveTotal(nextTotal, totalComment);
+              setTotalOpen(false);
+            }}
+          >
+            <label className="grid gap-1.5 text-sm">
+              <span className="text-xs font-medium text-muted-foreground">Solde total</span>
+              <input
+                type="number"
+                min="0"
+                step="0.5"
+                value={total}
+                onChange={(event) => setTotal(event.target.value)}
+                className="rounded-md border bg-background px-3 py-2"
+                required
+              />
+            </label>
+            <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+              Solde actuel : {formatNumber(row.total)} j · Restant actuel :{" "}
+              {formatNumber(row.remaining)} j.
+            </div>
+            <label className="grid gap-1.5 text-sm">
+              <span className="text-xs font-medium text-muted-foreground">
+                Motif de la correction
+              </span>
+              <textarea
+                rows={3}
+                maxLength={500}
+                value={totalComment}
+                onChange={(event) => setTotalComment(event.target.value)}
+                className="rounded-md border bg-background px-3 py-2"
+                placeholder="Ex. régularisation du solde total validée par la RH"
+              />
+            </label>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setTotalOpen(false)}>
+                Annuler
+              </Button>
+              <Button type="submit" disabled={disabledTotal}>
+                Enregistrer
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
       <Dialog open={takenOpen} onOpenChange={setTakenOpen}>
         <DialogContent className="sm:max-w-[520px]">
           <DialogHeader>
@@ -641,6 +730,22 @@ export function VueGlobale() {
     onSuccess: async () => {
       await queryClient.invalidateQueries();
       toast.success("Jours pris mis à jour");
+    },
+    onError: (error) => {
+      toast.error("Correction impossible", {
+        description: error instanceof Error ? error.message : "Erreur inconnue",
+      });
+    },
+  });
+  const updateTotalDays = useMutation({
+    mutationFn: ({ userId, total, comment }: { userId: string; total: number; comment: string }) =>
+      apiFetch<TotalDaysAdjustmentResponse>(`/rh/global-view/balances/${userId}/total`, {
+        method: "PATCH",
+        body: JSON.stringify({ year: Number(year), total, comment: comment.trim() || undefined }),
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries();
+      toast.success("Solde total mis à jour");
     },
     onError: (error) => {
       toast.error("Correction impossible", {
@@ -1039,8 +1144,12 @@ export function VueGlobale() {
                             row={row}
                             year={Number(year)}
                             plannedRequests={rowPlannedRequests}
+                            disabledTotal={updateTotalDays.isPending}
                             disabledTaken={updateTakenDays.isPending}
                             disabledPlanned={updatePlannedDays.isPending}
+                            onSaveTotal={(total, comment) =>
+                              updateTotalDays.mutateAsync({ userId: row.id, total, comment })
+                            }
                             onSaveTaken={(taken, comment) =>
                               updateTakenDays.mutateAsync({ userId: row.id, taken, comment })
                             }

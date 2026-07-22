@@ -15,8 +15,8 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { FindManagerDashboardQueryDto } from './dto/manager-dashboard.dto';
-import { LeaveEntitlementsService } from '../../shared/leave-entitlements/leave-entitlements.service';
 import { LeaveBalanceSyncService } from '../../shared/leave-balances/leave-balance-sync.service';
+import { LeaveBalanceInitializerService } from '../../shared/leave-balances/leave-balance-initializer.service';
 import { overlapDateWhere, resolveDateRange } from '../../../common/date-range';
 import {
   getLeaveYearRange,
@@ -26,9 +26,12 @@ import {
   expandHolidayDateKeys,
   utcDateKey,
 } from '../../../common/working-days';
+import {
+  paidPassifRemaining,
+  summarizePaidLeavePool,
+} from '../../shared/leave-balances/leave-balance-pools';
 
 type LeaveBarStatus = 'draft' | 'pending' | 'manager' | 'rh' | 'conflict';
-const REGULAR_PAID_CODES = new Set(['CP', 'ANC', 'ENF']);
 
 const dashboardUserSelect = {
   id: true,
@@ -68,8 +71,8 @@ type DashboardUser = Prisma.UserGetPayload<{
 export class ManagerDashboardService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly leaveEntitlements: LeaveEntitlementsService,
     private readonly leaveBalanceSync: LeaveBalanceSyncService,
+    private readonly leaveBalanceInitializer: LeaveBalanceInitializerService,
   ) {}
 
   async findSummary(query: FindManagerDashboardQueryDto) {
@@ -244,8 +247,8 @@ export class ManagerDashboardService {
     ).length;
 
     const teamIds = sortedTeam.map((member) => member.id);
+    await this.initializeVisibleTeamBalances(sortedTeam, year);
     await this.syncVisibleTeamBalances(ownerWhere, leaveYearRange);
-    await this.ensureTeamActiveBalances(sortedTeam, year);
 
     const rawBalances = teamIds.length
       ? await this.prisma.leaveBalance.findMany({
@@ -270,30 +273,12 @@ export class ManagerDashboardService {
 
     const balances = sortedTeam.map((member) => {
       const memberBalances = balancesByUser.get(member.id) ?? [];
-      const mainBalances = memberBalances.filter((b) =>
-        this.isRegularPaidBalance(b.leaveType),
-      );
-      const passifBalance = memberBalances.find(
-        (b) => b.leaveType.code.toUpperCase() === 'PASSIF',
-      );
-      const total = this.roundDays(
-        mainBalances.reduce((sum, b) => sum + b.acquired + b.carryover, 0),
-      );
-      const taken = this.roundDays(
-        mainBalances.reduce((sum, b) => sum + b.taken, 0),
-      );
-      const planned = this.roundDays(
-        mainBalances.reduce((sum, b) => sum + b.scheduled, 0),
-      );
-      const remaining = this.roundDays(total - taken - planned);
-      const passif = passifBalance
-        ? this.roundDays(
-            passifBalance.acquired +
-              passifBalance.carryover -
-              passifBalance.taken -
-              passifBalance.scheduled,
-          )
-        : 0;
+      const paidSummary = summarizePaidLeavePool(memberBalances);
+      const total = paidSummary.acquired;
+      const taken = paidSummary.taken;
+      const planned = paidSummary.scheduled;
+      const remaining = paidSummary.remaining;
+      const passif = paidPassifRemaining(memberBalances);
       const alert =
         remaining < 0
           ? ('negative' as const)
@@ -316,6 +301,29 @@ export class ManagerDashboardService {
         alert,
       };
     });
+    const paidTotalDays = this.roundDays(
+      balances.reduce((sum, balance) => sum + balance.total, 0),
+    );
+    const paidTakenDays = this.roundDays(
+      balances.reduce((sum, balance) => sum + balance.taken, 0),
+    );
+    const paidPlannedDays = this.roundDays(
+      balances.reduce((sum, balance) => sum + balance.planned, 0),
+    );
+    const paidRemainingDays = this.roundDays(
+      balances.reduce((sum, balance) => sum + balance.remaining, 0),
+    );
+    const lowBalanceEmployees = balances.filter(
+      (balance) => balance.alert === 'low',
+    ).length;
+    const negativeBalanceEmployees = balances.filter(
+      (balance) => balance.alert === 'negative',
+    ).length;
+    const passifEmployees = balances.filter(
+      (balance) => balance.alert === 'passif',
+    ).length;
+    const balanceAlerts =
+      lowBalanceEmployees + negativeBalanceEmployees + passifEmployees;
     const totalAbsenceDays = rows.reduce(
       (sum, member) =>
         sum +
@@ -358,6 +366,14 @@ export class ManagerDashboardService {
       },
       stats: {
         totalLeaves: totalAbsenceDays,
+        paidTotalDays,
+        paidTakenDays,
+        paidPlannedDays,
+        paidRemainingDays,
+        balanceAlerts,
+        lowBalanceEmployees,
+        negativeBalanceEmployees,
+        passifEmployees,
         pendingRequests,
         urgentPendingRequests,
         upcomingAbsences7d: upcomingAbsenceOwners.length,
@@ -558,49 +574,15 @@ export class ManagerDashboardService {
     );
   }
 
-  private async ensureTeamActiveBalances(team: DashboardUser[], year: number) {
+  private async initializeVisibleTeamBalances(
+    team: DashboardUser[],
+    year: number,
+  ) {
     if (!team.length) return;
 
-    const activeLeaveTypes = await this.prisma.leaveType.findMany({
-      where: { active: true },
-      select: {
-        id: true,
-        code: true,
-        name: true,
-        category: true,
-        defaultDays: true,
-      },
-    });
-
     await Promise.all(
-      team.flatMap((member) =>
-        activeLeaveTypes.map((leaveType) => {
-          const acquired = this.leaveEntitlements.getAcquiredDays({
-            leaveType,
-            user: member,
-            year,
-          });
-
-          return this.prisma.leaveBalance.upsert({
-            where: {
-              userId_leaveTypeId_year: {
-                userId: member.id,
-                leaveTypeId: leaveType.id,
-                year,
-              },
-            },
-            create: {
-              userId: member.id,
-              leaveTypeId: leaveType.id,
-              year,
-              acquired,
-              carryover: 0,
-              taken: 0,
-              scheduled: 0,
-            },
-            update: { acquired },
-          });
-        }),
+      team.map((member) =>
+        this.leaveBalanceInitializer.initializeUserYear(member.id, year),
       ),
     );
   }
@@ -680,10 +662,6 @@ export class ManagerDashboardService {
 
   private fullName(user: { nom: string; prenom: string }) {
     return `${user.prenom} ${user.nom}`.trim();
-  }
-
-  private isRegularPaidBalance(leaveType: { code: string }) {
-    return REGULAR_PAID_CODES.has(leaveType.code.trim().toUpperCase());
   }
 
   private roundDays(value: number) {

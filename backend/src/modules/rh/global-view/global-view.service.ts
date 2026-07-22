@@ -27,6 +27,7 @@ import { ImportRhLeaveHistoryDto } from './dto/rh-leave-history-import.dto';
 import {
   UpdateRhPlannedDaysDto,
   UpdateRhTakenDaysDto,
+  UpdateRhTotalDaysDto,
 } from './dto/rh-balance-adjustment.dto';
 import { EmailService } from '../../shared/notifications/email.service';
 import { LeaveBalanceSyncService } from '../../shared/leave-balances/leave-balance-sync.service';
@@ -215,6 +216,110 @@ export class RhGlobalViewService {
         previousTaken,
         taken: targetTaken,
         takenAdjustment: totalTakenAdjustment,
+      };
+    });
+  }
+
+  async updateTotalDays(userId: string, dto: UpdateRhTotalDaysDto) {
+    const rhUser = await this.resolveRh(dto.rhId, dto.rhEmail);
+    const targetTotal = this.roundDays(dto.total);
+
+    return this.prisma.$transaction(async (transaction) => {
+      const employee = await transaction.user.findUnique({
+        where: { id: userId },
+        select: { id: true, matricule: true, nom: true, prenom: true },
+      });
+      if (!employee) throw new NotFoundException('Employé introuvable');
+
+      await this.leaveBalanceInitializer.initializeUserYear(
+        userId,
+        dto.year,
+        transaction,
+      );
+      await this.leaveBalanceSync.syncUserYear(userId, dto.year, transaction);
+
+      const balances = await transaction.leaveBalance.findMany({
+        where: {
+          userId,
+          year: dto.year,
+          leaveType: { code: { in: [...PAID_BALANCE_CODES] } },
+        },
+        orderBy: { leaveType: { code: 'asc' } },
+        select: {
+          id: true,
+          acquired: true,
+          carryover: true,
+          balanceAdjustment: true,
+          leaveType: { select: { code: true } },
+        },
+      });
+      if (!balances.length) {
+        throw new BadRequestException(
+          'Aucun solde de congés payés disponible pour cet employé',
+        );
+      }
+
+      const previousTotal = this.roundDays(
+        balances.reduce(
+          (sum, balance) => sum + balance.acquired + balance.carryover,
+          0,
+        ),
+      );
+      const adjustmentDelta = this.roundDays(targetTotal - previousTotal);
+      const targetBalance =
+        balances.find(
+          (balance) => balance.leaveType.code.trim().toUpperCase() === 'CP',
+        ) ?? balances[0];
+      const nextCarryover = this.roundDays(
+        targetBalance.carryover + adjustmentDelta,
+      );
+      const nextBalanceAdjustment = this.roundDays(
+        targetBalance.balanceAdjustment + adjustmentDelta,
+      );
+
+      await transaction.leaveBalance.update({
+        where: { id: targetBalance.id },
+        data: {
+          carryover: nextCarryover,
+          balanceAdjustment: nextBalanceAdjustment,
+        },
+      });
+      await this.leaveBalanceInitializer.refreshPaidDebtCarryover(
+        userId,
+        dto.year + 1,
+        transaction,
+      );
+      await transaction.auditLog.create({
+        data: {
+          userId: rhUser.id,
+          action: AuditAction.UPDATE,
+          entity: 'LeaveBalance',
+          entityId: userId,
+          metadata: {
+            source: 'rh_total_days_adjustment',
+            year: dto.year,
+            employeeId: employee.id,
+            employeeMatricule: employee.matricule,
+            employeeName: this.fullName(employee),
+            targetLeaveType: targetBalance.leaveType.code,
+            previousTotal,
+            newTotal: targetTotal,
+            adjustmentDelta,
+            previousCarryover: targetBalance.carryover,
+            newCarryover: nextCarryover,
+            previousBalanceAdjustment: targetBalance.balanceAdjustment,
+            newBalanceAdjustment: nextBalanceAdjustment,
+            comment: dto.comment?.trim() || null,
+          },
+        },
+      });
+
+      return {
+        userId,
+        year: dto.year,
+        previousTotal,
+        total: targetTotal,
+        adjustmentDelta,
       };
     });
   }

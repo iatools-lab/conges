@@ -1,10 +1,10 @@
 import { Module } from '@nestjs/common';
-import { SharedLeaveEntitlementsModule } from '../../shared/leave-entitlements/leave-entitlements.module';
+import { SharedLeaveBalancesModule } from '../../shared/leave-balances/leave-balances.module';
 import { ManagerDashboardController } from './dashboard.controller';
 import { ManagerDashboardService } from './dashboard.service';
 
 @Module({
-  imports: [SharedLeaveEntitlementsModule],
+  imports: [SharedLeaveBalancesModule],
   controllers: [ManagerDashboardController],
   providers: [ManagerDashboardService],
 })

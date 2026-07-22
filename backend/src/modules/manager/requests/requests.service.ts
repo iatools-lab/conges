@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import {
   AuditAction,
+  LeaveCategory,
   LeaveRequestStatus,
   NotificationType,
   Prisma,
@@ -23,7 +24,16 @@ import {
 import { EmailService } from '../../shared/notifications/email.service';
 import { LeaveBalanceSyncService } from '../../shared/leave-balances/leave-balance-sync.service';
 import { overlapDateWhere, resolveDateRange } from '../../../common/date-range';
-import { getLeaveYear } from '../../../common/leave-year';
+import {
+  getLeaveYear,
+  getLeaveYearsForPeriod,
+} from '../../../common/leave-year';
+import {
+  isPaidLeavePool,
+  isSpecialLeavePool,
+  summarizePaidLeavePool,
+  summarizeSpecialLeavePool,
+} from '../../shared/leave-balances/leave-balance-pools';
 
 type BadgeTone =
   | 'valid'
@@ -73,6 +83,17 @@ type ManagerRequestRecord = Prisma.LeaveRequestGetPayload<{
   select: typeof managerRequestSelect;
 }>;
 
+type ManagerRequestBalance = {
+  userId: string;
+  leaveTypeId: string;
+  year: number;
+  acquired: number;
+  carryover: number;
+  taken: number;
+  scheduled: number;
+  leaveType: { code: string; category: LeaveCategory };
+};
+
 @Injectable()
 export class ManagerRequestsService {
   constructor(
@@ -104,6 +125,7 @@ export class ManagerRequestsService {
       select: managerRequestSelect,
     });
 
+    await this.syncVisibleRequestBalances(requests);
     const balanceByKey = await this.findBalances(requests, year);
     const rows = requests.map((request) =>
       this.toResponse(
@@ -411,39 +433,104 @@ export class ManagerRequestsService {
   }
 
   private async findBalances(requests: ManagerRequestRecord[], year: number) {
-    const pairs = requests.map((request) => ({
-      userId: request.ownerId,
-      leaveTypeId: request.leaveTypeId,
-    }));
+    const pairs = Array.from(
+      new Map(
+        requests.map((request) => {
+          const requestYear = getLeaveYear(request.startDate) || year;
+          return [
+            `${request.ownerId}:${requestYear}`,
+            {
+              userId: request.ownerId,
+              year: requestYear,
+            },
+          ];
+        }),
+      ).values(),
+    );
     if (pairs.length === 0) return new Map<string, { remaining: number }>();
 
     const balances = await this.prisma.leaveBalance.findMany({
       where: {
-        year,
         OR: pairs,
       },
       select: {
         userId: true,
         leaveTypeId: true,
+        year: true,
         acquired: true,
         carryover: true,
         taken: true,
         scheduled: true,
+        leaveType: {
+          select: {
+            code: true,
+            category: true,
+          },
+        },
       },
     });
 
+    const balancesByUserYear = new Map<string, typeof balances>();
+    for (const balance of balances) {
+      const key = `${balance.userId}:${balance.year}`;
+      const list = balancesByUserYear.get(key) ?? [];
+      list.push(balance);
+      balancesByUserYear.set(key, list);
+    }
+
     return new Map(
-      balances.map((balance) => [
-        `${balance.userId}:${balance.leaveTypeId}`,
-        {
-          remaining: this.roundDays(
-            balance.acquired +
-              balance.carryover -
-              balance.taken -
-              balance.scheduled,
-          ),
-        },
-      ]),
+      requests.map((request) => {
+        const requestYear = getLeaveYear(request.startDate) || year;
+        const requestBalances =
+          balancesByUserYear.get(`${request.ownerId}:${requestYear}`) ?? [];
+
+        return [
+          this.balanceKey(request),
+          {
+            remaining: this.balanceRemainingForRequest(
+              request,
+              requestBalances,
+            ),
+          },
+        ];
+      }),
+    );
+  }
+
+  private async syncVisibleRequestBalances(requests: ManagerRequestRecord[]) {
+    await this.leaveBalanceSync.syncForKeys(
+      requests.flatMap((request) =>
+        getLeaveYearsForPeriod(request.startDate, request.endDate).map(
+          (year) => ({
+            userId: request.ownerId,
+            leaveTypeId: request.leaveTypeId,
+            year,
+          }),
+        ),
+      ),
+    );
+  }
+
+  private balanceRemainingForRequest(
+    request: ManagerRequestRecord,
+    balances: ManagerRequestBalance[],
+  ) {
+    if (isPaidLeavePool(request)) {
+      return summarizePaidLeavePool(balances).remaining;
+    }
+
+    if (isSpecialLeavePool(request)) {
+      return summarizeSpecialLeavePool(balances).remaining;
+    }
+
+    const balance = balances.find(
+      (candidate) => candidate.leaveTypeId === request.leaveTypeId,
+    );
+
+    if (!balance) return 0;
+
+    return this.roundDays(
+      balance.acquired + balance.carryover - balance.taken - balance.scheduled,
     );
   }
 
@@ -574,7 +661,7 @@ export class ManagerRequestsService {
   }
 
   private balanceKey(request: ManagerRequestRecord) {
-    return `${request.ownerId}:${request.leaveTypeId}`;
+    return `${request.ownerId}:${request.leaveTypeId}:${getLeaveYear(request.startDate)}`;
   }
 
   private toEmailSubject(status: LeaveRequestStatus) {

@@ -13,6 +13,13 @@ import {
 import { PrismaService } from '../../../prisma/prisma.service';
 import { FindManagerPlanningQueryDto } from './dto/manager-planning.dto';
 import { overlapDateWhere, resolveDateRange } from '../../../common/date-range';
+import { getLeaveYearsForPeriod } from '../../../common/leave-year';
+import { LeaveBalanceInitializerService } from '../../shared/leave-balances/leave-balance-initializer.service';
+import { LeaveBalanceSyncService } from '../../shared/leave-balances/leave-balance-sync.service';
+import {
+  paidPassifRemaining,
+  summarizePaidLeavePool,
+} from '../../shared/leave-balances/leave-balance-pools';
 
 const planningUserSelect = {
   id: true,
@@ -40,7 +47,11 @@ type PlanningUser = Prisma.UserGetPayload<{
 
 @Injectable()
 export class ManagerPlanningService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly leaveBalanceInitializer: LeaveBalanceInitializerService,
+    private readonly leaveBalanceSync: LeaveBalanceSyncService,
+  ) {}
 
   async findYear(query: FindManagerPlanningQueryDto) {
     const manager = await this.resolveManager(
@@ -49,7 +60,10 @@ export class ManagerPlanningService {
     );
     const range = resolveDateRange(query, { defaultMode: 'year' });
     const year = range.year;
-    const ownerWhere = this.buildManagedOwnerWhere(manager);
+    const ownerWhere = this.applyDepartmentFilter(
+      this.buildManagedOwnerWhere(manager),
+      query.department,
+    );
     const scopedDepartments = this.getManagedDepartments(manager);
 
     const team = await this.prisma.user.findMany({
@@ -78,6 +92,9 @@ export class ManagerPlanningService {
     });
 
     const userIds = team.map((member) => member.id);
+    await this.initializeVisibleTeamBalances(team, year);
+    await this.syncVisibleTeamBalances(ownerWhere, range);
+
     const balances = userIds.length
       ? await this.prisma.leaveBalance.findMany({
           where: {
@@ -105,35 +122,12 @@ export class ManagerPlanningService {
     const rows = team.map((member) => this.toPlanningRow(member, year));
     const balanceRows = team.map((member) => {
       const memberBalances = balancesByUser.get(member.id) ?? [];
-      const total = this.roundDays(
-        memberBalances.reduce(
-          (sum, balance) => sum + balance.acquired + balance.carryover,
-          0,
-        ),
-      );
-      const taken = this.roundDays(
-        memberBalances.reduce((sum, balance) => sum + balance.taken, 0),
-      );
-      const planned = this.roundDays(
-        memberBalances.reduce((sum, balance) => sum + balance.scheduled, 0),
-      );
-      const remaining = this.roundDays(total - taken - planned);
-      const passif = this.roundDays(
-        memberBalances
-          .filter((balance) => balance.leaveType.code === 'PASSIF')
-          .reduce(
-            (sum, balance) =>
-              sum +
-              Math.max(
-                0,
-                balance.acquired +
-                  balance.carryover -
-                  balance.taken -
-                  balance.scheduled,
-              ),
-            0,
-          ),
-      );
+      const paidSummary = summarizePaidLeavePool(memberBalances);
+      const total = paidSummary.acquired;
+      const taken = paidSummary.taken;
+      const planned = paidSummary.scheduled;
+      const remaining = paidSummary.remaining;
+      const passif = paidPassifRemaining(memberBalances);
 
       return {
         id: member.id,
@@ -277,6 +271,61 @@ export class ManagerPlanningService {
         { n3Id: manager.id },
       ],
     } satisfies Prisma.UserWhereInput;
+  }
+
+  private applyDepartmentFilter(
+    ownerWhere: Prisma.UserWhereInput,
+    department?: string,
+  ) {
+    const value = department?.trim();
+    if (!value || value.toUpperCase() === 'ALL') return ownerWhere;
+
+    return {
+      AND: [ownerWhere, { department: { code: value } }],
+    } satisfies Prisma.UserWhereInput;
+  }
+
+  private async initializeVisibleTeamBalances(
+    team: PlanningUser[],
+    year: number,
+  ) {
+    if (!team.length) return;
+
+    await Promise.all(
+      team.map((member) =>
+        this.leaveBalanceInitializer.initializeUserYear(member.id, year),
+      ),
+    );
+  }
+
+  private async syncVisibleTeamBalances(
+    ownerWhere: Prisma.UserWhereInput,
+    range: ReturnType<typeof resolveDateRange>,
+  ) {
+    const requests = await this.prisma.leaveRequest.findMany({
+      where: {
+        owner: ownerWhere,
+        ...overlapDateWhere(range),
+      },
+      select: {
+        ownerId: true,
+        leaveTypeId: true,
+        startDate: true,
+        endDate: true,
+      },
+    });
+
+    await this.leaveBalanceSync.syncForKeys(
+      requests.flatMap((request) =>
+        getLeaveYearsForPeriod(request.startDate, request.endDate).map(
+          (leaveYear) => ({
+            userId: request.ownerId,
+            leaveTypeId: request.leaveTypeId,
+            year: leaveYear,
+          }),
+        ),
+      ),
+    );
   }
 
   private getManagerDepartment(

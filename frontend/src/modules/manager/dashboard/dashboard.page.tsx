@@ -103,6 +103,14 @@ type ManagerDashboardResponse = {
   };
   stats: {
     totalLeaves: number;
+    paidTotalDays: number;
+    paidTakenDays: number;
+    paidPlannedDays: number;
+    paidRemainingDays: number;
+    balanceAlerts: number;
+    lowBalanceEmployees: number;
+    negativeBalanceEmployees: number;
+    passifEmployees: number;
     pendingRequests: number;
     urgentPendingRequests: number;
     upcomingAbsences7d: number;
@@ -155,6 +163,14 @@ const WEEKDAYS = ["L", "M", "M", "J", "V", "S", "D"];
 const emptyTeam: Member[] = [];
 const emptyStats: ManagerDashboardResponse["stats"] = {
   totalLeaves: 0,
+  paidTotalDays: 0,
+  paidTakenDays: 0,
+  paidPlannedDays: 0,
+  paidRemainingDays: 0,
+  balanceAlerts: 0,
+  lowBalanceEmployees: 0,
+  negativeBalanceEmployees: 0,
+  passifEmployees: 0,
   pendingRequests: 0,
   urgentPendingRequests: 0,
   upcomingAbsences7d: 0,
@@ -311,6 +327,7 @@ export function ManagerDashboard() {
   const attention = dashboardQuery.data?.attention ?? emptyAttention;
   const balances = dashboardQuery.data?.balances ?? emptyBalances;
   const holidays = dashboardQuery.data?.holidays ?? emptyHolidays;
+  const balanceYear = dashboardQuery.data?.year ?? year;
   const daysInMonth = new Date(year, monthIdx + 1, 0).getDate();
   const firstDow = (new Date(year, monthIdx, 1).getDay() + 6) % 7;
   const holidaysByDay = useMemo(
@@ -431,46 +448,48 @@ export function ManagerDashboard() {
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-6">
         <KpiLink
           to="/manager/planning"
-          label="Total congés"
-          value={stats.totalLeaves}
+          label="Solde restant équipe"
+          value={stats.paidRemainingDays}
           suffix="j"
           tone="green"
-          hint="Source : vue globale des congés"
+          hint="Source : soldes RH consolidés"
         />
         <KpiLink
-          to="/manager/demandes"
-          label="Demandes en attente"
-          value={stats.pendingRequests}
+          to="/manager/planning"
+          label="Jours planifiés"
+          value={stats.paidPlannedDays}
+          suffix="j"
           tone="blue"
-          hint="Source : demandes"
+          hint="Source : soldes RH consolidés"
+        />
+        <KpiLink
+          to="/manager/planning"
+          label="Congés pris"
+          value={stats.paidTakenDays}
+          suffix="j"
+          tone="orange"
+          hint="Source : soldes RH consolidés"
         />
         <KpiLink
           to="/manager/demandes"
-          label="Demandes urgentes (>48h)"
+          label="Demandes à traiter"
+          value={stats.pendingRequests}
+          tone="yellow"
+          hint="Source : demandes N+1"
+        />
+        <KpiLink
+          to="/manager/demandes"
+          label="Demandes urgentes"
           value={stats.urgentPendingRequests}
           tone="red"
-          hint="Source : demandes"
+          hint="Demandes soumises depuis plus de 48h"
         />
         <KpiLink
           to="/manager/planning"
-          label="Absences prochaines 7j"
-          value={stats.upcomingAbsences7d}
-          tone="yellow"
-          hint="Source : calendrier"
-        />
-        <KpiLink
-          to="/manager/planning"
-          label="Employés absents ce mois"
-          value={stats.absentEmployees}
-          tone="green"
-          hint="Source : calendrier"
-        />
-        <KpiLink
-          to="/manager/conflits"
-          label="Conflits détectés"
-          value={stats.activeConflicts}
+          label="Soldes à risque"
+          value={stats.balanceAlerts}
           tone="red"
-          hint="Source : conflits"
+          hint={`${stats.negativeBalanceEmployees} négatif(s), ${stats.lowBalanceEmployees} faible(s), ${stats.passifEmployees} passif(s)`}
         />
       </div>
 
@@ -527,7 +546,7 @@ export function ManagerDashboard() {
 
       <Card className="mt-6">
         <CardHeader
-          title={`Soldes de congés ${year} — équipe`}
+          title={`Soldes de congés ${balanceYear} — équipe`}
           action={
             <span className="text-xs text-muted-foreground">{balances.length} employé(s)</span>
           }

@@ -165,6 +165,7 @@ export class RhSpecialLeavesService {
       this.prisma.leaveRequest.findMany({
         where: {
           ...overlapDateWhere(range),
+          reference: { startsWith: 'CS-' },
           leaveType: { category: { in: [...EVENT_LEAVE_CATEGORIES] } },
         },
         orderBy: [{ startDate: 'desc' }, { reference: 'desc' }],

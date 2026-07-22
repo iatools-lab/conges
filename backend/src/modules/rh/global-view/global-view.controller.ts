@@ -20,6 +20,7 @@ import { ImportRhLeaveHistoryDto } from './dto/rh-leave-history-import.dto';
 import {
   UpdateRhPlannedDaysDto,
   UpdateRhTakenDaysDto,
+  UpdateRhTotalDaysDto,
 } from './dto/rh-balance-adjustment.dto';
 
 @Controller('rh/global-view')
@@ -72,6 +73,18 @@ export class RhGlobalViewController {
     @Req() req: AuthenticatedRequest,
   ) {
     return this.globalViewService.updateTakenDays(
+      userId,
+      withAuthenticatedRh(dto, requireAuthSession(req)),
+    );
+  }
+
+  @Patch('balances/:userId/total')
+  updateTotalDays(
+    @Param('userId') userId: string,
+    @Body() dto: UpdateRhTotalDaysDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.globalViewService.updateTotalDays(
       userId,
       withAuthenticatedRh(dto, requireAuthSession(req)),
     );

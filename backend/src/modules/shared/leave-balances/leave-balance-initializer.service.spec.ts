@@ -116,6 +116,62 @@ describe('LeaveBalanceInitializerService', () => {
     );
   });
 
+  it('keeps RH total balance adjustments when employee entitlements are refreshed', async () => {
+    const prisma = {
+      user: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'employee-1',
+            sexe: 'M',
+            dateEmbauche: new Date('2025-04-10T00:00:00.000Z'),
+            passifInitial: 0,
+            children: [],
+            events: [],
+          },
+        ]),
+      },
+      leaveType: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'type-cp',
+            code: 'CP',
+            name: 'Congés payés',
+            category: 'CONGE_PAYE',
+            defaultDays: 24,
+          },
+        ]),
+      },
+      leaveBalance: {
+        findMany: jest
+          .fn()
+          .mockResolvedValueOnce([])
+          .mockResolvedValueOnce([
+            {
+              userId: 'employee-1',
+              leaveTypeId: 'type-cp',
+              balanceAdjustment: 5,
+            },
+          ]),
+        upsert: jest.fn().mockResolvedValue({}),
+      },
+    } as any;
+    const leaveEntitlements = {
+      getAcquiredDays: jest.fn().mockReturnValue(24),
+    } as any;
+    const service = new LeaveBalanceInitializerService(
+      prisma,
+      leaveEntitlements,
+    );
+
+    await service.initializeUserYear('employee-1', 2026, prisma, true);
+
+    expect(prisma.leaveBalance.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: { acquired: 24, carryover: 5 },
+      }),
+    );
+  });
+
   it('creates next-year CP with a negative carryover when the previous paid total is overdrawn', async () => {
     const prisma = {
       user: {

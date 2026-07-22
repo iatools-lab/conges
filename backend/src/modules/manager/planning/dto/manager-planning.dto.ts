@@ -31,4 +31,8 @@ export class FindManagerPlanningQueryDto {
   @IsOptional()
   @IsString()
   dateTo?: string;
+
+  @IsOptional()
+  @IsString()
+  department?: string;
 }

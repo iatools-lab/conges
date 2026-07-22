@@ -1,4 +1,3 @@
-import { BadRequestException } from '@nestjs/common';
 import {
   LeaveCategory,
   LeaveRequestStatus,
@@ -51,8 +50,8 @@ function createHarness() {
 }
 
 describe('EmployeeLeaveRequestsService', () => {
-  it('blocks paid leave taking before the first work anniversary while keeping acquired days visible', async () => {
-    const { prisma, service } = createHarness();
+  it('allows paid leave taking before the first work anniversary while keeping acquired days visible', async () => {
+    const { prisma, leaveBalanceSync, service } = createHarness();
     prisma.user.findUnique.mockResolvedValue({
       id: 'employee-1',
       email: 'employee@example.com',
@@ -85,6 +84,30 @@ describe('EmployeeLeaveRequestsService', () => {
         scheduled: 0,
       },
     ]);
+    const created = {
+      id: 'request-1',
+      reference: 'DRAFT-001',
+      startDate: new Date('2026-06-22T00:00:00.000Z'),
+      endDate: new Date('2026-06-22T00:00:00.000Z'),
+      days: 1,
+      reason: null,
+      status: LeaveRequestStatus.DRAFT,
+      submittedAt: null,
+      createdAt: new Date('2026-05-01T00:00:00.000Z'),
+      leaveType: {
+        id: 'cp-type',
+        code: 'CP',
+        name: 'Congés payés',
+        category: LeaveCategory.CONGE_PAYE,
+        requiresProof: false,
+      },
+      attachments: [],
+      validations: [],
+    };
+    prisma.leaveRequest.create.mockResolvedValue(created);
+    prisma.$transaction.mockImplementation((callback: (tx: any) => unknown) =>
+      callback(prisma),
+    );
 
     await expect(
       service.create({
@@ -92,8 +115,13 @@ describe('EmployeeLeaveRequestsService', () => {
         leaveTypeCode: 'PAYE',
         startDate: '2026-06-22',
         endDate: '2026-06-22',
+        draft: true,
       } as any),
-    ).rejects.toThrow(BadRequestException);
+    ).resolves.toMatchObject({ id: 'request-1', jours: 1 });
+    expect(leaveBalanceSync.syncForRequest).toHaveBeenCalledWith(
+      'request-1',
+      prisma,
+    );
   });
 
   it('keeps special-leave proof optional and deducts every subtype from the shared 12-day pool', async () => {

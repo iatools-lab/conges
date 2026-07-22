@@ -112,7 +112,7 @@ export class LeaveEntitlementsService {
     const normalizedAnnualDays = Math.max(annualDays, 0);
 
     // Les congés payés s'acquièrent dès l'embauche au prorata mensuel.
-    // La restriction de prise avant un an est appliquée côté demandes.
+    // Ils restent consommables avant le premier anniversaire d'embauche.
     if (referenceDate < hireDate) return 0;
 
     if (referenceDate < firstAnniversary) {
