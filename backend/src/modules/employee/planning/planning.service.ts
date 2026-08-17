@@ -55,7 +55,7 @@ type DepartmentPlanningRequest = Prisma.LeaveRequestGetPayload<{
 const POOL_PAYE_CODE = 'PAYE';
 const POOL_SPECIAL_CODE = 'SPECIAL';
 const MATERNITY_CODE = 'MAT';
-const PAID_SOURCE_CODES = new Set(['CP', 'ANC', 'ENF']);
+const PAID_SOURCE_CODES = new Set(['CP', 'ANC', 'ENF', 'PASSIF']);
 const EXCLUDED_SPECIAL_CODES = new Set(['PASSIF', 'MAT', 'SS']);
 const POOL_PAYE_LABEL = 'Congés payés (total annuel)';
 const POOL_SPECIAL_LABEL = 'Congés spéciaux (plafond 12 j)';
@@ -403,8 +403,14 @@ export class EmployeePlanningService {
     return options;
   }
 
-  private isPaidPoolLeaveType(leaveType: { code: string }) {
-    return PAID_SOURCE_CODES.has(leaveType.code.trim().toUpperCase());
+  private isPaidPoolLeaveType(leaveType: {
+    code: string;
+    category?: LeaveCategory;
+  }) {
+    return (
+      PAID_SOURCE_CODES.has(leaveType.code.trim().toUpperCase()) ||
+      leaveType.category === LeaveCategory.CONGE_PAYE
+    );
   }
 
   private isSpecialPoolLeaveType(leaveType: {

@@ -4,6 +4,7 @@ import { Link } from "@tanstack/react-router";
 import { readSheet } from "read-excel-file/browser";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
+import { RowActions } from "@/components/RowActions";
 import {
   DateRangeFilter,
   appendDateRange,
@@ -25,8 +26,11 @@ import { apiFetch } from "@/lib/api";
 import { useAuthSession } from "@/modules/auth/session";
 import {
   AlertCircle,
+  Ban,
   Download,
+  Eye,
   FileUp,
+  Pencil,
   RefreshCw,
   Search,
   Trash2,
@@ -55,10 +59,16 @@ type PlanificationRow = {
   manager: string;
   departmentCode: string;
   departmentName: string;
+  ownerId?: string;
   startDate: string;
   endDate: string;
+  startDateIso?: string;
+  endDateIso?: string;
   days: number;
   type: string;
+  leaveTypeCode?: string;
+  leaveTypeCategory?: string;
+  reason?: string;
   statusCode: string;
   status: BadgeTone;
   label: string;
@@ -104,6 +114,15 @@ type HistoryImportResponse = {
 };
 
 type ProcessedFilter = "ALL" | "APPROVED" | "REJECTED" | "CANCELLED";
+type ProcessedEditDraft = {
+  startDate: string;
+  endDate: string;
+  days: number;
+  reason: string;
+  comment: string;
+};
+
+const PROCESSED_PAGE_SIZE = 15;
 
 function buildGlobalViewPath(range: DateRangeValue, department: string) {
   const params = appendDateRange(new URLSearchParams(), range);
@@ -380,6 +399,16 @@ export function RhDemandesConges() {
   const [remark, setRemark] = useState("");
   const [historyPreviewRows, setHistoryPreviewRows] = useState<HistoryImportRow[]>([]);
   const [lastHistoryImport, setLastHistoryImport] = useState<HistoryImportResponse | null>(null);
+  const [processedPage, setProcessedPage] = useState(1);
+  const [processedDetail, setProcessedDetail] = useState<PlanificationRow | null>(null);
+  const [processedEdit, setProcessedEdit] = useState<PlanificationRow | null>(null);
+  const [processedEditDraft, setProcessedEditDraft] = useState<ProcessedEditDraft>({
+    startDate: "",
+    endDate: "",
+    days: 1,
+    reason: "",
+    comment: "",
+  });
 
   const queryKey = ["rh-leave-requests", department, ...dateRangeQueryKey(dateRange)];
 
@@ -387,6 +416,17 @@ export function RhDemandesConges() {
     queryKey,
     queryFn: () => apiFetch<GlobalViewResponse>(buildGlobalViewPath(dateRange, department)),
   });
+
+  const invalidateLeaveRequestViews = () => {
+    void queryClient.invalidateQueries({ queryKey });
+    void queryClient.invalidateQueries({ queryKey: ["rh-dashboard"] });
+    void queryClient.invalidateQueries({ queryKey: ["rh-global-view"] });
+    void queryClient.invalidateQueries({ queryKey: ["employee-balances"] });
+    void queryClient.invalidateQueries({ queryKey: ["employee-dashboard"] });
+    void queryClient.invalidateQueries({ queryKey: ["manager-dashboard"] });
+    void queryClient.invalidateQueries({ queryKey: ["manager-planning"] });
+    void queryClient.invalidateQueries({ queryKey: ["manager-requests"] });
+  };
 
   const rhDecisionMutation = useMutation({
     mutationFn: ({ id, decision }: { id: string; decision: "approve" | "reject" }) => {
@@ -404,8 +444,7 @@ export function RhDemandesConges() {
       toast.success(
         variables.decision === "approve" ? "Demande confirmée par RH" : "Demande rejetée par RH",
       );
-      void queryClient.invalidateQueries({ queryKey });
-      void queryClient.invalidateQueries({ queryKey: ["rh-dashboard"] });
+      invalidateLeaveRequestViews();
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Décision RH impossible");
@@ -431,7 +470,7 @@ export function RhDemandesConges() {
       });
       setRemarkDialog(null);
       setRemark("");
-      void queryClient.invalidateQueries({ queryKey });
+      invalidateLeaveRequestViews();
     },
     onError: (error) => {
       toast.error(
@@ -463,18 +502,82 @@ export function RhDemandesConges() {
           .filter(Boolean)
           .join(" "),
       });
-      void queryClient.invalidateQueries({ queryKey });
-      void queryClient.invalidateQueries({ queryKey: ["rh-dashboard"] });
-      void queryClient.invalidateQueries({ queryKey: ["rh-global-view"] });
+      invalidateLeaveRequestViews();
       void queryClient.invalidateQueries({ queryKey: ["rh-settings"] });
       void queryClient.invalidateQueries({ queryKey: ["employee-history"] });
-      void queryClient.invalidateQueries({ queryKey: ["employee-balances"] });
-      void queryClient.invalidateQueries({ queryKey: ["employee-dashboard"] });
     },
     onError: (error) => {
       toast.error("Import historique impossible", {
         description: error instanceof Error ? error.message : "Erreur inconnue",
       });
+    },
+  });
+
+  const updateProcessedMutation = useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: ProcessedEditDraft }) => {
+      if (!session) throw new Error("Session RH introuvable");
+      return apiFetch(`/rh/global-view/requests/${id}/processed`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          rhId: session.id,
+          rhEmail: session.email,
+          startDate: payload.startDate,
+          endDate: payload.endDate,
+          days: payload.days,
+          reason: payload.reason,
+          comment: payload.comment,
+        }),
+      });
+    },
+    onSuccess: () => {
+      toast.success("Demande traitÃ©e mise Ã  jour");
+      setProcessedEdit(null);
+      invalidateLeaveRequestViews();
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Modification impossible");
+    },
+  });
+
+  const cancelProcessedMutation = useMutation({
+    mutationFn: (row: PlanificationRow) => {
+      if (!session) throw new Error("Session RH introuvable");
+      return apiFetch(`/rh/global-view/requests/${row.id}/cancel`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          rhId: session.id,
+          rhEmail: session.email,
+          comment: "Annulation depuis l'historique RH",
+        }),
+      });
+    },
+    onSuccess: () => {
+      toast.success("Demande annulÃ©e et soldes resynchronisÃ©s");
+      invalidateLeaveRequestViews();
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Annulation impossible");
+    },
+  });
+
+  const deleteProcessedMutation = useMutation({
+    mutationFn: (row: PlanificationRow) => {
+      if (!session) throw new Error("Session RH introuvable");
+      return apiFetch(`/rh/global-view/requests/${row.id}`, {
+        method: "DELETE",
+        body: JSON.stringify({
+          rhId: session.id,
+          rhEmail: session.email,
+          comment: "Suppression depuis l'historique RH",
+        }),
+      });
+    },
+    onSuccess: () => {
+      toast.success("Demande supprimÃ©e et soldes resynchronisÃ©s");
+      invalidateLeaveRequestViews();
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Suppression impossible");
     },
   });
 
@@ -504,6 +607,18 @@ export function RhDemandesConges() {
     if (processedFilter === "ALL") return true;
     return row.statusCode === processedFilter;
   });
+  const processedTotalPages = Math.max(1, Math.ceil(processedRows.length / PROCESSED_PAGE_SIZE));
+  const processedCurrentPage = Math.min(processedPage, processedTotalPages);
+  const processedFirstRow =
+    processedRows.length === 0 ? 0 : (processedCurrentPage - 1) * PROCESSED_PAGE_SIZE + 1;
+  const processedLastRow = Math.min(
+    processedCurrentPage * PROCESSED_PAGE_SIZE,
+    processedRows.length,
+  );
+  const paginatedProcessedRows = processedRows.slice(
+    (processedCurrentPage - 1) * PROCESSED_PAGE_SIZE,
+    processedCurrentPage * PROCESSED_PAGE_SIZE,
+  );
   const historyPreviewTotalDays = historyPreviewRows.reduce((sum, row) => sum + row.days, 0);
   const historyPreviewTakenRows = historyPreviewRows.filter((row) => row.category === "pris");
   const historyPreviewPlannedRows = historyPreviewRows.filter(
@@ -545,20 +660,40 @@ export function RhDemandesConges() {
     setLastHistoryImport(null);
   };
 
+  const openProcessedEdit = (row: PlanificationRow) => {
+    setProcessedEdit(row);
+    setProcessedEditDraft({
+      startDate: row.startDateIso ?? "",
+      endDate: row.endDateIso ?? "",
+      days: row.days,
+      reason: row.reason ?? "",
+      comment: "",
+    });
+  };
+
   return (
     <AppShell
       title="Demande et Planification"
       subtitle="Suivi RH des demandes en attente N+1, validations RH et historique traité"
     >
       <div className="mb-3">
-        <DateRangeFilter value={dateRange} onChange={setDateRange} />
+        <DateRangeFilter
+          value={dateRange}
+          onChange={(nextRange) => {
+            setDateRange(nextRange);
+            setProcessedPage(1);
+          }}
+        />
       </div>
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-4">
         <select
           className="rounded-md border px-3 py-2 text-sm bg-background"
           value={department}
-          onChange={(event) => setDepartment(event.target.value)}
+          onChange={(event) => {
+            setDepartment(event.target.value);
+            setProcessedPage(1);
+          }}
         >
           <option value="ALL">Tous départements</option>
           {(data?.departments ?? []).map((option) => (
@@ -570,7 +705,10 @@ export function RhDemandesConges() {
         <select
           className="rounded-md border px-3 py-2 text-sm bg-background"
           value={typeFilter}
-          onChange={(event) => setTypeFilter(event.target.value)}
+          onChange={(event) => {
+            setTypeFilter(event.target.value);
+            setProcessedPage(1);
+          }}
         >
           <option value="ALL">Tous types</option>
           {typeOptions.map((type) => (
@@ -582,7 +720,10 @@ export function RhDemandesConges() {
         <select
           className="rounded-md border px-3 py-2 text-sm bg-background"
           value={processedFilter}
-          onChange={(event) => setProcessedFilter(event.target.value as ProcessedFilter)}
+          onChange={(event) => {
+            setProcessedFilter(event.target.value as ProcessedFilter);
+            setProcessedPage(1);
+          }}
         >
           <option value="ALL">Historique: tous statuts</option>
           <option value="APPROVED">Historique: approuvées</option>
@@ -593,7 +734,10 @@ export function RhDemandesConges() {
           <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
           <input
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setProcessedPage(1);
+            }}
             placeholder="Rechercher référence, employé..."
             className="w-full rounded-md border bg-background py-2 pl-8 pr-3 text-sm"
           />
@@ -965,7 +1109,7 @@ export function RhDemandesConges() {
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {processedRows.map((row) => (
+                  {paginatedProcessedRows.map((row) => (
                     <tr key={row.id} className="hover:bg-muted/30">
                       <td className="px-5 py-3 font-medium">{row.reference}</td>
                       <td className="px-5 py-3">{row.employee}</td>
@@ -979,13 +1123,56 @@ export function RhDemandesConges() {
                         <Badge tone={row.status}>{row.label}</Badge>
                       </td>
                       <td className="px-5 py-3">
-                        <div className="flex justify-end gap-2">
-                          <Button variant="ghost" size="sm" asChild>
-                            <Link to="/rh/global">Ouvrir</Link>
-                          </Button>
-                          <Button variant="outline" size="sm" onClick={() => exportRowCsv(row)}>
-                            <Download className="size-4" /> Exporter
-                          </Button>
+                        <div className="flex justify-end">
+                          <RowActions
+                            label={`la demande ${row.reference}`}
+                            actions={[
+                              {
+                                label: "Lire",
+                                icon: Eye,
+                                onSelect: () => setProcessedDetail(row),
+                              },
+                              {
+                                label: "Modifier",
+                                icon: Pencil,
+                                disabled: updateProcessedMutation.isPending,
+                                onSelect: () => openProcessedEdit(row),
+                              },
+                              {
+                                label: "Exporter",
+                                icon: Download,
+                                onSelect: () => exportRowCsv(row),
+                              },
+                              {
+                                label: "Annuler",
+                                icon: Ban,
+                                destructive: true,
+                                disabled:
+                                  row.statusCode === "CANCELLED" ||
+                                  cancelProcessedMutation.isPending,
+                                onSelect: () => {
+                                  if (window.confirm(`Annuler ${row.reference} ?`)) {
+                                    cancelProcessedMutation.mutate(row);
+                                  }
+                                },
+                              },
+                              {
+                                label: "Supprimer",
+                                icon: Trash2,
+                                destructive: true,
+                                disabled: deleteProcessedMutation.isPending,
+                                onSelect: () => {
+                                  if (
+                                    window.confirm(
+                                      `Supprimer definitivement ${row.reference} ? Cette action retire la demande et resynchronise le solde.`,
+                                    )
+                                  ) {
+                                    deleteProcessedMutation.mutate(row);
+                                  }
+                                },
+                              },
+                            ]}
+                          />
                         </div>
                       </td>
                     </tr>
@@ -1000,9 +1187,199 @@ export function RhDemandesConges() {
                 </tbody>
               </table>
             </div>
+            {processedRows.length > PROCESSED_PAGE_SIZE && (
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t px-5 py-3 text-sm text-muted-foreground">
+                <span>
+                  {processedFirstRow}-{processedLastRow} sur {processedRows.length} demande(s)
+                </span>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={processedCurrentPage <= 1}
+                    onClick={() => setProcessedPage((current) => Math.max(1, current - 1))}
+                  >
+                    PrÃ©cÃ©dent
+                  </Button>
+                  <span>
+                    Page {processedCurrentPage}/{processedTotalPages}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={processedCurrentPage >= processedTotalPages}
+                    onClick={() =>
+                      setProcessedPage((current) => Math.min(processedTotalPages, current + 1))
+                    }
+                  >
+                    Suivant
+                  </Button>
+                </div>
+              </div>
+            )}
           </Card>
         </TabsContent>
       </Tabs>
+
+      <Dialog open={!!processedDetail} onOpenChange={(open) => !open && setProcessedDetail(null)}>
+        <DialogContent className="sm:max-w-[560px]">
+          <DialogHeader>
+            <DialogTitle>DÃ©tail de la demande</DialogTitle>
+            <DialogDescription>
+              Lecture rapide de la demande traitÃ©e et de son statut final.
+            </DialogDescription>
+          </DialogHeader>
+          {processedDetail && (
+            <dl className="grid grid-cols-2 gap-3 text-sm">
+              <Info label="RÃ©fÃ©rence" value={processedDetail.reference} />
+              <Info label="EmployÃ©" value={processedDetail.employee} />
+              <Info label="DÃ©partement" value={processedDetail.departmentName} />
+              <Info label="Type" value={processedDetail.type} />
+              <Info label="DÃ©but" value={processedDetail.startDate} />
+              <Info label="Fin" value={processedDetail.endDate} />
+              <Info label="Jours" value={formatNumber(processedDetail.days)} />
+              <Info label="Statut" value={processedDetail.label} />
+              <Info
+                label="Commentaire"
+                value={processedDetail.reason || "â€”"}
+                className="col-span-2"
+              />
+            </dl>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setProcessedDetail(null)}>
+              Fermer
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!processedEdit} onOpenChange={(open) => !open && setProcessedEdit(null)}>
+        <DialogContent className="sm:max-w-[560px]">
+          <DialogHeader>
+            <DialogTitle>Modifier une demande traitÃ©e</DialogTitle>
+            <DialogDescription>
+              Les dates et les jours seront resynchronisÃ©s dans le solde de l'employÃ©.
+            </DialogDescription>
+          </DialogHeader>
+          {processedEdit && (
+            <form
+              className="grid gap-3"
+              onSubmit={(event) => {
+                event.preventDefault();
+                updateProcessedMutation.mutate({
+                  id: processedEdit.id,
+                  payload: processedEditDraft,
+                });
+              }}
+            >
+              <div className="text-xs text-muted-foreground">
+                Demande {processedEdit.reference} Â· {processedEdit.employee}
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="grid gap-1.5 text-sm">
+                  <span className="text-xs font-medium text-muted-foreground">Date dÃ©but</span>
+                  <input
+                    type="date"
+                    className="rounded-md border bg-background px-3 py-2 text-sm"
+                    value={processedEditDraft.startDate}
+                    onChange={(event) =>
+                      setProcessedEditDraft((draft) => ({
+                        ...draft,
+                        startDate: event.target.value,
+                      }))
+                    }
+                    required
+                  />
+                </label>
+                <label className="grid gap-1.5 text-sm">
+                  <span className="text-xs font-medium text-muted-foreground">Date fin</span>
+                  <input
+                    type="date"
+                    className="rounded-md border bg-background px-3 py-2 text-sm"
+                    value={processedEditDraft.endDate}
+                    onChange={(event) =>
+                      setProcessedEditDraft((draft) => ({
+                        ...draft,
+                        endDate: event.target.value,
+                      }))
+                    }
+                    required
+                  />
+                </label>
+                <label className="grid gap-1.5 text-sm">
+                  <span className="text-xs font-medium text-muted-foreground">Jours</span>
+                  <input
+                    type="number"
+                    min="0.5"
+                    step="0.5"
+                    className="rounded-md border bg-background px-3 py-2 text-sm"
+                    value={processedEditDraft.days}
+                    onChange={(event) =>
+                      setProcessedEditDraft((draft) => ({
+                        ...draft,
+                        days: Number(event.target.value),
+                      }))
+                    }
+                    required
+                  />
+                </label>
+                <label className="grid gap-1.5 text-sm">
+                  <span className="text-xs font-medium text-muted-foreground">Motif RH</span>
+                  <input
+                    className="rounded-md border bg-background px-3 py-2 text-sm"
+                    placeholder="Ex: correction dates"
+                    value={processedEditDraft.comment}
+                    onChange={(event) =>
+                      setProcessedEditDraft((draft) => ({
+                        ...draft,
+                        comment: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <label className="col-span-2 grid gap-1.5 text-sm">
+                  <span className="text-xs font-medium text-muted-foreground">
+                    Commentaire de la demande
+                  </span>
+                  <textarea
+                    rows={3}
+                    className="rounded-md border bg-background px-3 py-2 text-sm"
+                    value={processedEditDraft.reason}
+                    onChange={(event) =>
+                      setProcessedEditDraft((draft) => ({
+                        ...draft,
+                        reason: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+              </div>
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setProcessedEdit(null)}
+                  disabled={updateProcessedMutation.isPending}
+                >
+                  Annuler
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={
+                    updateProcessedMutation.isPending ||
+                    !processedEditDraft.startDate ||
+                    !processedEditDraft.endDate ||
+                    processedEditDraft.days <= 0
+                  }
+                >
+                  {updateProcessedMutation.isPending ? "Enregistrement..." : "Enregistrer"}
+                </Button>
+              </DialogFooter>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!remarkDialog} onOpenChange={(open) => !open && setRemarkDialog(null)}>
         <DialogContent>
@@ -1047,5 +1424,22 @@ export function RhDemandesConges() {
         </DialogContent>
       </Dialog>
     </AppShell>
+  );
+}
+
+function Info({
+  label,
+  value,
+  className = "",
+}: {
+  label: string;
+  value: string;
+  className?: string;
+}) {
+  return (
+    <div className={className}>
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="font-medium break-words">{value}</div>
+    </div>
   );
 }

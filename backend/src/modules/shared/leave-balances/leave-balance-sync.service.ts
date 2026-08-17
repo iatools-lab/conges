@@ -1,5 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import { EventType, LeaveRequestStatus, Prisma } from '@prisma/client';
+import {
+  EventType,
+  LeaveRequestStatus,
+  Prisma,
+  ValidationDecision,
+} from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { LeaveEntitlementsService } from '../leave-entitlements/leave-entitlements.service';
 import { LeaveBalanceInitializerService } from './leave-balance-initializer.service';
@@ -110,6 +115,7 @@ export class LeaveBalanceSyncService {
 
   async syncYear(year: number, client: PrismaClientLike = this.prisma) {
     const range = getLeaveYearRange(year);
+    await this.repairWorkflowStatuses({ range }, client);
     const requests = await client.leaveRequest.findMany({
       where: {
         startDate: { lt: range.endExclusive },
@@ -143,6 +149,7 @@ export class LeaveBalanceSyncService {
     client: PrismaClientLike = this.prisma,
   ) {
     const range = getLeaveYearRange(year);
+    await this.repairWorkflowStatuses({ range, userId }, client);
     const requests = await client.leaveRequest.findMany({
       where: {
         ownerId: userId,
@@ -169,6 +176,117 @@ export class LeaveBalanceSyncService {
       ),
       client,
     );
+  }
+
+  private async repairWorkflowStatuses(
+    params: {
+      range: { start: Date; endExclusive: Date };
+      userId?: string;
+    },
+    client: PrismaClientLike,
+  ) {
+    const requests = await client.leaveRequest.findMany({
+      where: {
+        ...(params.userId ? { ownerId: params.userId } : {}),
+        status: {
+          in: [
+            LeaveRequestStatus.DRAFT,
+            LeaveRequestStatus.PENDING,
+            LeaveRequestStatus.IN_REVIEW,
+          ],
+        },
+        startDate: { lt: params.range.endExclusive },
+        endDate: { gte: params.range.start },
+      },
+      select: {
+        id: true,
+        status: true,
+        submittedAt: true,
+        validations: {
+          orderBy: [{ decidedAt: 'desc' }],
+          take: 8,
+          select: {
+            level: true,
+            decision: true,
+            decidedAt: true,
+          },
+        },
+      },
+    });
+
+    await Promise.all(
+      requests.flatMap((request) => {
+        const repair = this.deriveWorkflowStatusRepair(request);
+        if (!repair || repair.status === request.status) return [];
+
+        return [
+          client.leaveRequest.update({
+            where: { id: request.id },
+            data: {
+              status: repair.status,
+              decidedAt: repair.decidedAt,
+              cancelledAt: null,
+            },
+          }),
+        ];
+      }),
+    );
+  }
+
+  private deriveWorkflowStatusRepair(request: {
+    status: LeaveRequestStatus;
+    submittedAt: Date | null;
+    validations: Array<{
+      level: number;
+      decision: ValidationDecision;
+      decidedAt: Date;
+    }>;
+  }) {
+    const latestValidation = request.validations[0];
+    if (latestValidation?.decision === ValidationDecision.REVIEW_REQUESTED) {
+      return { status: LeaveRequestStatus.DRAFT, decidedAt: null };
+    }
+
+    const latestRhFinalDecision = request.validations.find(
+      (validation) =>
+        validation.level === 3 &&
+        (validation.decision === ValidationDecision.APPROVED ||
+          validation.decision === ValidationDecision.REJECTED),
+    );
+    if (latestRhFinalDecision) {
+      return {
+        status:
+          latestRhFinalDecision.decision === ValidationDecision.APPROVED
+            ? LeaveRequestStatus.APPROVED
+            : LeaveRequestStatus.REJECTED,
+        decidedAt: latestRhFinalDecision.decidedAt,
+      };
+    }
+
+    const latestManagerDecision = request.validations.find(
+      (validation) =>
+        validation.level === 1 &&
+        (validation.decision === ValidationDecision.APPROVED ||
+          validation.decision === ValidationDecision.REJECTED),
+    );
+    if (latestManagerDecision?.decision === ValidationDecision.REJECTED) {
+      return {
+        status: LeaveRequestStatus.REJECTED,
+        decidedAt: latestManagerDecision.decidedAt,
+      };
+    }
+    if (latestManagerDecision?.decision === ValidationDecision.APPROVED) {
+      return { status: LeaveRequestStatus.IN_REVIEW, decidedAt: null };
+    }
+
+    if (
+      request.status === LeaveRequestStatus.DRAFT &&
+      request.submittedAt !== null
+    ) {
+      return { status: LeaveRequestStatus.PENDING, decidedAt: null };
+    }
+
+    return null;
   }
 
   private async syncForKey(key: BalanceKey, client: PrismaClientLike) {

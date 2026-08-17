@@ -10,6 +10,7 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { LeaveEntitlementsService } from '../../shared/leave-entitlements/leave-entitlements.service';
 import { LeaveBalanceSyncService } from '../../shared/leave-balances/leave-balance-sync.service';
 import { overlapDateWhere, resolveDateRange } from '../../../common/date-range';
+import { isPaidLeavePool } from '../../shared/leave-balances/leave-balance-pools';
 
 type BadgeTone =
   | 'valid'
@@ -18,8 +19,6 @@ type BadgeTone =
   | 'draft'
   | 'info'
   | 'neutral';
-
-const PAID_POOL_CODES = new Set(['CP', 'ANC', 'ENF', 'PASSIF']);
 
 const dashboardUserSelect = {
   id: true,
@@ -312,9 +311,10 @@ export class EmployeeDashboardService {
     return `${user.prenom} ${user.nom}`.trim();
   }
 
-  private isPaidPoolBalance(leaveType: { code: string }) {
-    return PAID_POOL_CODES.has(
-      this.leaveEntitlements.normalizeCode(leaveType.code),
-    );
+  private isPaidPoolBalance(leaveType: {
+    code: string;
+    category: LeaveCategory;
+  }) {
+    return isPaidLeavePool({ leaveType });
   }
 }

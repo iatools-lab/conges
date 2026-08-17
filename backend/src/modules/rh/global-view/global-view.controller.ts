@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -22,6 +23,10 @@ import {
   UpdateRhTakenDaysDto,
   UpdateRhTotalDaysDto,
 } from './dto/rh-balance-adjustment.dto';
+import {
+  CancelRhProcessedRequestDto,
+  UpdateRhProcessedRequestDto,
+} from './dto/rh-request-maintenance.dto';
 
 @Controller('rh/global-view')
 export class RhGlobalViewController {
@@ -97,6 +102,42 @@ export class RhGlobalViewController {
     @Req() req: AuthenticatedRequest,
   ) {
     return this.globalViewService.updatePlannedDays(
+      id,
+      withAuthenticatedRh(dto, requireAuthSession(req)),
+    );
+  }
+
+  @Patch('requests/:id/processed')
+  updateProcessedRequest(
+    @Param('id') id: string,
+    @Body() dto: UpdateRhProcessedRequestDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.globalViewService.updateProcessedRequest(
+      id,
+      withAuthenticatedRh(dto, requireAuthSession(req)),
+    );
+  }
+
+  @Patch('requests/:id/cancel')
+  cancelProcessedRequest(
+    @Param('id') id: string,
+    @Body() dto: CancelRhProcessedRequestDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.globalViewService.cancelProcessedRequest(
+      id,
+      withAuthenticatedRh(dto, requireAuthSession(req)),
+    );
+  }
+
+  @Delete('requests/:id')
+  deleteProcessedRequest(
+    @Param('id') id: string,
+    @Body() dto: CancelRhProcessedRequestDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.globalViewService.deleteProcessedRequest(
       id,
       withAuthenticatedRh(dto, requireAuthSession(req)),
     );

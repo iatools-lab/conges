@@ -54,6 +54,14 @@ function createHarness() {
 }
 
 describe('LeaveBalanceSyncService', () => {
+  beforeEach(() => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-07-01T00:00:00.000Z'));
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   it('counts past approvals as taken and future or pending requests as scheduled', async () => {
     const { prisma, service } = createHarness();
     prisma.leaveRequest.findUnique.mockResolvedValue({

@@ -9,14 +9,16 @@ import { LeaveEntitlementsService } from '../../shared/leave-entitlements/leave-
 import { LeaveBalanceSyncService } from '../../shared/leave-balances/leave-balance-sync.service';
 import { LeaveBalanceInitializerService } from '../../shared/leave-balances/leave-balance-initializer.service';
 import { getCurrentLeaveYear } from '../../../common/leave-year';
+import {
+  isPaidLeavePool,
+  isSpecialLeavePool,
+  SPECIAL_LEAVE_POOL_CAP_DAYS,
+} from '../../shared/leave-balances/leave-balance-pools';
 
 const POOL_PAYE_CODE = 'PAYE';
 const POOL_SPECIAL_CODE = 'SPECIAL';
 const MATERNITY_CODE = 'MAT';
-const SPECIAL_POOL_CAP_DAYS = 12;
-const PAID_SOURCE_CODES = new Set(['CP', 'ANC', 'ENF', 'PASSIF']);
 const PAID_CONSUMPTION_ORDER = ['ANC', 'CP', 'ENF', 'PASSIF'] as const;
-const EXCLUDED_SPECIAL_CODES = new Set(['PASSIF', 'MAT', 'SS']);
 
 type BalanceDisplayRow = {
   id: string;
@@ -120,11 +122,11 @@ export class EmployeeBalancesService {
     const paidTotals = this.sumRowsRaw(rawPaidDetails);
     const rawSpecialTotals = this.sumRows(specialDetails);
     const specialTotals = {
-      acquired: specialDetails.length ? SPECIAL_POOL_CAP_DAYS : 0,
+      acquired: specialDetails.length ? SPECIAL_LEAVE_POOL_CAP_DAYS : 0,
       taken: rawSpecialTotals.taken,
       scheduled: rawSpecialTotals.scheduled,
       remaining: this.roundDays(
-        (specialDetails.length ? SPECIAL_POOL_CAP_DAYS : 0) -
+        (specialDetails.length ? SPECIAL_LEAVE_POOL_CAP_DAYS : 0) -
           rawSpecialTotals.taken -
           rawSpecialTotals.scheduled,
       ),
@@ -258,21 +260,16 @@ export class EmployeeBalancesService {
     return index === -1 ? Number.MAX_SAFE_INTEGER : index;
   }
 
-  private isPaidPoolRow(row: { code: string }) {
-    return PAID_SOURCE_CODES.has(row.code.trim().toUpperCase());
+  private isPaidPoolRow(row: { code: string; category: LeaveCategory }) {
+    return isPaidLeavePool({
+      leaveType: { code: row.code, category: row.category },
+    });
   }
 
   private isSpecialPoolRow(row: { code: string; category: LeaveCategory }) {
-    const normalizedCode = row.code.trim().toUpperCase();
-    if (this.isPaidPoolRow(row)) return false;
-    if (EXCLUDED_SPECIAL_CODES.has(normalizedCode)) return false;
-
-    return (
-      row.category === LeaveCategory.CONGE_SPECIAL ||
-      row.category === LeaveCategory.CONGE_PATERNITE ||
-      row.category === LeaveCategory.CONGE_MALADIE ||
-      normalizedCode === 'SPE'
-    );
+    return isSpecialLeavePool({
+      leaveType: { code: row.code, category: row.category },
+    });
   }
 
   private isMaternityRow(row: { code: string; category: LeaveCategory }) {

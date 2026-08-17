@@ -1293,11 +1293,14 @@ export class EmployeeLeaveRequestsService {
     const normalizedCode = leaveType.code.trim().toUpperCase();
 
     if (poolCode === PAID_POOL_CODE) {
-      return PAID_SOURCE_CODES.has(normalizedCode);
+      return (
+        PAID_SOURCE_CODES.has(normalizedCode) ||
+        leaveType.category === LeaveCategory.CONGE_PAYE
+      );
     }
 
     return (
-      !PAID_SOURCE_CODES.has(normalizedCode) &&
+      !this.isTypeInPool(leaveType, PAID_POOL_CODE) &&
       !EXCLUDED_SPECIAL_CODES.has(normalizedCode) &&
       (leaveType.category === LeaveCategory.CONGE_SPECIAL ||
         leaveType.category === LeaveCategory.CONGE_PATERNITE ||

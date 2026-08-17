@@ -29,6 +29,10 @@ import {
   UpdateRhTakenDaysDto,
   UpdateRhTotalDaysDto,
 } from './dto/rh-balance-adjustment.dto';
+import {
+  CancelRhProcessedRequestDto,
+  UpdateRhProcessedRequestDto,
+} from './dto/rh-request-maintenance.dto';
 import { EmailService } from '../../shared/notifications/email.service';
 import { LeaveBalanceSyncService } from '../../shared/leave-balances/leave-balance-sync.service';
 import { LeaveBalanceInitializerService } from '../../shared/leave-balances/leave-balance-initializer.service';
@@ -37,7 +41,11 @@ import {
   getCurrentLeaveYear,
   getLeaveYearsForPeriod,
 } from '../../../common/leave-year';
-import { endDateForWorkingDays } from '../../../common/working-days';
+import {
+  countWorkingDays,
+  endDateForWorkingDays,
+} from '../../../common/working-days';
+import { summarizePaidLeavePool } from '../../shared/leave-balances/leave-balance-pools';
 type BadgeTone =
   | 'valid'
   | 'pending'
@@ -57,6 +65,11 @@ const TRACKED_REQUEST_STATUSES = [
   LeaveRequestStatus.REJECTED,
   LeaveRequestStatus.CANCELLED,
 ];
+const PROCESSED_REQUEST_STATUSES = [
+  LeaveRequestStatus.APPROVED,
+  LeaveRequestStatus.REJECTED,
+  LeaveRequestStatus.CANCELLED,
+] as const;
 const PAID_BALANCE_CODES = ['CP', 'ANC', 'ENF', 'PASSIF'] as const;
 const MATERNITY_CODE = 'MAT';
 
@@ -105,7 +118,12 @@ export class RhGlobalViewService {
         where: {
           userId,
           year: dto.year,
-          leaveType: { code: { in: [...PAID_BALANCE_CODES] } },
+          leaveType: {
+            OR: [
+              { category: LeaveCategory.CONGE_PAYE },
+              { code: { in: [...PAID_BALANCE_CODES] } },
+            ],
+          },
         },
         orderBy: { leaveType: { code: 'asc' } },
         select: {
@@ -242,7 +260,12 @@ export class RhGlobalViewService {
         where: {
           userId,
           year: dto.year,
-          leaveType: { code: { in: [...PAID_BALANCE_CODES] } },
+          leaveType: {
+            OR: [
+              { category: LeaveCategory.CONGE_PAYE },
+              { code: { in: [...PAID_BALANCE_CODES] } },
+            ],
+          },
         },
         orderBy: { leaveType: { code: 'asc' } },
         select: {
@@ -339,6 +362,7 @@ export class RhGlobalViewService {
           startDate: true,
           endDate: true,
           days: true,
+          reason: true,
           status: true,
           submittedAt: true,
           leaveType: { select: { code: true, name: true, category: true } },
@@ -439,6 +463,362 @@ export class RhGlobalViewService {
         startDate: this.toInputDate(updated.startDate),
         previousEndDate: this.toInputDate(previousEndDate),
         endDate: this.toInputDate(updated.endDate),
+      };
+    });
+  }
+
+  async updateProcessedRequest(
+    requestId: string,
+    dto: UpdateRhProcessedRequestDto,
+  ) {
+    const rhUser = await this.resolveRh(dto.rhId, dto.rhEmail);
+
+    return this.prisma.$transaction(async (transaction) => {
+      const request = await transaction.leaveRequest.findUnique({
+        where: { id: requestId },
+        select: {
+          id: true,
+          reference: true,
+          ownerId: true,
+          leaveTypeId: true,
+          startDate: true,
+          endDate: true,
+          days: true,
+          reason: true,
+          status: true,
+          owner: {
+            select: {
+              matricule: true,
+              nom: true,
+              prenom: true,
+            },
+          },
+          leaveType: { select: { code: true, name: true, category: true } },
+        },
+      });
+      if (!request) throw new NotFoundException('Demande introuvable');
+      this.assertProcessedRequest(request.status);
+
+      const hasChange =
+        dto.startDate !== undefined ||
+        dto.endDate !== undefined ||
+        dto.days !== undefined ||
+        dto.reason !== undefined;
+      if (!hasChange) {
+        throw new BadRequestException(
+          'Aucune modification exploitable fournie.',
+        );
+      }
+
+      const previousSnapshot = {
+        userId: request.ownerId,
+        leaveTypeId: request.leaveTypeId,
+        startDate: request.startDate,
+        endDate: request.endDate,
+      };
+      const startDate = dto.startDate
+        ? this.parseInputDate(dto.startDate)
+        : request.startDate;
+      let endDate = dto.endDate
+        ? this.parseInputDate(dto.endDate)
+        : request.endDate;
+      let days =
+        dto.days !== undefined ? this.roundDays(dto.days) : request.days;
+
+      if (dto.days !== undefined && !dto.endDate) {
+        const searchEnd = new Date(startDate);
+        searchEnd.setUTCDate(searchEnd.getUTCDate() + days * 2 + 30);
+        const holidays = await this.findPublicHolidays(
+          startDate,
+          searchEnd,
+          transaction,
+        );
+        endDate = endDateForWorkingDays(startDate, days, holidays);
+      } else if (dto.days === undefined && (dto.startDate || dto.endDate)) {
+        days = await this.countBusinessDays(startDate, endDate, transaction);
+      }
+
+      if (startDate > endDate) {
+        throw new BadRequestException(
+          'La date de dÃ©but doit Ãªtre antÃ©rieure ou Ã©gale Ã  la date de fin.',
+        );
+      }
+
+      const updated = await transaction.leaveRequest.update({
+        where: { id: request.id },
+        data: {
+          startDate,
+          endDate,
+          days,
+          ...(dto.reason !== undefined
+            ? { reason: dto.reason.trim() || null }
+            : {}),
+        },
+        select: {
+          id: true,
+          reference: true,
+          ownerId: true,
+          leaveTypeId: true,
+          startDate: true,
+          endDate: true,
+          days: true,
+          reason: true,
+          status: true,
+        },
+      });
+
+      await this.initializeAffectedLeaveYears(
+        previousSnapshot.userId,
+        previousSnapshot.startDate,
+        previousSnapshot.endDate,
+        transaction,
+      );
+      await this.initializeAffectedLeaveYears(
+        updated.ownerId,
+        updated.startDate,
+        updated.endDate,
+        transaction,
+      );
+      await this.leaveBalanceSync.syncForRequestSnapshot(
+        previousSnapshot,
+        transaction,
+      );
+      await this.leaveBalanceSync.syncForRequest(updated.id, transaction);
+
+      await transaction.auditLog.create({
+        data: {
+          userId: rhUser.id,
+          action: AuditAction.UPDATE,
+          entity: 'LeaveRequest',
+          entityId: updated.id,
+          metadata: {
+            source: 'rh_processed_request_update',
+            reference: updated.reference,
+            employeeId: request.ownerId,
+            employeeMatricule: request.owner.matricule,
+            employeeName: this.fullName(request.owner),
+            leaveType: request.leaveType.code,
+            status: request.status,
+            previousStartDate: this.toInputDate(request.startDate),
+            newStartDate: this.toInputDate(updated.startDate),
+            previousEndDate: this.toInputDate(request.endDate),
+            newEndDate: this.toInputDate(updated.endDate),
+            previousDays: this.roundDays(request.days),
+            newDays: this.roundDays(updated.days),
+            previousReason: request.reason,
+            newReason: updated.reason,
+            comment: dto.comment?.trim() || null,
+          },
+        },
+      });
+
+      return {
+        id: updated.id,
+        reference: updated.reference,
+        status: updated.status,
+        startDate: this.toInputDate(updated.startDate),
+        endDate: this.toInputDate(updated.endDate),
+        days: this.roundDays(updated.days),
+      };
+    });
+  }
+
+  async cancelProcessedRequest(
+    requestId: string,
+    dto: CancelRhProcessedRequestDto,
+  ) {
+    const rhUser = await this.resolveRh(dto.rhId, dto.rhEmail);
+    const comment = dto.comment?.trim() || null;
+
+    return this.prisma.$transaction(async (transaction) => {
+      const request = await transaction.leaveRequest.findUnique({
+        where: { id: requestId },
+        select: {
+          id: true,
+          reference: true,
+          ownerId: true,
+          leaveTypeId: true,
+          startDate: true,
+          endDate: true,
+          status: true,
+          owner: {
+            select: {
+              id: true,
+              matricule: true,
+              nom: true,
+              prenom: true,
+              n1Id: true,
+            },
+          },
+        },
+      });
+      if (!request) throw new NotFoundException('Demande introuvable');
+      this.assertProcessedRequest(request.status);
+      if (request.status === LeaveRequestStatus.CANCELLED) {
+        return {
+          id: request.id,
+          reference: request.reference,
+          status: LeaveRequestStatus.CANCELLED,
+          applied: false,
+        };
+      }
+
+      const now = new Date();
+      const updated = await transaction.leaveRequest.update({
+        where: { id: request.id },
+        data: {
+          status: LeaveRequestStatus.CANCELLED,
+          cancelledAt: now,
+          decidedAt: now,
+        },
+        select: {
+          id: true,
+          reference: true,
+          ownerId: true,
+          leaveTypeId: true,
+          startDate: true,
+          endDate: true,
+          status: true,
+        },
+      });
+
+      await this.initializeAffectedLeaveYears(
+        request.ownerId,
+        request.startDate,
+        request.endDate,
+        transaction,
+      );
+      await this.leaveBalanceSync.syncForRequestSnapshot(
+        {
+          userId: request.ownerId,
+          leaveTypeId: request.leaveTypeId,
+          startDate: request.startDate,
+          endDate: request.endDate,
+        },
+        transaction,
+      );
+
+      const recipients = Array.from(
+        new Set([request.ownerId, request.owner.n1Id].filter(Boolean)),
+      ) as string[];
+      if (recipients.length > 0) {
+        await transaction.notification.createMany({
+          data: recipients.map((recipientId) => ({
+            userId: recipientId,
+            type: NotificationType.SYSTEM,
+            title: 'Demande annulÃ©e par RH',
+            description: `${request.reference} â€” ${this.fullName(request.owner)}`,
+            link:
+              recipientId === request.ownerId
+                ? '/demandes'
+                : '/manager/demandes',
+          })),
+        });
+      }
+
+      await transaction.auditLog.create({
+        data: {
+          userId: rhUser.id,
+          action: AuditAction.UPDATE,
+          entity: 'LeaveRequest',
+          entityId: request.id,
+          metadata: {
+            source: 'rh_processed_request_cancel',
+            reference: request.reference,
+            previousStatus: request.status,
+            newStatus: updated.status,
+            employeeId: request.ownerId,
+            employeeMatricule: request.owner.matricule,
+            employeeName: this.fullName(request.owner),
+            comment,
+          },
+        },
+      });
+
+      return {
+        id: updated.id,
+        reference: updated.reference,
+        status: updated.status,
+        applied: true,
+      };
+    });
+  }
+
+  async deleteProcessedRequest(
+    requestId: string,
+    dto: CancelRhProcessedRequestDto,
+  ) {
+    const rhUser = await this.resolveRh(dto.rhId, dto.rhEmail);
+    const comment = dto.comment?.trim() || null;
+
+    return this.prisma.$transaction(async (transaction) => {
+      const request = await transaction.leaveRequest.findUnique({
+        where: { id: requestId },
+        select: {
+          id: true,
+          reference: true,
+          ownerId: true,
+          leaveTypeId: true,
+          startDate: true,
+          endDate: true,
+          days: true,
+          status: true,
+          owner: {
+            select: {
+              matricule: true,
+              nom: true,
+              prenom: true,
+            },
+          },
+          leaveType: { select: { code: true, name: true, category: true } },
+        },
+      });
+      if (!request) throw new NotFoundException('Demande introuvable');
+      this.assertProcessedRequest(request.status);
+
+      await transaction.leaveRequest.delete({ where: { id: request.id } });
+      await this.initializeAffectedLeaveYears(
+        request.ownerId,
+        request.startDate,
+        request.endDate,
+        transaction,
+      );
+      await this.leaveBalanceSync.syncForRequestSnapshot(
+        {
+          userId: request.ownerId,
+          leaveTypeId: request.leaveTypeId,
+          startDate: request.startDate,
+          endDate: request.endDate,
+        },
+        transaction,
+      );
+
+      await transaction.auditLog.create({
+        data: {
+          userId: rhUser.id,
+          action: AuditAction.DELETE,
+          entity: 'LeaveRequest',
+          entityId: request.id,
+          metadata: {
+            source: 'rh_processed_request_delete',
+            reference: request.reference,
+            status: request.status,
+            employeeId: request.ownerId,
+            employeeMatricule: request.owner.matricule,
+            employeeName: this.fullName(request.owner),
+            leaveType: request.leaveType.code,
+            startDate: this.toInputDate(request.startDate),
+            endDate: this.toInputDate(request.endDate),
+            days: this.roundDays(request.days),
+            comment,
+          },
+        },
+      });
+
+      return {
+        id: request.id,
+        reference: request.reference,
+        deleted: true,
       };
     });
   }
@@ -1072,6 +1452,7 @@ export class RhGlobalViewService {
           startDate: true,
           endDate: true,
           days: true,
+          reason: true,
           status: true,
           submittedAt: true,
           leaveType: { select: { code: true, name: true, category: true } },
@@ -1141,28 +1522,20 @@ export class RhGlobalViewService {
       };
     }>,
   ) {
-    const cpBalances = user.balances.filter(
-      (balance) => balance.leaveType?.category === LeaveCategory.CONGE_PAYE,
+    const paidSummary = summarizePaidLeavePool(user.balances);
+    const cpBalances = user.balances.filter((balance) =>
+      this.isPaidBalanceLeaveType(balance.leaveType),
     );
-    const total = this.roundDays(
-      cpBalances.reduce(
-        (sum, balance) => sum + balance.acquired + balance.carryover,
-        0,
-      ),
-    );
-    const taken = this.roundDays(
-      cpBalances.reduce((sum, balance) => sum + balance.taken, 0),
-    );
+    const total = paidSummary.acquired;
+    const taken = paidSummary.taken;
     const takenAdjustment = this.roundDays(
       cpBalances.reduce(
         (sum, balance) => sum + (balance.takenAdjustment ?? 0),
         0,
       ),
     );
-    const planned = this.roundDays(
-      cpBalances.reduce((sum, balance) => sum + balance.scheduled, 0),
-    );
-    const remaining = this.roundDays(total - taken - planned);
+    const planned = paidSummary.scheduled;
+    const remaining = paidSummary.remaining;
     const liability = remaining;
 
     return {
@@ -1192,6 +1565,7 @@ export class RhGlobalViewService {
         startDate: true;
         endDate: true;
         days: true;
+        reason: true;
         status: true;
         submittedAt: true;
         leaveType: { select: { code: true; name: true; category: true } };
@@ -1222,6 +1596,7 @@ export class RhGlobalViewService {
       startDateIso: request.startDate.toISOString().slice(0, 10),
       endDateIso: request.endDate.toISOString().slice(0, 10),
       days: this.roundDays(request.days),
+      reason: request.reason ?? '',
       type: this.toParentLeaveTypeLabel(request.leaveType),
       leaveTypeCode: request.leaveType.code,
       leaveTypeCategory: request.leaveType.category,
@@ -1654,6 +2029,46 @@ export class RhGlobalViewService {
 
   private toInputDate(date: Date) {
     return date.toISOString().slice(0, 10);
+  }
+
+  private parseInputDate(value: string) {
+    const date = new Date(`${value}T00:00:00.000Z`);
+    if (Number.isNaN(date.getTime())) {
+      throw new BadRequestException('Date invalide.');
+    }
+
+    return date;
+  }
+
+  private assertProcessedRequest(status: LeaveRequestStatus) {
+    if (!PROCESSED_REQUEST_STATUSES.some((value) => value === status)) {
+      throw new BadRequestException(
+        "Seules les demandes deja traitees peuvent etre modifiees depuis l'historique.",
+      );
+    }
+  }
+
+  private async findPublicHolidays(
+    startDate: Date,
+    endDate: Date,
+    client: PrismaClientLike = this.prisma,
+  ) {
+    return client.publicHoliday.findMany({
+      where: {
+        country: 'CM',
+        OR: [{ date: { gte: startDate, lte: endDate } }, { recurring: true }],
+      },
+      select: { date: true, recurring: true },
+    });
+  }
+
+  private async countBusinessDays(
+    startDate: Date,
+    endDate: Date,
+    client: PrismaClientLike = this.prisma,
+  ) {
+    const holidays = await this.findPublicHolidays(startDate, endDate, client);
+    return this.roundDays(countWorkingDays(startDate, endDate, holidays));
   }
 
   private async autoRejectOverdueRequests() {
