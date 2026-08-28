@@ -167,12 +167,15 @@ const emptyTotals: SpecialLeavesResponse["totals"] = {
 };
 
 const eventOptions = [
-  "Mariage",
-  "Naissance",
-  "Décès parent",
-  "Accouchement épouse",
-  "Maladie",
-  "Autre",
+  "Mariage du travailleur",
+  "Congé paternité",
+  "Baptême d'un enfant du travailleur",
+  "Mariage d'un enfant du travailleur",
+  "Décès du conjoint du travailleur",
+  "Décès d'un enfant du travailleur",
+  "Décès du père ou de la mère du travailleur",
+  "Décès du père ou de la mère du conjoint légitime",
+  "Décès du frère ou de la sœur du travailleur",
 ];
 
 const statusOptions: { value: SpecialLeaveStatusCode; label: string }[] = [
@@ -185,7 +188,7 @@ const statusOptions: { value: SpecialLeaveStatusCode; label: string }[] = [
 
 const emptyDraft: SpecialLeavePayload = {
   employeeId: "",
-  eventLabel: "Mariage",
+  eventLabel: "Mariage du travailleur",
   startDate: "",
   reason: "",
   status: "APPROVED",

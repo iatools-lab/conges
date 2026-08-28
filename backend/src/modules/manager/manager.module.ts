@@ -4,6 +4,7 @@ import { ManagerConflictsModule } from './conflicts/conflicts.module';
 import { ManagerDashboardModule } from './dashboard/dashboard.module';
 import { ManagerHistoryModule } from './history/history.module';
 import { ManagerPlanningModule } from './planning/planning.module';
+import { ManagerPermissionsModule } from './permissions/permissions.module';
 import { ManagerRequestsModule } from './requests/requests.module';
 
 @Module({
@@ -14,6 +15,7 @@ import { ManagerRequestsModule } from './requests/requests.module';
     ManagerCalendarModule,
     ManagerPlanningModule,
     ManagerHistoryModule,
+    ManagerPermissionsModule,
   ],
 })
 export class ManagerModule {}

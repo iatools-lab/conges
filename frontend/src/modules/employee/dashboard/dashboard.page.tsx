@@ -139,6 +139,11 @@ export function EmployeeDashboard() {
     },
     {
       icon: <FileText className="size-5" />,
+      label: "Demander une permission",
+      to: "/permissions",
+    },
+    {
+      icon: <FileText className="size-5" />,
       label: "Suivre mes demandes",
       to: "/demandes",
     },

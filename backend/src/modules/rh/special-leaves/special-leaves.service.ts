@@ -22,11 +22,7 @@ import {
   ImportRhSpecialLeaveRowDto,
   UpdateRhSpecialLeaveDto,
 } from './dto/rh-special-leave.dto';
-import {
-  fieldDateWhere,
-  overlapDateWhere,
-  resolveDateRange,
-} from '../../../common/date-range';
+import { fieldDateWhere, resolveDateRange } from '../../../common/date-range';
 import {
   getCurrentLeaveYear,
   getLeaveYear,
@@ -38,6 +34,7 @@ import {
   countWorkingDays,
   endDateForWorkingDays,
 } from '../../../common/working-days';
+import { findExceptionalPermissionRule } from '../../shared/special-leaves/exceptional-permissions';
 
 type BadgeTone = 'valid' | 'pending' | 'rejected' | 'draft' | 'neutral';
 type PrismaClientLike = PrismaService | Prisma.TransactionClient;
@@ -161,67 +158,29 @@ export class RhSpecialLeavesService {
     const year = range.year;
     const eventDate = fieldDateWhere(range);
 
-    const [requests, balances, events] = await Promise.all([
-      this.prisma.leaveRequest.findMany({
-        where: {
-          ...overlapDateWhere(range),
-          reference: { startsWith: 'CS-' },
-          leaveType: { category: { in: [...EVENT_LEAVE_CATEGORIES] } },
-        },
-        orderBy: [{ startDate: 'desc' }, { reference: 'desc' }],
-        select: specialLeaveSelect,
-      }),
-      this.prisma.leaveBalance.findMany({
-        where: {
-          year,
-          leaveType: { category: { in: [...EVENT_LEAVE_CATEGORIES] } },
-        },
-        select: {
-          userId: true,
-          leaveTypeId: true,
-          acquired: true,
-          carryover: true,
-          taken: true,
-          scheduled: true,
-        },
-      }),
-      this.prisma.event.findMany({
-        where: {
-          ...(eventDate ? { eventDate } : {}),
-          user: { status: { not: UserStatus.INACTIVE } },
-          OR: [
-            { description: null },
-            {
-              description: {
-                not: { startsWith: 'Enfant RH ' },
-              },
+    const events = await this.prisma.event.findMany({
+      where: {
+        ...(eventDate ? { eventDate } : {}),
+        user: { status: { not: UserStatus.INACTIVE } },
+        OR: [
+          { description: null },
+          {
+            description: {
+              not: { startsWith: 'Enfant RH ' },
             },
-          ],
-        },
-        orderBy: [{ eventDate: 'desc' }, { createdAt: 'desc' }],
-        select: eventRowSelect,
-      }),
-    ]);
-    const balanceByUser = new Map(
-      balances.map((balance) => [
-        this.balanceMapKey(balance.userId, balance.leaveTypeId),
-        balance,
-      ]),
-    );
+          },
+        ],
+      },
+      orderBy: [{ eventDate: 'desc' }, { createdAt: 'desc' }],
+      select: eventRowSelect,
+    });
 
-    const requestRows = requests.map((request) =>
-      this.toResponse(
-        request,
-        balanceByUser.get(
-          this.balanceMapKey(request.ownerId, request.leaveType.id),
-        ),
-      ),
-    );
-    const eventRows = events.map((event) => this.toEventRow(event));
-    const rows = [...eventRows, ...requestRows].sort(
-      (a, b) =>
-        new Date(b.startDate).getTime() - new Date(a.startDate).getTime(),
-    );
+    const rows = events
+      .map((event) => this.toEventRow(event))
+      .sort(
+        (a, b) =>
+          new Date(b.startDate).getTime() - new Date(a.startDate).getTime(),
+      );
 
     return {
       year,
@@ -984,6 +943,14 @@ export class RhSpecialLeavesService {
   }
 
   private preferredLeaveTypeCodeForEvent(eventLabel: string, sexe: Sexe) {
+    const exceptionalRule = findExceptionalPermissionRule(eventLabel);
+    if (
+      exceptionalRule &&
+      (!exceptionalRule.sex || exceptionalRule.sex === sexe)
+    ) {
+      return exceptionalRule.code;
+    }
+
     const kind = this.resolveEventKind(eventLabel);
     if (kind === 'birth') return sexe === Sexe.F ? 'MAT' : 'PAT';
     if (kind === 'illness') return 'MAL';
@@ -1023,6 +990,11 @@ export class RhSpecialLeavesService {
     leaveType: EventLeaveType;
     sexe: Sexe;
   }) {
+    const exceptionalRule = findExceptionalPermissionRule(
+      params.leaveType.code,
+    );
+    if (exceptionalRule) return exceptionalRule.defaultDays;
+
     const kind = this.resolveEventKind(params.eventLabel);
     const code = params.leaveType.code.trim().toUpperCase();
     const configuredDays = this.roundDays(params.leaveType.defaultDays);
@@ -1734,7 +1706,9 @@ export class RhSpecialLeavesService {
 
   private toEventRow(event: EventRowRecord) {
     const status = this.toBadgeStatus(event.status);
-    const eventLabel = this.eventTypeLabel(event.type);
+    const eventLabel =
+      this.exceptionalEventLabel(event.description) ??
+      this.eventTypeLabel(event.type);
 
     return {
       id: this.toEventRowId(event.id),
@@ -1771,6 +1745,15 @@ export class RhSpecialLeavesService {
         ?.replace(/\s*\[RH_STATUS:(APPROVED|REJECTED|CANCELLED)\]\s*$/, '')
         .trim() ?? ''
     );
+  }
+
+  private exceptionalEventLabel(description: string | null | undefined) {
+    const codeMatch = (description ?? '').match(/\[([A-Z0-9_]+)\]/);
+    const rule = codeMatch ? findExceptionalPermissionRule(codeMatch[1]) : null;
+
+    return rule
+      ? `${rule.name} (${rule.defaultDays} jour${rule.defaultDays > 1 ? 's' : ''})`
+      : null;
   }
 
   private async ensureChildFromBirthEvent(

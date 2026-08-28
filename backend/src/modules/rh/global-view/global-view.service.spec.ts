@@ -82,6 +82,7 @@ function createHarness() {
 
   const leaveBalanceSync = {
     syncForRequest: jest.fn(),
+    syncForRequestSnapshot: jest.fn(),
     syncForKeys: jest.fn(),
     syncYear: jest.fn(),
     syncUserYear: jest.fn(),
@@ -364,6 +365,81 @@ describe('RhGlobalViewService', () => {
         endDate: '2026-06-08',
       }),
     );
+  });
+
+  it('recalculates processed request days from the updated period', async () => {
+    const { prisma, leaveBalanceSync, leaveBalanceInitializer, service } =
+      createHarness();
+    prisma.user.findUnique.mockResolvedValueOnce(rhUser);
+    prisma.leaveRequest.findUnique.mockResolvedValue({
+      id: 'processed-request-1',
+      reference: 'DM-2026-777',
+      ownerId: 'employee-1',
+      leaveTypeId: 'type-cp',
+      startDate: new Date('2026-06-01T00:00:00.000Z'),
+      endDate: new Date('2026-06-01T00:00:00.000Z'),
+      days: 1,
+      reason: null,
+      status: LeaveRequestStatus.APPROVED,
+      owner: {
+        matricule: 'EMP001',
+        nom: 'Employee',
+        prenom: 'Test',
+      },
+      leaveType: {
+        code: 'CP',
+        name: 'Conges payes',
+        category: LeaveCategory.CONGE_PAYE,
+      },
+    });
+    prisma.leaveRequest.update.mockImplementation(({ data }) =>
+      Promise.resolve({
+        id: 'processed-request-1',
+        reference: 'DM-2026-777',
+        ownerId: 'employee-1',
+        leaveTypeId: 'type-cp',
+        startDate: data.startDate,
+        endDate: data.endDate,
+        days: data.days,
+        reason: data.reason,
+        status: LeaveRequestStatus.APPROVED,
+      }),
+    );
+
+    const result = await service.updateProcessedRequest('processed-request-1', {
+      rhId: rhUser.id,
+      startDate: '2026-06-01',
+      endDate: '2026-06-05',
+      days: 1,
+      comment: 'Correction periode',
+    });
+
+    expect(prisma.leaveRequest.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          days: 5,
+          startDate: new Date('2026-06-01T00:00:00.000Z'),
+          endDate: new Date('2026-06-05T00:00:00.000Z'),
+        }),
+      }),
+    );
+    expect(leaveBalanceInitializer.initializeUserYear).toHaveBeenCalledWith(
+      'employee-1',
+      2026,
+      prisma,
+    );
+    expect(leaveBalanceSync.syncForRequestSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'employee-1',
+        leaveTypeId: 'type-cp',
+      }),
+      prisma,
+    );
+    expect(leaveBalanceSync.syncForRequest).toHaveBeenCalledWith(
+      'processed-request-1',
+      prisma,
+    );
+    expect(result.days).toBe(5);
   });
 
   it('approves an RH-reviewed request and notifies employee plus N+1', async () => {

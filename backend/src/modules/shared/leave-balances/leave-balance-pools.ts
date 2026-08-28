@@ -2,7 +2,14 @@ import { LeaveCategory } from '@prisma/client';
 
 export const PAID_LEAVE_POOL_CODES = new Set(['CP', 'ANC', 'ENF', 'PASSIF']);
 export const SPECIAL_LEAVE_POOL_CAP_DAYS = 12;
-const EXCLUDED_SPECIAL_CODES = new Set(['PASSIF', 'MAT', 'SS']);
+const EXCLUDED_SPECIAL_CODES = new Set([
+  'PASSIF',
+  'MAT',
+  'SS',
+  'SPE',
+  'MAL',
+  'ACC_EPOUSE',
+]);
 
 export type LeaveBalancePoolInput = {
   acquired: number;
@@ -79,10 +86,8 @@ export function isSpecialLeavePool(balance: {
   if (EXCLUDED_SPECIAL_CODES.has(code)) return false;
 
   return (
-    code === 'SPE' ||
     balance.leaveType.category === LeaveCategory.CONGE_SPECIAL ||
-    balance.leaveType.category === LeaveCategory.CONGE_PATERNITE ||
-    balance.leaveType.category === LeaveCategory.CONGE_MALADIE
+    balance.leaveType.category === LeaveCategory.CONGE_PATERNITE
   );
 }
 

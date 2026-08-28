@@ -42,6 +42,9 @@ function createHarness() {
   const leaveEntitlements = {
     getAcquiredDays: jest.fn().mockReturnValue(24),
   } as any;
+  const emailService = {
+    sendMany: jest.fn(),
+  } as any;
 
   prisma.leaveType.findUnique.mockResolvedValue(leaveType);
   prisma.user.findUnique.mockResolvedValue(employee);
@@ -57,7 +60,12 @@ function createHarness() {
   return {
     prisma,
     leaveEntitlements,
-    service: new RhLeaveBalancesService(prisma, leaveEntitlements),
+    emailService,
+    service: new RhLeaveBalancesService(
+      prisma,
+      leaveEntitlements,
+      emailService,
+    ),
   };
 }
 

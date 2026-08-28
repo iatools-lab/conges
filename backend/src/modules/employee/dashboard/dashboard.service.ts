@@ -10,7 +10,10 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { LeaveEntitlementsService } from '../../shared/leave-entitlements/leave-entitlements.service';
 import { LeaveBalanceSyncService } from '../../shared/leave-balances/leave-balance-sync.service';
 import { overlapDateWhere, resolveDateRange } from '../../../common/date-range';
-import { isPaidLeavePool } from '../../shared/leave-balances/leave-balance-pools';
+import {
+  isPaidLeavePool,
+  paidPassifRemaining,
+} from '../../shared/leave-balances/leave-balance-pools';
 
 type BadgeTone =
   | 'valid'
@@ -143,21 +146,6 @@ export class EmployeeDashboardService {
           this.leaveEntitlements.normalizeCode(balance.leaveType.code) === 'CP',
       )
       .reduce((sum, balance) => sum + balance.acquired, 0);
-    const passiveDays = balances
-      .filter(
-        (balance) =>
-          this.leaveEntitlements.normalizeCode(balance.leaveType.code) ===
-          'PASSIF',
-      )
-      .reduce(
-        (sum, balance) =>
-          sum +
-          balance.acquired +
-          balance.carryover -
-          balance.taken -
-          balance.scheduled,
-        0,
-      );
     const childBalanceDays = balances
       .filter(
         (balance) =>
@@ -165,10 +153,6 @@ export class EmployeeDashboardService {
           'ENF',
       )
       .reduce((sum, balance) => sum + balance.acquired, 0);
-    const fallbackCarryoverDays = paidBalances.reduce(
-      (sum, balance) => sum + balance.carryover,
-      0,
-    );
     const specialLeaveQuota = this.leaveEntitlements.getAcquiredDays({
       leaveType: {
         code: 'SPE',
@@ -195,7 +179,7 @@ export class EmployeeDashboardService {
         annualDays: this.roundDays(annualDays),
         takenDays: this.roundDays(taken),
         scheduledDays: this.roundDays(scheduled),
-        carryoverDays: this.roundDays(passiveDays || fallbackCarryoverDays),
+        carryoverDays: this.roundDays(paidPassifRemaining(balances)),
         seniorityBonusDays: this.leaveEntitlements.getSeniorityBonusDays(
           user.dateEmbauche,
         ),

@@ -7,6 +7,7 @@ import {
   GitBranch,
   CalendarDays,
   CalendarOff,
+  CalendarCheck,
   CalendarRange,
   ClipboardCheck,
   Coins,
@@ -49,6 +50,11 @@ function item(module: FrontendModule, id: string, icon: ReactNode): NavigationIt
 const employeeDashboard = item(employeeModule, "dashboard", <LayoutDashboard className="size-4" />);
 const employeeBalances = item(employeeModule, "balances", <Wallet className="size-4" />);
 const employeePlanning = item(employeeModule, "planning", <CalendarDays className="size-4" />);
+const employeePermissions = item(
+  employeeModule,
+  "permissions",
+  <CalendarCheck className="size-4" />,
+);
 const employeeRequests = item(
   employeeModule,
   "leave-requests",
@@ -61,6 +67,7 @@ const employeeNav: NavigationItem[] = [
   employeeDashboard,
   employeeBalances,
   employeePlanning,
+  employeePermissions,
   employeeRequests,
   employeeEvents,
   employeeHistory,
@@ -74,6 +81,7 @@ const managerGroups: NavigationGroup[] = [
     items: [
       item(managerModule, "dashboard", <BarChart3 className="size-4" />),
       item(managerModule, "requests", <ClipboardCheck className="size-4" />),
+      item(managerModule, "permissions", <CalendarCheck className="size-4" />),
       item(managerModule, "conflicts", <AlertCircle className="size-4" />),
       item(managerModule, "calendar", <Globe className="size-4" />),
       item(managerModule, "history", <History className="size-4" />),
@@ -89,6 +97,7 @@ const rhGroups: NavigationGroup[] = [
     items: [
       item(rhModule, "dashboard", <BarChart3 className="size-4" />),
       item(rhModule, "leave-requests", <ClipboardCheck className="size-4" />),
+      item(rhModule, "permissions", <CalendarCheck className="size-4" />),
       item(rhModule, "global-view", <Globe className="size-4" />),
       item(rhModule, "alerts", <ShieldAlert className="size-4" />),
     ],

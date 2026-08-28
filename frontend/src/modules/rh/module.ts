@@ -7,6 +7,7 @@ export const rhModule: FrontendModule = {
   submodules: [
     { id: "dashboard", label: "Tableau de bord RH", path: "/rh" },
     { id: "leave-requests", label: "Demande & Planification", path: "/rh/demandes-conges" },
+    { id: "permissions", label: "Permissions", path: "/rh/permissions" },
     { id: "global-view", label: "Vue globale congés", path: "/rh/global" },
     { id: "alerts", label: "Alertes conformité", path: "/rh/alertes" },
     { id: "analytics-workforce", label: "Analyse des effectifs", path: "/rh/analytics/effectifs" },

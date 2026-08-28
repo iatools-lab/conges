@@ -15,10 +15,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Badge, Button, Card, CardHeader, StatCard } from "@/components/ui-kit";
+import { RowActions } from "@/components/RowActions";
 import { apiFetch } from "@/lib/api";
 import { useAuthSession } from "@/modules/auth/session";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Calendar, FileText, Paperclip, Plus } from "lucide-react";
+import { Calendar, Eye, FileText, Paperclip, Pencil, Plus, Trash2 } from "lucide-react";
 import React, { useState } from "react";
 import { toast } from "sonner";
 
@@ -29,6 +30,7 @@ type EventRow = {
   type: string;
   typeLabel: string;
   eventDate: string;
+  eventDateInput?: string;
   createdAt: string;
   description: string;
   hasProof: boolean;
@@ -37,13 +39,88 @@ type EventRow = {
   statusLabel: string;
   statusTone: EventStatusTone;
   rhComment: string;
+  proofUrl?: string;
+};
+
+type EventTypeOption = {
+  id: string;
+  value: string;
+  label: string;
+  code?: string;
+  days?: number;
 };
 
 type EventsResponse = {
+  eventTypes?: EventTypeOption[];
   rows: EventRow[];
 };
 
 const emptyRows: EventRow[] = [];
+const defaultEventTypes: EventTypeOption[] = [
+  {
+    id: "leave-type:MAR_TRAV",
+    value: "MARRIAGE",
+    label: "Mariage du travailleur (4 jours)",
+    code: "MAR_TRAV",
+    days: 4,
+  },
+  {
+    id: "leave-type:PAT",
+    value: "BIRTH",
+    label: "Congé paternité (3 jours)",
+    code: "PAT",
+    days: 3,
+  },
+  {
+    id: "leave-type:BAP_ENF",
+    value: "OTHER",
+    label: "Baptême d'un enfant du travailleur (1 jour)",
+    code: "BAP_ENF",
+    days: 1,
+  },
+  {
+    id: "leave-type:MAR_ENF",
+    value: "MARRIAGE",
+    label: "Mariage d'un enfant du travailleur (2 jours)",
+    code: "MAR_ENF",
+    days: 2,
+  },
+  {
+    id: "leave-type:DEC_CONJ",
+    value: "DEATH",
+    label: "Décès du conjoint du travailleur (5 jours)",
+    code: "DEC_CONJ",
+    days: 5,
+  },
+  {
+    id: "leave-type:DEC_ENF",
+    value: "DEATH",
+    label: "Décès d'un enfant du travailleur (3 jours)",
+    code: "DEC_ENF",
+    days: 3,
+  },
+  {
+    id: "leave-type:DEC_PARENT",
+    value: "DEATH",
+    label: "Décès du père ou de la mère du travailleur (5 jours)",
+    code: "DEC_PARENT",
+    days: 5,
+  },
+  {
+    id: "leave-type:DEC_PARENT_CONJ",
+    value: "DEATH",
+    label: "Décès du père ou de la mère du conjoint légitime (3 jours)",
+    code: "DEC_PARENT_CONJ",
+    days: 3,
+  },
+  {
+    id: "leave-type:DEC_FRERE_SOEUR",
+    value: "DEATH",
+    label: "Décès du frère ou de la sœur du travailleur (3 jours)",
+    code: "DEC_FRERE_SOEUR",
+    days: 3,
+  },
+];
 
 function buildEventsPath(session: { id: string; email: string }, range: DateRangeValue) {
   const params = new URLSearchParams({
@@ -56,11 +133,39 @@ function buildEventsPath(session: { id: string; email: string }, range: DateRang
   return `/employee/events?${params.toString()}`;
 }
 
+function eventTypeOptionForRow(row: EventRow | undefined, eventTypes: EventTypeOption[]) {
+  if (!row) return eventTypes[0]?.id ?? "leave-type:MAR_TRAV";
+
+  const codeMatch = row.description.match(/\[([A-Z0-9_]+)\]/);
+  if (codeMatch) {
+    const normalizedCode = codeMatch[1] === "ACC_EPOUSE" ? "PAT" : codeMatch[1];
+    const byCode = eventTypes.find((option) => option.code === normalizedCode);
+    if (byCode) return byCode.id;
+  }
+
+  return (
+    eventTypes.find((option) => option.value === row.type)?.id ??
+    eventTypes[0]?.id ??
+    "leave-type:MAR_TRAV"
+  );
+}
+
+function commentForRow(row: EventRow | undefined) {
+  if (!row?.description) return "";
+
+  return row.description
+    .replace(/^\[[A-Z0-9_]+\]\s*-\s*/, "")
+    .replace(/^.+?\(\d+\s+jours?\)\s*-\s*/, "")
+    .trim();
+}
+
 export function Declarer() {
   const { ready, session } = useAuthSession();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
-  const [type, setType] = useState("BIRTH");
+  const [editingEvent, setEditingEvent] = useState<EventRow | null>(null);
+  const [detailEvent, setDetailEvent] = useState<EventRow | null>(null);
+  const [eventTypeOptionId, setEventTypeOptionId] = useState("leave-type:MAR_TRAV");
   const [eventDate, setEventDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [childBirthDate, setChildBirthDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [otherEventType, setOtherEventType] = useState("");
@@ -82,6 +187,12 @@ export function Declarer() {
   });
 
   const rows = eventsQuery.data?.rows ?? emptyRows;
+  const eventTypes = eventsQuery.data?.eventTypes?.length
+    ? eventsQuery.data.eventTypes
+    : defaultEventTypes.filter((option) => option.code);
+  const selectedEventTypeOption =
+    eventTypes.find((option) => option.id === eventTypeOptionId) ?? eventTypes[0];
+  const type = selectedEventTypeOption?.value ?? "BIRTH";
   const pendingCount = rows.filter(
     (row) => row.statusCode === "PENDING" || row.statusCode === "IN_REVIEW",
   ).length;
@@ -90,28 +201,42 @@ export function Declarer() {
   ).length;
 
   const startNewDeclaration = (row?: EventRow) => {
-    setType(row?.type ?? "BIRTH");
-    setEventDate(new Date().toISOString().slice(0, 10));
-    setChildBirthDate(new Date().toISOString().slice(0, 10));
+    setEventTypeOptionId(eventTypeOptionForRow(row, eventTypes));
+    setEventDate(row?.eventDateInput ?? new Date().toISOString().slice(0, 10));
+    setChildBirthDate(row?.eventDateInput ?? new Date().toISOString().slice(0, 10));
     setOtherEventType("");
-    setComment(row?.description ?? "");
+    setComment(commentForRow(row));
     setFile(null);
     setFileInputKey((value) => value + 1);
+    setEditingEvent(row ?? null);
     setOpen(true);
   };
 
-  const createEvent = useMutation({
+  const closeDeclarationDialog = () => {
+    setOpen(false);
+    setEditingEvent(null);
+  };
+
+  const saveEvent = useMutation({
     mutationFn: async () => {
       if (!session)
         throw new Error("Session utilisateur introuvable. Reconnectez-vous puis réessayez.");
       const trimmedOtherEventType = otherEventType.trim();
-      if (type === "OTHER" && !trimmedOtherEventType) {
+      if (type === "OTHER" && !selectedEventTypeOption?.code && !trimmedOtherEventType) {
         throw new Error("Précisez le type d'événement.");
       }
       const description =
-        type === "OTHER"
-          ? [trimmedOtherEventType, comment.trim()].filter(Boolean).join(" - ")
-          : comment.trim();
+        selectedEventTypeOption?.code || selectedEventTypeOption?.label
+          ? [
+              selectedEventTypeOption.code ? `[${selectedEventTypeOption.code}]` : "",
+              selectedEventTypeOption.label,
+              comment.trim(),
+            ]
+              .filter(Boolean)
+              .join(" - ")
+          : type === "OTHER"
+            ? [trimmedOtherEventType, comment.trim()].filter(Boolean).join(" - ")
+            : comment.trim();
 
       const form = new FormData();
       form.append("userId", session.id);
@@ -122,20 +247,44 @@ export function Declarer() {
       form.append("description", description);
       if (file) form.append("proof", file, file.name);
 
-      return apiFetch<EventRow>("/employee/events", { method: "POST", body: form });
+      return apiFetch<EventRow>(
+        editingEvent ? `/employee/events/${editingEvent.id}` : "/employee/events",
+        {
+          method: editingEvent ? "PATCH" : "POST",
+          body: form,
+        },
+      );
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey });
       queryClient.invalidateQueries({ queryKey: ["employee-dashboard"] });
       setOpen(false);
-      setType("BIRTH");
+      setEditingEvent(null);
+      setEventTypeOptionId(eventTypes[0]?.id ?? "leave-type:MAR_TRAV");
       setEventDate(new Date().toISOString().slice(0, 10));
       setChildBirthDate(new Date().toISOString().slice(0, 10));
       setOtherEventType("");
       setComment("");
       setFile(null);
       setFileInputKey((value) => value + 1);
-      toast.success("Déclaration envoyée à la RH");
+      toast.success(editingEvent ? "Déclaration mise à jour" : "Déclaration envoyée à la RH");
+    },
+    onError: (error) => toast.error(error.message),
+  });
+
+  const deleteEvent = useMutation({
+    mutationFn: (row: EventRow) => {
+      if (!session)
+        throw new Error("Session utilisateur introuvable. Reconnectez-vous puis réessayez.");
+      return apiFetch<{ id: string; deleted: boolean }>(`/employee/events/${row.id}`, {
+        method: "DELETE",
+        body: JSON.stringify({ userId: session.id, userEmail: session.email }),
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey });
+      queryClient.invalidateQueries({ queryKey: ["employee-dashboard"] });
+      toast.success("Déclaration supprimée");
     },
     onError: (error) => toast.error(error.message),
   });
@@ -174,7 +323,7 @@ export function Declarer() {
                 <th className="px-5 py-3">Statut</th>
                 <th className="px-5 py-3">Ma description</th>
                 <th className="px-5 py-3">Commentaire RH</th>
-                <th className="px-5 py-3 text-right">Action</th>
+                <th className="px-5 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y">
@@ -202,9 +351,33 @@ export function Declarer() {
                     <td className="px-5 py-3 text-muted-foreground">{row.description || "—"}</td>
                     <td className="px-5 py-3 text-muted-foreground">{row.rhComment || "—"}</td>
                     <td className="px-5 py-3 text-right">
-                      <Button variant="outline" onClick={() => startNewDeclaration(row)}>
-                        Déclarer
-                      </Button>
+                      <RowActions
+                        label="la déclaration"
+                        actions={[
+                          {
+                            label: "Voir",
+                            icon: Eye,
+                            onSelect: () => setDetailEvent(row),
+                          },
+                          {
+                            label: "Modifier",
+                            icon: Pencil,
+                            disabled:
+                              row.statusCode === "APPROVED" || row.statusCode === "IN_REVIEW",
+                            onSelect: () => startNewDeclaration(row),
+                          },
+                          {
+                            label: "Supprimer",
+                            icon: Trash2,
+                            destructive: true,
+                            disabled:
+                              row.statusCode === "APPROVED" ||
+                              row.statusCode === "IN_REVIEW" ||
+                              deleteEvent.isPending,
+                            onSelect: () => deleteEvent.mutate(row),
+                          },
+                        ]}
+                      />
                     </td>
                   </tr>
                 ))
@@ -214,10 +387,60 @@ export function Declarer() {
         </div>
       </Card>
 
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog
+        open={Boolean(detailEvent)}
+        onOpenChange={(nextOpen) => !nextOpen && setDetailEvent(null)}
+      >
         <DialogContent className="sm:max-w-[560px]">
           <DialogHeader>
-            <DialogTitle>Nouvelle déclaration</DialogTitle>
+            <DialogTitle>Détail de la déclaration</DialogTitle>
+            <DialogDescription>Informations transmises à la RH.</DialogDescription>
+          </DialogHeader>
+          {detailEvent && (
+            <dl className="grid gap-3 text-sm sm:grid-cols-2">
+              <Detail label="Événement" value={detailEvent.typeLabel} />
+              <Detail label="Date" value={detailEvent.eventDate} />
+              <Detail label="Statut" value={detailEvent.statusLabel} />
+              <Detail label="Créée le" value={detailEvent.createdAt} />
+              <Detail label="Description" value={detailEvent.description || "—"} wide />
+              <Detail label="Commentaire RH" value={detailEvent.rhComment || "—"} wide />
+              <Detail
+                label="Justificatif"
+                value={
+                  detailEvent.proofUrl ? (
+                    <a
+                      href={detailEvent.proofUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-primary hover:underline"
+                    >
+                      Ouvrir le fichier
+                    </a>
+                  ) : (
+                    "Aucun justificatif"
+                  )
+                }
+                wide
+              />
+            </dl>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDetailEvent(null)}>
+              Fermer
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={open}
+        onOpenChange={(nextOpen) => (nextOpen ? setOpen(true) : closeDeclarationDialog())}
+      >
+        <DialogContent className="max-h-[calc(100vh-2rem)] overflow-y-auto sm:max-w-[560px]">
+          <DialogHeader>
+            <DialogTitle>
+              {editingEvent ? "Modifier la déclaration" : "Nouvelle déclaration"}
+            </DialogTitle>
             <DialogDescription>
               La déclaration sera transmise à la RH avec le justificatif si nécessaire.
             </DialogDescription>
@@ -226,16 +449,18 @@ export function Declarer() {
             className="space-y-5"
             onSubmit={(event) => {
               event.preventDefault();
-              createEvent.mutate();
+              saveEvent.mutate();
             }}
           >
             <Field label="Type d'événement">
               <select
                 className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-                value={type}
+                value={selectedEventTypeOption?.id ?? "leave-type:MAR_TRAV"}
                 onChange={(event) => {
-                  const nextType = event.target.value;
-                  setType(nextType);
+                  const nextOptionId = event.target.value;
+                  const nextType =
+                    eventTypes.find((option) => option.id === nextOptionId)?.value ?? "BIRTH";
+                  setEventTypeOptionId(nextOptionId);
                   if (nextType !== "BIRTH") {
                     setChildBirthDate(new Date().toISOString().slice(0, 10));
                   }
@@ -244,14 +469,14 @@ export function Declarer() {
                   }
                 }}
               >
-                <option value="BIRTH">Naissance / enfant</option>
-                <option value="MARRIAGE">Mariage</option>
-                <option value="DEATH">Décès</option>
-                <option value="ILLNESS">Maladie</option>
-                <option value="OTHER">Autre</option>
+                {eventTypes.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
               </select>
             </Field>
-            {type === "OTHER" && (
+            {type === "OTHER" && !selectedEventTypeOption?.code && (
               <Field label="Autre type d'événement">
                 <input
                   type="text"
@@ -320,12 +545,16 @@ export function Declarer() {
               <div className="mt-1 text-xs text-muted-foreground">Image ou PDF, 3 Mo maximum.</div>
             </Field>
             <DialogFooter className="gap-2">
-              <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+              <Button type="button" variant="outline" onClick={closeDeclarationDialog}>
                 Annuler
               </Button>
-              <Button type="submit" disabled={createEvent.isPending || !ready || !session}>
+              <Button type="submit" disabled={saveEvent.isPending || !ready || !session}>
                 <FileText className="size-4" />{" "}
-                {createEvent.isPending ? "Envoi..." : "Soumettre à la RH"}
+                {saveEvent.isPending
+                  ? "Envoi..."
+                  : editingEvent
+                    ? "Enregistrer et renvoyer RH"
+                    : "Soumettre à la RH"}
               </Button>
             </DialogFooter>
           </form>
@@ -340,6 +569,15 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     <div>
       <label className="mb-1.5 block text-sm font-medium">{label}</label>
       {children}
+    </div>
+  );
+}
+
+function Detail({ label, value, wide }: { label: string; value: React.ReactNode; wide?: boolean }) {
+  return (
+    <div className={wide ? "sm:col-span-2" : ""}>
+      <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
+      <dd className="mt-1 break-words font-medium">{value}</dd>
     </div>
   );
 }

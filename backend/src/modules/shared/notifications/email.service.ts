@@ -234,16 +234,27 @@ export class EmailService {
     actionUrl?: string;
     actionLabel?: string;
   }) {
-    const paragraphs = params.text
+    const lines = params.text
       .split(/\n+/)
       .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => `<p>${this.escapeHtml(line)}</p>`)
-      .join('');
+      .filter(Boolean);
+    const intro = lines[0] ?? params.subject;
+    const details = lines.slice(1);
+    const detailsHtml = details.length
+      ? `<div style="margin:20px 0 0;border:1px solid #dbeafe;border-radius:12px;background:#eff6ff;padding:14px 16px">
+          <div style="margin-bottom:8px;font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#1d4ed8">Détails</div>
+          ${details
+            .map(
+              (line) =>
+                `<p style="margin:6px 0;color:#1e293b">${this.escapeHtml(line)}</p>`,
+            )
+            .join('')}
+        </div>`
+      : '';
     const action = params.actionUrl
       ? `<p style="margin:28px 0 0"><a href="${this.escapeAttribute(
           params.actionUrl,
-        )}" style="display:inline-block;border-radius:6px;background:#0f766e;color:#ffffff;font-weight:700;text-decoration:none;padding:12px 18px">${this.escapeHtml(
+        )}" style="display:inline-block;border-radius:10px;background:#0f766e;color:#ffffff;font-weight:700;text-decoration:none;padding:13px 20px">${this.escapeHtml(
           params.actionLabel ?? 'Ouvrir la plateforme',
         )}</a></p><p style="font-size:12px;color:#64748b;word-break:break-all">Lien direct : ${this.escapeHtml(
           params.actionUrl,
@@ -256,21 +267,28 @@ export class EmailService {
     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f8fafc;padding:24px">
       <tr>
         <td align="center">
-          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:640px;background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:680px;background:#ffffff;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden;box-shadow:0 10px 30px rgba(15,23,42,.08)">
             <tr>
-              <td style="background:#0f766e;color:#ffffff;padding:18px 24px;font-size:18px;font-weight:700">UP congés</td>
-            </tr>
-            <tr>
-              <td style="padding:28px 24px">
-                <h1 style="margin:0 0 16px;font-size:22px;line-height:1.3;color:#0f172a">${this.escapeHtml(
-                  params.subject,
-                )}</h1>
-                <div style="font-size:15px;line-height:1.6;color:#334155">${paragraphs}</div>
-                ${action}
+              <td style="background:linear-gradient(135deg,#0f766e,#1d4ed8);color:#ffffff;padding:22px 28px">
+                <div style="font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;opacity:.85">Plateforme RH</div>
+                <div style="margin-top:4px;font-size:22px;font-weight:800">UP congés</div>
               </td>
             </tr>
             <tr>
-              <td style="border-top:1px solid #e2e8f0;padding:14px 24px;font-size:12px;color:#64748b">Message automatique de la plateforme de gestion des congés.</td>
+              <td style="padding:30px 28px">
+                <h1 style="margin:0 0 12px;font-size:22px;line-height:1.3;color:#0f172a">${this.escapeHtml(
+                  params.subject,
+                )}</h1>
+                <p style="margin:0;font-size:15px;line-height:1.7;color:#334155">${this.escapeHtml(
+                  intro,
+                )}</p>
+                ${detailsHtml}
+                ${action}
+                <p style="margin:24px 0 0;font-size:13px;color:#64748b">Si vous n'êtes pas concerné par cette action, vous pouvez simplement ignorer ce message.</p>
+              </td>
+            </tr>
+            <tr>
+              <td style="border-top:1px solid #e2e8f0;background:#f8fafc;padding:16px 28px;font-size:12px;line-height:1.5;color:#64748b">Message automatique de la plateforme de gestion des congés. Merci de ne pas répondre directement à cet email.</td>
             </tr>
           </table>
         </td>

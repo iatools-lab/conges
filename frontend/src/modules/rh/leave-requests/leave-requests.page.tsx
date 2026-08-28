@@ -60,6 +60,8 @@ type PlanificationRow = {
   departmentCode: string;
   departmentName: string;
   ownerId?: string;
+  submittedAt?: string | null;
+  submittedDate?: string | null;
   startDate: string;
   endDate: string;
   startDateIso?: string;
@@ -166,6 +168,18 @@ function cellToCategory(value: ExcelCell, rowNumber: number): HistoryImportCateg
       "prise",
       "prises",
       "taken",
+      "valide",
+      "valides",
+      "validee",
+      "validees",
+      "approuve",
+      "approuves",
+      "approuvee",
+      "approuvees",
+      "approved",
+      "historiquevalide",
+      "congevalide",
+      "congesvalides",
       "consomme",
       "consommes",
       "congepris",
@@ -335,7 +349,7 @@ function parseHistoryImportRows(result: ExcelReadResult): HistoryImportRow[] {
 function downloadHistoryTemplate() {
   const csv = [
     "reference;matricule;categorie;type;date debut;date fin;nombre de jours",
-    "OLD-2025-001;EMP001;pris;paye;2025-04-01;2025-04-05;5",
+    "OLD-2025-001;EMP001;valide;paye;2025-04-01;2025-04-05;5",
     "PLAN-2025-001;EMP002;planifier;paye;2025-08-12;2025-08-20;7",
   ].join("\n");
   const blob = new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" });
@@ -804,6 +818,7 @@ export function RhDemandesConges() {
                   <tr className="text-left">
                     <th className="px-5 py-3">Référence</th>
                     <th className="px-5 py-3">Employé</th>
+                    <th className="px-5 py-3">Date de soumission</th>
                     <th className="px-5 py-3">N+1</th>
                     <th className="px-5 py-3">Département</th>
                     <th className="px-5 py-3">Type de congé</th>
@@ -818,6 +833,7 @@ export function RhDemandesConges() {
                     <tr key={row.id} className="hover:bg-muted/30">
                       <td className="px-5 py-3 font-medium">{row.reference}</td>
                       <td className="px-5 py-3">{row.employee}</td>
+                      <td className="px-5 py-3">{row.submittedDate ?? "—"}</td>
                       <td className="px-5 py-3">{row.manager}</td>
                       <td className="px-5 py-3">{row.departmentName}</td>
                       <td className="px-5 py-3">{row.type}</td>
@@ -846,7 +862,7 @@ export function RhDemandesConges() {
                   ))}
                   {!managerPendingRows.length && (
                     <tr>
-                      <td className="px-5 py-8 text-center text-muted-foreground" colSpan={9}>
+                      <td className="px-5 py-8 text-center text-muted-foreground" colSpan={10}>
                         Aucune demande en attente d'action N+1 pour ces filtres.
                       </td>
                     </tr>
@@ -869,6 +885,7 @@ export function RhDemandesConges() {
                     <th className="px-5 py-3">Département</th>
                     <th className="px-5 py-3">Type de congé</th>
                     <th className="px-5 py-3">Période</th>
+                    <th className="px-5 py-3">Date de soumission</th>
                     <th className="px-5 py-3">Jours</th>
                     <th className="px-5 py-3">Statut</th>
                     <th className="px-5 py-3 text-right">Actions RH</th>
@@ -884,6 +901,7 @@ export function RhDemandesConges() {
                       <td className="px-5 py-3">
                         {row.startDate} - {row.endDate}
                       </td>
+                      <td className="px-5 py-3">{row.submittedDate ?? "—"}</td>
                       <td className="px-5 py-3">{formatNumber(row.days)}</td>
                       <td className="px-5 py-3">
                         <Badge tone={row.status}>{row.label}</Badge>
@@ -916,7 +934,7 @@ export function RhDemandesConges() {
                   ))}
                   {!rhPendingRows.length && (
                     <tr>
-                      <td className="px-5 py-8 text-center text-muted-foreground" colSpan={8}>
+                      <td className="px-5 py-8 text-center text-muted-foreground" colSpan={9}>
                         Aucune demande en attente de validation RH pour ces filtres.
                       </td>
                     </tr>
@@ -940,6 +958,7 @@ export function RhDemandesConges() {
                     <th className="px-5 py-3">Département</th>
                     <th className="px-5 py-3">Type de congé</th>
                     <th className="px-5 py-3">Période</th>
+                    <th className="px-5 py-3">Date de soumission</th>
                     <th className="px-5 py-3">Jours</th>
                     <th className="px-5 py-3">Statut</th>
                     <th className="px-5 py-3 text-right">Actions</th>
@@ -956,6 +975,7 @@ export function RhDemandesConges() {
                       <td className="px-5 py-3">
                         {row.startDate} - {row.endDate}
                       </td>
+                      <td className="px-5 py-3">{row.submittedDate ?? "—"}</td>
                       <td className="px-5 py-3">{formatNumber(row.days)}</td>
                       <td className="px-5 py-3">
                         <Badge tone={row.status}>{row.label}</Badge>
@@ -974,7 +994,7 @@ export function RhDemandesConges() {
                   ))}
                   {!plannedRows.length && (
                     <tr>
-                      <td className="px-5 py-8 text-center text-muted-foreground" colSpan={9}>
+                      <td className="px-5 py-8 text-center text-muted-foreground" colSpan={10}>
                         Aucun congé planifié trouvé pour ces filtres.
                       </td>
                     </tr>
@@ -1004,11 +1024,19 @@ export function RhDemandesConges() {
                   <Button
                     variant="primary"
                     size="sm"
-                    disabled={!canImportHistory}
-                    onClick={() => importHistoryMutation.mutate(historyPreviewRows)}
+                    disabled={importHistoryMutation.isPending}
+                    onClick={() =>
+                      canImportHistory
+                        ? importHistoryMutation.mutate(historyPreviewRows)
+                        : historyFileInputRef.current?.click()
+                    }
                   >
                     <UploadCloud className="size-4" />
-                    {importHistoryMutation.isPending ? "Import..." : "Importer"}
+                    {importHistoryMutation.isPending
+                      ? "Import..."
+                      : canImportHistory
+                        ? "Importer"
+                        : "Choisir un fichier"}
                   </Button>
                   <Button
                     variant="ghost"
@@ -1103,6 +1131,7 @@ export function RhDemandesConges() {
                     <th className="px-5 py-3">Département</th>
                     <th className="px-5 py-3">Type de congé</th>
                     <th className="px-5 py-3">Période</th>
+                    <th className="px-5 py-3">Date de soumission</th>
                     <th className="px-5 py-3">Jours</th>
                     <th className="px-5 py-3">Statut final</th>
                     <th className="px-5 py-3 text-right">Actions</th>
@@ -1118,6 +1147,7 @@ export function RhDemandesConges() {
                       <td className="px-5 py-3">
                         {row.startDate} - {row.endDate}
                       </td>
+                      <td className="px-5 py-3">{row.submittedDate ?? "—"}</td>
                       <td className="px-5 py-3">{formatNumber(row.days)}</td>
                       <td className="px-5 py-3">
                         <Badge tone={row.status}>{row.label}</Badge>
@@ -1179,7 +1209,7 @@ export function RhDemandesConges() {
                   ))}
                   {!processedRows.length && (
                     <tr>
-                      <td className="px-5 py-8 text-center text-muted-foreground" colSpan={8}>
+                      <td className="px-5 py-8 text-center text-muted-foreground" colSpan={9}>
                         Aucune demande traitée trouvée pour ces filtres.
                       </td>
                     </tr>

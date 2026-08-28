@@ -215,6 +215,11 @@ const quickActions = [
     to: "/manager/demandes",
   },
   {
+    icon: <CalendarDays className="size-5" />,
+    label: "Valider les permissions",
+    to: "/manager/permissions",
+  },
+  {
     icon: <AlertTriangle className="size-5" />,
     label: "Résoudre les conflits",
     to: "/manager/conflits",

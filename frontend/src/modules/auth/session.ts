@@ -142,6 +142,7 @@ const personalPaths = new Set([
   "/",
   "/solde",
   "/planifier",
+  "/permissions",
   "/demandes",
   "/historique",
   "/declarer",

@@ -86,6 +86,8 @@ type TeamPlan = {
     reference: string;
     startDate: string;
     endDate: string;
+    submittedAt?: string | null;
+    submittedDate?: string | null;
     days: number;
     type: string;
     typeCode: string;
@@ -308,6 +310,8 @@ export function ManagerDemandes() {
           type: request.type,
           startDate: request.startDate,
           endDate: request.endDate,
+          submittedAt: request.submittedAt ?? null,
+          submittedDate: request.submittedDate ?? null,
           days: request.days,
           status: request.status,
         })),
@@ -416,7 +420,7 @@ export function ManagerDemandes() {
 
   return (
     <AppShell
-      title="Demandes & Validations"
+      title="Demandes & Planifications"
       subtitle={`Pilotage des validations et planifications du périmètre ${departmentLabel}`}
     >
       <div className="mb-3">
@@ -505,7 +509,9 @@ export function ManagerDemandes() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3 text-sm text-destructive">
               <AlertCircle className="size-5" />
-              <span>Impossible de charger une partie des données de Demandes & Validations.</span>
+              <span>
+                Impossible de charger une partie des données de Demandes & Planifications.
+              </span>
             </div>
             <Button
               variant="outline"
@@ -555,6 +561,7 @@ export function ManagerDemandes() {
                     <tr className="text-left">
                       <th className="px-5 py-3">Référence</th>
                       <th className="px-5 py-3">Employé</th>
+                      <th className="px-5 py-3">Date de soumission</th>
                       <th className="px-5 py-3">N+1</th>
                       <th className="px-5 py-3">Département</th>
                       <th className="px-5 py-3">Type de congé</th>
@@ -567,7 +574,7 @@ export function ManagerDemandes() {
                   <tbody className="divide-y">
                     {filtered.filter((row) => row.status === "pending").length === 0 && (
                       <tr>
-                        <td colSpan={9} className="px-5 py-10 text-center text-muted-foreground">
+                        <td colSpan={10} className="px-5 py-10 text-center text-muted-foreground">
                           Aucune demande en attente d'action N+1 pour ces filtres.
                         </td>
                       </tr>
@@ -591,6 +598,7 @@ export function ManagerDemandes() {
                                 </div>
                               </div>
                             </td>
+                            <td className="px-5 py-3">{request.envoyee}</td>
                             <td className="px-5 py-3">{session?.name ?? "Manager"}</td>
                             <td className="px-5 py-3">{request.departmentName}</td>
                             <td className="px-5 py-3">{request.type}</td>
@@ -666,6 +674,7 @@ export function ManagerDemandes() {
                       <th className="px-5 py-3">Département</th>
                       <th className="px-5 py-3">Type de congé</th>
                       <th className="px-5 py-3">Période</th>
+                      <th className="px-5 py-3">Date de soumission</th>
                       <th className="px-5 py-3">Jours</th>
                       <th className="px-5 py-3">Statut</th>
                       <th className="px-5 py-3 text-right">Actions</th>
@@ -674,7 +683,7 @@ export function ManagerDemandes() {
                   <tbody className="divide-y">
                     {planningRows.length === 0 && (
                       <tr>
-                        <td colSpan={9} className="px-5 py-10 text-center text-muted-foreground">
+                        <td colSpan={10} className="px-5 py-10 text-center text-muted-foreground">
                           Aucune planification disponible.
                         </td>
                       </tr>
@@ -689,6 +698,7 @@ export function ManagerDemandes() {
                         <td className="px-5 py-3 text-muted-foreground">
                           {formatDate(row.startDate)} - {formatDate(row.endDate)}
                         </td>
+                        <td className="px-5 py-3">{row.submittedDate ?? "Non soumise"}</td>
                         <td className="px-5 py-3">{formatNumber(row.days)}</td>
                         <td className="px-5 py-3">
                           <Badge tone={planningStatus(row.status).tone}>
@@ -730,6 +740,7 @@ export function ManagerDemandes() {
                       <th className="px-5 py-3">Département</th>
                       <th className="px-5 py-3">Type de congé</th>
                       <th className="px-5 py-3">Période</th>
+                      <th className="px-5 py-3">Date de soumission</th>
                       <th className="px-5 py-3">Jours</th>
                       <th className="px-5 py-3">Statut</th>
                       <th className="px-5 py-3 text-right">Actions</th>
@@ -738,7 +749,7 @@ export function ManagerDemandes() {
                   <tbody className="divide-y">
                     {historyRows.length === 0 && (
                       <tr>
-                        <td colSpan={8} className="px-5 py-10 text-center text-muted-foreground">
+                        <td colSpan={9} className="px-5 py-10 text-center text-muted-foreground">
                           Aucun historique disponible.
                         </td>
                       </tr>
@@ -752,6 +763,7 @@ export function ManagerDemandes() {
                         <td className="px-5 py-3 text-muted-foreground">
                           {row.debut} → {row.fin}
                         </td>
+                        <td className="px-5 py-3">{row.envoyee}</td>
                         <td className="px-5 py-3">{row.jours}</td>
                         <td className="px-5 py-3">
                           <Badge tone={statusMap[row.status].tone}>{row.statusLabel}</Badge>
@@ -795,6 +807,7 @@ export function ManagerDemandes() {
               <Info k="Poste" v={detail.poste} />
               <Info k="Type" v={detail.type} />
               <Info k="Période" v={`${detail.debut} → ${detail.fin}`} />
+              <Info k="Date de soumission" v={detail.envoyee} />
               <Info k="Jours" v={`${detail.jours} jours ouvrables`} />
               <Info k="Solde" v={`${detail.solde} j`} />
               <Info k="Statut" v={detail.statusLabel} />

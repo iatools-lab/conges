@@ -67,9 +67,7 @@ function BalanceTable({
           {rows.length ? (
             rows.map((row) => (
               <tr key={row.id}>
-                <td className="px-5 py-3 font-medium">
-                  {row.source} <span className="text-xs text-muted-foreground">({row.code})</span>
-                </td>
+                <td className="px-5 py-3 font-medium">{row.source}</td>
                 <td className="px-5 py-3">{formatNumber(row.acquired)}</td>
                 <td className="px-5 py-3">{formatNumber(row.taken)}</td>
                 <td className="px-5 py-3">{formatNumber(row.scheduled)}</td>

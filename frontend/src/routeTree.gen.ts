@@ -15,6 +15,7 @@ import { Route as SignupRouteImport } from './modules/routing/signup'
 import { Route as ResetPasswordRouteImport } from './modules/routing/reset-password'
 import { Route as ProfilRouteImport } from './modules/routing/profil'
 import { Route as PlanifierRouteImport } from './modules/routing/planifier'
+import { Route as PermissionsRouteImport } from './modules/routing/permissions'
 import { Route as ParametresRouteImport } from './modules/routing/parametres'
 import { Route as LoginRouteImport } from './modules/routing/login'
 import { Route as LandingRouteImport } from './modules/routing/landing'
@@ -29,6 +30,7 @@ import { Route as ManagerIndexRouteImport } from './modules/routing/manager.inde
 import { Route as RhSpeciauxRouteImport } from './modules/routing/rh.speciaux'
 import { Route as RhSoldesCpRouteImport } from './modules/routing/rh.soldes-cp'
 import { Route as RhProfilRouteImport } from './modules/routing/rh.profil'
+import { Route as RhPermissionsRouteImport } from './modules/routing/rh.permissions'
 import { Route as RhPassifRouteImport } from './modules/routing/rh.passif'
 import { Route as RhParametresRouteImport } from './modules/routing/rh.parametres'
 import { Route as RhHierarchieRouteImport } from './modules/routing/rh.hierarchie'
@@ -42,6 +44,7 @@ import { Route as RhAuditRouteImport } from './modules/routing/rh.audit'
 import { Route as RhAlertesRouteImport } from './modules/routing/rh.alertes'
 import { Route as ManagerProfilRouteImport } from './modules/routing/manager.profil'
 import { Route as ManagerPlanningRouteImport } from './modules/routing/manager.planning'
+import { Route as ManagerPermissionsRouteImport } from './modules/routing/manager.permissions'
 import { Route as ManagerParametresRouteImport } from './modules/routing/manager.parametres'
 import { Route as ManagerHistoriqueRouteImport } from './modules/routing/manager.historique'
 import { Route as ManagerDemandesRouteImport } from './modules/routing/manager.demandes'
@@ -91,6 +94,11 @@ const ProfilRoute = ProfilRouteImport.update({
 const PlanifierRoute = PlanifierRouteImport.update({
   id: '/planifier',
   path: '/planifier',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PermissionsRoute = PermissionsRouteImport.update({
+  id: '/permissions',
+  path: '/permissions',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ParametresRoute = ParametresRouteImport.update({
@@ -163,6 +171,11 @@ const RhProfilRoute = RhProfilRouteImport.update({
   path: '/rh/profil',
   getParentRoute: () => rootRouteImport,
 } as any)
+const RhPermissionsRoute = RhPermissionsRouteImport.update({
+  id: '/rh/permissions',
+  path: '/rh/permissions',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const RhPassifRoute = RhPassifRouteImport.update({
   id: '/rh/passif',
   path: '/rh/passif',
@@ -226,6 +239,11 @@ const ManagerProfilRoute = ManagerProfilRouteImport.update({
 const ManagerPlanningRoute = ManagerPlanningRouteImport.update({
   id: '/manager/planning',
   path: '/manager/planning',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ManagerPermissionsRoute = ManagerPermissionsRouteImport.update({
+  id: '/manager/permissions',
+  path: '/manager/permissions',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ManagerParametresRoute = ManagerParametresRouteImport.update({
@@ -340,6 +358,7 @@ export interface FileRoutesByFullPath {
   '/landing': typeof LandingRoute
   '/login': typeof LoginRoute
   '/parametres': typeof ParametresRoute
+  '/permissions': typeof PermissionsRoute
   '/planifier': typeof PlanifierRoute
   '/profil': typeof ProfilRoute
   '/reset-password': typeof ResetPasswordRoute
@@ -359,6 +378,7 @@ export interface FileRoutesByFullPath {
   '/manager/demandes': typeof ManagerDemandesRoute
   '/manager/historique': typeof ManagerHistoriqueRoute
   '/manager/parametres': typeof ManagerParametresRoute
+  '/manager/permissions': typeof ManagerPermissionsRoute
   '/manager/planning': typeof ManagerPlanningRoute
   '/manager/profil': typeof ManagerProfilRoute
   '/rh/alertes': typeof RhAlertesRoute
@@ -372,6 +392,7 @@ export interface FileRoutesByFullPath {
   '/rh/hierarchie': typeof RhHierarchieRoute
   '/rh/parametres': typeof RhParametresRoute
   '/rh/passif': typeof RhPassifRoute
+  '/rh/permissions': typeof RhPermissionsRoute
   '/rh/profil': typeof RhProfilRoute
   '/rh/soldes-cp': typeof RhSoldesCpRoute
   '/rh/speciaux': typeof RhSpeciauxRoute
@@ -395,6 +416,7 @@ export interface FileRoutesByTo {
   '/landing': typeof LandingRoute
   '/login': typeof LoginRoute
   '/parametres': typeof ParametresRoute
+  '/permissions': typeof PermissionsRoute
   '/planifier': typeof PlanifierRoute
   '/profil': typeof ProfilRoute
   '/reset-password': typeof ResetPasswordRoute
@@ -414,6 +436,7 @@ export interface FileRoutesByTo {
   '/manager/demandes': typeof ManagerDemandesRoute
   '/manager/historique': typeof ManagerHistoriqueRoute
   '/manager/parametres': typeof ManagerParametresRoute
+  '/manager/permissions': typeof ManagerPermissionsRoute
   '/manager/planning': typeof ManagerPlanningRoute
   '/manager/profil': typeof ManagerProfilRoute
   '/rh/alertes': typeof RhAlertesRoute
@@ -427,6 +450,7 @@ export interface FileRoutesByTo {
   '/rh/hierarchie': typeof RhHierarchieRoute
   '/rh/parametres': typeof RhParametresRoute
   '/rh/passif': typeof RhPassifRoute
+  '/rh/permissions': typeof RhPermissionsRoute
   '/rh/profil': typeof RhProfilRoute
   '/rh/soldes-cp': typeof RhSoldesCpRoute
   '/rh/speciaux': typeof RhSpeciauxRoute
@@ -451,6 +475,7 @@ export interface FileRoutesById {
   '/landing': typeof LandingRoute
   '/login': typeof LoginRoute
   '/parametres': typeof ParametresRoute
+  '/permissions': typeof PermissionsRoute
   '/planifier': typeof PlanifierRoute
   '/profil': typeof ProfilRoute
   '/reset-password': typeof ResetPasswordRoute
@@ -470,6 +495,7 @@ export interface FileRoutesById {
   '/manager/demandes': typeof ManagerDemandesRoute
   '/manager/historique': typeof ManagerHistoriqueRoute
   '/manager/parametres': typeof ManagerParametresRoute
+  '/manager/permissions': typeof ManagerPermissionsRoute
   '/manager/planning': typeof ManagerPlanningRoute
   '/manager/profil': typeof ManagerProfilRoute
   '/rh/alertes': typeof RhAlertesRoute
@@ -483,6 +509,7 @@ export interface FileRoutesById {
   '/rh/hierarchie': typeof RhHierarchieRoute
   '/rh/parametres': typeof RhParametresRoute
   '/rh/passif': typeof RhPassifRoute
+  '/rh/permissions': typeof RhPermissionsRoute
   '/rh/profil': typeof RhProfilRoute
   '/rh/soldes-cp': typeof RhSoldesCpRoute
   '/rh/speciaux': typeof RhSpeciauxRoute
@@ -508,6 +535,7 @@ export interface FileRouteTypes {
     | '/landing'
     | '/login'
     | '/parametres'
+    | '/permissions'
     | '/planifier'
     | '/profil'
     | '/reset-password'
@@ -527,6 +555,7 @@ export interface FileRouteTypes {
     | '/manager/demandes'
     | '/manager/historique'
     | '/manager/parametres'
+    | '/manager/permissions'
     | '/manager/planning'
     | '/manager/profil'
     | '/rh/alertes'
@@ -540,6 +569,7 @@ export interface FileRouteTypes {
     | '/rh/hierarchie'
     | '/rh/parametres'
     | '/rh/passif'
+    | '/rh/permissions'
     | '/rh/profil'
     | '/rh/soldes-cp'
     | '/rh/speciaux'
@@ -563,6 +593,7 @@ export interface FileRouteTypes {
     | '/landing'
     | '/login'
     | '/parametres'
+    | '/permissions'
     | '/planifier'
     | '/profil'
     | '/reset-password'
@@ -582,6 +613,7 @@ export interface FileRouteTypes {
     | '/manager/demandes'
     | '/manager/historique'
     | '/manager/parametres'
+    | '/manager/permissions'
     | '/manager/planning'
     | '/manager/profil'
     | '/rh/alertes'
@@ -595,6 +627,7 @@ export interface FileRouteTypes {
     | '/rh/hierarchie'
     | '/rh/parametres'
     | '/rh/passif'
+    | '/rh/permissions'
     | '/rh/profil'
     | '/rh/soldes-cp'
     | '/rh/speciaux'
@@ -618,6 +651,7 @@ export interface FileRouteTypes {
     | '/landing'
     | '/login'
     | '/parametres'
+    | '/permissions'
     | '/planifier'
     | '/profil'
     | '/reset-password'
@@ -637,6 +671,7 @@ export interface FileRouteTypes {
     | '/manager/demandes'
     | '/manager/historique'
     | '/manager/parametres'
+    | '/manager/permissions'
     | '/manager/planning'
     | '/manager/profil'
     | '/rh/alertes'
@@ -650,6 +685,7 @@ export interface FileRouteTypes {
     | '/rh/hierarchie'
     | '/rh/parametres'
     | '/rh/passif'
+    | '/rh/permissions'
     | '/rh/profil'
     | '/rh/soldes-cp'
     | '/rh/speciaux'
@@ -674,6 +710,7 @@ export interface RootRouteChildren {
   LandingRoute: typeof LandingRoute
   LoginRoute: typeof LoginRoute
   ParametresRoute: typeof ParametresRoute
+  PermissionsRoute: typeof PermissionsRoute
   PlanifierRoute: typeof PlanifierRoute
   ProfilRoute: typeof ProfilRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
@@ -693,6 +730,7 @@ export interface RootRouteChildren {
   ManagerDemandesRoute: typeof ManagerDemandesRoute
   ManagerHistoriqueRoute: typeof ManagerHistoriqueRoute
   ManagerParametresRoute: typeof ManagerParametresRoute
+  ManagerPermissionsRoute: typeof ManagerPermissionsRoute
   ManagerPlanningRoute: typeof ManagerPlanningRoute
   ManagerProfilRoute: typeof ManagerProfilRoute
   RhAlertesRoute: typeof RhAlertesRoute
@@ -706,6 +744,7 @@ export interface RootRouteChildren {
   RhHierarchieRoute: typeof RhHierarchieRoute
   RhParametresRoute: typeof RhParametresRoute
   RhPassifRoute: typeof RhPassifRoute
+  RhPermissionsRoute: typeof RhPermissionsRoute
   RhProfilRoute: typeof RhProfilRoute
   RhSoldesCpRoute: typeof RhSoldesCpRoute
   RhSpeciauxRoute: typeof RhSpeciauxRoute
@@ -762,6 +801,13 @@ declare module '@tanstack/react-router' {
       path: '/planifier'
       fullPath: '/planifier'
       preLoaderRoute: typeof PlanifierRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/permissions': {
+      id: '/permissions'
+      path: '/permissions'
+      fullPath: '/permissions'
+      preLoaderRoute: typeof PermissionsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/parametres': {
@@ -862,6 +908,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof RhProfilRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/rh/permissions': {
+      id: '/rh/permissions'
+      path: '/rh/permissions'
+      fullPath: '/rh/permissions'
+      preLoaderRoute: typeof RhPermissionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/rh/passif': {
       id: '/rh/passif'
       path: '/rh/passif'
@@ -951,6 +1004,13 @@ declare module '@tanstack/react-router' {
       path: '/manager/planning'
       fullPath: '/manager/planning'
       preLoaderRoute: typeof ManagerPlanningRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/manager/permissions': {
+      id: '/manager/permissions'
+      path: '/manager/permissions'
+      fullPath: '/manager/permissions'
+      preLoaderRoute: typeof ManagerPermissionsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/manager/parametres': {
@@ -1106,6 +1166,7 @@ const rootRouteChildren: RootRouteChildren = {
   LandingRoute: LandingRoute,
   LoginRoute: LoginRoute,
   ParametresRoute: ParametresRoute,
+  PermissionsRoute: PermissionsRoute,
   PlanifierRoute: PlanifierRoute,
   ProfilRoute: ProfilRoute,
   ResetPasswordRoute: ResetPasswordRoute,
@@ -1125,6 +1186,7 @@ const rootRouteChildren: RootRouteChildren = {
   ManagerDemandesRoute: ManagerDemandesRoute,
   ManagerHistoriqueRoute: ManagerHistoriqueRoute,
   ManagerParametresRoute: ManagerParametresRoute,
+  ManagerPermissionsRoute: ManagerPermissionsRoute,
   ManagerPlanningRoute: ManagerPlanningRoute,
   ManagerProfilRoute: ManagerProfilRoute,
   RhAlertesRoute: RhAlertesRoute,
@@ -1138,6 +1200,7 @@ const rootRouteChildren: RootRouteChildren = {
   RhHierarchieRoute: RhHierarchieRoute,
   RhParametresRoute: RhParametresRoute,
   RhPassifRoute: RhPassifRoute,
+  RhPermissionsRoute: RhPermissionsRoute,
   RhProfilRoute: RhProfilRoute,
   RhSoldesCpRoute: RhSoldesCpRoute,
   RhSpeciauxRoute: RhSpeciauxRoute,

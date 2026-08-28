@@ -17,6 +17,9 @@ function createHarness() {
     leaveType: {
       findMany: jest.fn(),
     },
+    event: {
+      count: jest.fn(),
+    },
   } as any;
 
   prisma.user.findUnique.mockResolvedValue({
@@ -41,6 +44,7 @@ function createHarness() {
       category: LeaveCategory.CONGE_PAYE,
     },
   ]);
+  prisma.event.count.mockResolvedValue(0);
 
   return { prisma, service: new EmployeePlanningService(prisma) };
 }

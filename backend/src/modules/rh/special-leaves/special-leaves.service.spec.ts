@@ -186,17 +186,11 @@ describe('RhSpecialLeavesService', () => {
   it('excludes employee form special-leave requests from the RH special leaves list', async () => {
     const { prisma, service } = createHarness();
 
-    await service.findAll({ year: '2026' });
+    const result = await service.findAll({ year: '2026' });
 
-    expect(prisma.leaveRequest.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          reference: { startsWith: 'CS-' },
-          leaveType: { category: { in: expect.any(Array) } },
-        }),
-      }),
-    );
+    expect(prisma.leaveRequest.findMany).not.toHaveBeenCalled();
     expect(prisma.event.findMany).toHaveBeenCalled();
+    expect(result.rows).toEqual([]);
   });
 
   it('imports a birth row for a male employee as paternity leave with computed days', async () => {

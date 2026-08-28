@@ -6,6 +6,7 @@ import {
 import { AuditAction, LeaveCategory, Prisma, UserStatus } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { LeaveEntitlementsService } from '../../shared/leave-entitlements/leave-entitlements.service';
+import { EmailService } from '../../shared/notifications/email.service';
 import { ImportRhPaidBalancesDto } from './dto/rh-paid-balance-import.dto';
 
 const PAID_LEAVE_CODE = 'CP';
@@ -22,6 +23,7 @@ type ImportResultRow = {
   matricule: string;
   employeeId: string;
   employeeName: string;
+  employeeEmail: string;
   acquired: number;
   taken: number;
   scheduled: number;
@@ -31,12 +33,14 @@ type ImportResultRow = {
   previousRemaining: number;
   newRemaining: number;
 };
+type ImportResponseRow = Omit<ImportResultRow, 'employeeEmail'>;
 
 @Injectable()
 export class RhLeaveBalancesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly leaveEntitlements: LeaveEntitlementsService,
+    private readonly emailService: EmailService,
   ) {}
 
   async importPaidBalances(dto: ImportRhPaidBalancesDto) {
@@ -78,7 +82,7 @@ export class RhLeaveBalancesService {
       );
     }
 
-    return this.prisma.$transaction(async (transaction) => {
+    const result = await this.prisma.$transaction(async (transaction) => {
       const leaveType = await this.findPaidLeaveType(transaction);
       const importedRows: ImportResultRow[] = [];
 
@@ -90,6 +94,7 @@ export class RhLeaveBalancesService {
             matricule: true,
             nom: true,
             prenom: true,
+            email: true,
             sexe: true,
             dateEmbauche: true,
             passifInitial: true,
@@ -159,6 +164,7 @@ export class RhLeaveBalancesService {
           matricule: employee.matricule,
           employeeId: employee.id,
           employeeName: `${employee.prenom} ${employee.nom}`.trim(),
+          employeeEmail: employee.email,
           acquired,
           taken,
           scheduled,
@@ -189,6 +195,10 @@ export class RhLeaveBalancesService {
         },
       });
 
+      const responseRows = importedRows.map((row) =>
+        this.toPublicImportRow(row),
+      );
+
       return {
         year: dto.year,
         leaveType: {
@@ -208,9 +218,43 @@ export class RhLeaveBalancesService {
             importedRows.reduce((sum, row) => sum + row.newRemaining, 0),
           ),
         },
-        rows: importedRows,
+        rows: responseRows,
+        emails: importedRows
+          .filter((row) => Boolean(row.employeeEmail?.trim()))
+          .map((row) => ({
+            to: row.employeeEmail,
+            subject: `Mise à jour de votre solde CP ${dto.year}`,
+            text: `${row.employeeName},\n\nVotre solde CP ${dto.year} a été mis à jour par la RH: ${row.previousRemaining} jour(s) → ${row.newRemaining} jour(s).\n\nVous pouvez consulter le détail actualisé dans votre solde de congés.`,
+            link: '/solde',
+            actionLabel: 'Voir mon solde',
+          })),
       };
     });
+
+    await this.emailService.sendMany(result.emails);
+    return {
+      year: result.year,
+      leaveType: result.leaveType,
+      imported: result.imported,
+      totals: result.totals,
+      rows: result.rows,
+    };
+  }
+
+  private toPublicImportRow(row: ImportResultRow): ImportResponseRow {
+    return {
+      matricule: row.matricule,
+      employeeId: row.employeeId,
+      employeeName: row.employeeName,
+      acquired: row.acquired,
+      taken: row.taken,
+      scheduled: row.scheduled,
+      previousCarryover: row.previousCarryover,
+      newCarryover: row.newCarryover,
+      importedBalance: row.importedBalance,
+      previousRemaining: row.previousRemaining,
+      newRemaining: row.newRemaining,
+    };
   }
 
   private async findPaidLeaveType(client: Prisma.TransactionClient) {

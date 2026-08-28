@@ -63,6 +63,43 @@ export class CreateEmployeeEventDto {
   description?: string;
 }
 
+export class UpdateEmployeeEventDto {
+  @IsOptional()
+  @IsString()
+  userId?: string;
+
+  @IsOptional()
+  @IsEmail()
+  userEmail?: string;
+
+  @IsOptional()
+  @IsEnum(EventType)
+  type?: EventType;
+
+  @IsOptional()
+  @IsDateString()
+  eventDate?: string;
+
+  @IsOptional()
+  @IsDateString()
+  childBirthDate?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  description?: string;
+}
+
+export class DeleteEmployeeEventDto {
+  @IsOptional()
+  @IsString()
+  userId?: string;
+
+  @IsOptional()
+  @IsEmail()
+  userEmail?: string;
+}
+
 export class ReviewEmployeeEventDto {
   @IsOptional()
   @IsString()

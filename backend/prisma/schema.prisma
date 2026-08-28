@@ -179,19 +179,22 @@ model User {
   roles UserRole[]
 
   // Relations métier
-  leaveRequests              LeaveRequest[]    @relation("RequestOwner")
-  validations                Validation[]      @relation("Validator")
-  balances                   LeaveBalance[]
-  children                   Child[]
-  events                     Event[]
-  notifications              Notification[]
-  auditLogs                  AuditLog[]
-  managedDepartments         Department[]      @relation("DepartmentManager")
-  conflictsResolved          Conflict[]        @relation("ConflictResolver")
-  overtimeRequests           OvertimeRequest[] @relation("OvertimeOwner")
-  overtimeDecisionsAsManager OvertimeRequest[] @relation("OvertimeManagerValidator")
-  overtimeDecisionsAsRh      OvertimeRequest[] @relation("OvertimeRhValidator")
-  otpRequests                OtpRequest[]
+  leaveRequests                LeaveRequest[]      @relation("RequestOwner")
+  validations                  Validation[]        @relation("Validator")
+  balances                     LeaveBalance[]
+  children                     Child[]
+  events                       Event[]
+  notifications                Notification[]
+  auditLogs                    AuditLog[]
+  managedDepartments           Department[]        @relation("DepartmentManager")
+  conflictsResolved            Conflict[]          @relation("ConflictResolver")
+  overtimeRequests             OvertimeRequest[]   @relation("OvertimeOwner")
+  overtimeDecisionsAsManager   OvertimeRequest[]   @relation("OvertimeManagerValidator")
+  overtimeDecisionsAsRh        OvertimeRequest[]   @relation("OvertimeRhValidator")
+  permissionRequests           PermissionRequest[] @relation("PermissionOwner")
+  permissionDecisionsAsManager PermissionRequest[] @relation("PermissionManagerValidator")
+  permissionDecisionsAsRh      PermissionRequest[] @relation("PermissionRhValidator")
+  otpRequests                  OtpRequest[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -428,6 +431,35 @@ model OvertimeRequest {
   @@index([workDate])
   @@index([managerValidatorId])
   @@index([rhValidatorId])
+}
+
+model PermissionRequest {
+  id                 String             @id @default(cuid())
+  reference          String             @unique
+  ownerId            String
+  owner              User               @relation("PermissionOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  permissionDate     DateTime
+  reason             String?
+  status             LeaveRequestStatus @default(PENDING)
+  submittedAt        DateTime           @default(now())
+  managerValidatorId String?
+  managerValidator   User?              @relation("PermissionManagerValidator", fields: [managerValidatorId], references: [id], onDelete: SetNull)
+  managerComment     String?
+  managerDecidedAt   DateTime?
+  rhValidatorId      String?
+  rhValidator        User?              @relation("PermissionRhValidator", fields: [rhValidatorId], references: [id], onDelete: SetNull)
+  rhComment          String?
+  rhDecidedAt        DateTime?
+  cancelledAt        DateTime?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@index([ownerId])
+  @@index([status])
+  @@index([permissionDate])
+  @@index([managerValidatorId])
+  @@index([rhValidatorId])
+  @@index([ownerId, permissionDate])
 }
 
 // ============================================================

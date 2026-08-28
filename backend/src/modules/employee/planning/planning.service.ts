@@ -56,7 +56,14 @@ const POOL_PAYE_CODE = 'PAYE';
 const POOL_SPECIAL_CODE = 'SPECIAL';
 const MATERNITY_CODE = 'MAT';
 const PAID_SOURCE_CODES = new Set(['CP', 'ANC', 'ENF', 'PASSIF']);
-const EXCLUDED_SPECIAL_CODES = new Set(['PASSIF', 'MAT', 'SS']);
+const EXCLUDED_SPECIAL_CODES = new Set([
+  'PASSIF',
+  'MAT',
+  'SS',
+  'SPE',
+  'MAL',
+  'ACC_EPOUSE',
+]);
 const POOL_PAYE_LABEL = 'Congés payés (total annuel)';
 const POOL_SPECIAL_LABEL = 'Congés spéciaux (plafond 12 j)';
 
@@ -79,7 +86,7 @@ export class EmployeePlanningService {
         orderBy: [{ startDate: 'asc' }, { reference: 'asc' }],
         select: planningRequestSelect,
       }),
-      this.findLeaveTypes(),
+      this.findLeaveTypes(user.id),
     ]);
 
     const plans = requests.map((request) => this.toPlan(request));
@@ -241,6 +248,12 @@ export class EmployeePlanningService {
       fin: this.formatDate(request.endDate),
       startDate: this.toInputDate(request.startDate),
       endDate: this.toInputDate(request.endDate),
+      submittedAt: request.submittedAt?.toISOString() ?? null,
+      submittedDate: request.submittedAt
+        ? this.formatDate(request.submittedAt)
+        : request.status === LeaveRequestStatus.DRAFT
+          ? 'Non soumise'
+          : '-',
       jours: this.roundDays(request.days),
       type: typeCode,
       leaveTypeCode: typeCode,
@@ -330,18 +343,29 @@ export class EmployeePlanningService {
     return Math.round(value * 10) / 10;
   }
 
-  private async findLeaveTypes() {
-    const leaveTypes = await this.prisma.leaveType.findMany({
-      where: { active: true },
-      orderBy: [{ category: 'asc' }, { name: 'asc' }],
-      select: {
-        id: true,
-        code: true,
-        name: true,
-        category: true,
-        requiresProof: true,
-      },
-    });
+  private async findLeaveTypes(userId?: string) {
+    const [leaveTypes, approvedSpecialEvents] = await Promise.all([
+      this.prisma.leaveType.findMany({
+        where: { active: true },
+        orderBy: [{ category: 'asc' }, { name: 'asc' }],
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          category: true,
+          requiresProof: true,
+        },
+      }),
+      userId
+        ? this.prisma.event.count({
+            where: {
+              userId,
+              processed: true,
+              status: LeaveRequestStatus.APPROVED,
+            },
+          })
+        : Promise.resolve(0),
+    ]);
 
     const paidPool = leaveTypes.filter((leaveType) =>
       this.isPaidPoolLeaveType(leaveType),
@@ -379,7 +403,7 @@ export class EmployeePlanningService {
       });
     }
 
-    if (specialPool.length) {
+    if (specialPool.length && approvedSpecialEvents > 0) {
       options.push({
         id: POOL_SPECIAL_CODE,
         code: POOL_SPECIAL_CODE,
@@ -423,9 +447,7 @@ export class EmployeePlanningService {
 
     return (
       leaveType.category === LeaveCategory.CONGE_SPECIAL ||
-      leaveType.category === LeaveCategory.CONGE_PATERNITE ||
-      leaveType.category === LeaveCategory.CONGE_MALADIE ||
-      code === 'SPE'
+      leaveType.category === LeaveCategory.CONGE_PATERNITE
     );
   }
 

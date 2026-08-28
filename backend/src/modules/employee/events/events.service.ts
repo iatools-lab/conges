@@ -15,8 +15,10 @@ import {
 import { PrismaService } from '../../../prisma/prisma.service';
 import {
   CreateEmployeeEventDto,
+  DeleteEmployeeEventDto,
   FindEmployeeEventsQueryDto,
   ReviewEmployeeEventDto,
+  UpdateEmployeeEventDto,
 } from './dto/employee-event.dto';
 import { EmailService } from '../../shared/notifications/email.service';
 import { LeaveEntitlementsService } from '../../shared/leave-entitlements/leave-entitlements.service';
@@ -27,6 +29,10 @@ import {
   splitPeriodByLeaveYear,
 } from '../../../common/leave-year';
 import { countWorkingDays } from '../../../common/working-days';
+import {
+  EXCEPTIONAL_PERMISSION_RULES,
+  findExceptionalPermissionRule,
+} from '../../shared/special-leaves/exceptional-permissions';
 
 export const EVENT_PROOF_MAX_BYTES = 3 * 1024 * 1024;
 
@@ -85,6 +91,7 @@ export class EmployeeEventsService {
       dateFrom: range.dateFromIso,
       dateTo: range.dateToIso,
       user: this.toUser(user),
+      eventTypes: this.buildEventTypeOptions(),
       rows: events.map((event) => this.toResponse(event)),
     };
   }
@@ -202,6 +209,120 @@ export class EmployeeEventsService {
     await this.emailService.sendMany(emails);
 
     return this.toResponse(event);
+  }
+
+  async update(
+    id: string,
+    dto: UpdateEmployeeEventDto,
+    proof?: UploadedEventProof,
+  ) {
+    const user = await this.resolveUser(dto.userId, dto.userEmail);
+    const existing = await this.prisma.event.findUnique({
+      where: { id },
+      select: { ...eventSelect, userId: true },
+    });
+
+    if (!existing || existing.userId !== user.id) {
+      throw new NotFoundException('Evénement introuvable');
+    }
+    if (
+      existing.status === LeaveRequestStatus.APPROVED ||
+      existing.status === LeaveRequestStatus.IN_REVIEW
+    ) {
+      throw new BadRequestException(
+        "Une déclaration validée ou en revue RH ne peut plus être modifiée depuis l'espace employé.",
+      );
+    }
+
+    const nextType = dto.type ?? existing.type;
+    const declaredEventDate = dto.eventDate
+      ? this.parseDate(dto.eventDate)
+      : existing.eventDate;
+    const nextEventDate =
+      nextType === EventType.BIRTH
+        ? this.parseBirthEventDate(
+            dto.childBirthDate ??
+              dto.eventDate ??
+              this.toDateInput(existing.eventDate),
+          )
+        : declaredEventDate;
+    const nextProofUrl = proof ? this.toProofDataUrl(proof) : existing.proofUrl;
+    const nextDescription =
+      dto.description !== undefined
+        ? dto.description.trim() || null
+        : existing.description;
+
+    const updated = await this.prisma.$transaction(async (transaction) => {
+      const row = await transaction.event.update({
+        where: { id },
+        data: {
+          type: nextType,
+          eventDate: nextEventDate,
+          description: nextDescription,
+          proofUrl: nextProofUrl,
+          status: LeaveRequestStatus.PENDING,
+          processed: false,
+          rhComment: null,
+          reviewedAt: null,
+        },
+        select: eventSelect,
+      });
+
+      await transaction.auditLog.create({
+        data: {
+          userId: user.id,
+          action: AuditAction.UPDATE,
+          entity: 'Event',
+          entityId: id,
+          metadata: {
+            source: 'employee',
+            previousStatus: existing.status,
+            type: nextType,
+            proof: Boolean(nextProofUrl),
+            eventDate: this.toDateInput(nextEventDate),
+          },
+        },
+      });
+
+      return row;
+    });
+
+    return this.toResponse(updated);
+  }
+
+  async remove(id: string, dto: DeleteEmployeeEventDto) {
+    const user = await this.resolveUser(dto.userId, dto.userEmail);
+    const existing = await this.prisma.event.findUnique({
+      where: { id },
+      select: { id: true, userId: true, status: true },
+    });
+
+    if (!existing || existing.userId !== user.id) {
+      throw new NotFoundException('Evénement introuvable');
+    }
+    if (
+      existing.status === LeaveRequestStatus.APPROVED ||
+      existing.status === LeaveRequestStatus.IN_REVIEW
+    ) {
+      throw new BadRequestException(
+        "Une déclaration validée ou en revue RH ne peut pas être supprimée depuis l'espace employé.",
+      );
+    }
+
+    await this.prisma.$transaction(async (transaction) => {
+      await transaction.event.delete({ where: { id } });
+      await transaction.auditLog.create({
+        data: {
+          userId: user.id,
+          action: AuditAction.DELETE,
+          entity: 'Event',
+          entityId: id,
+          metadata: { source: 'employee', previousStatus: existing.status },
+        },
+      });
+    });
+
+    return { id, deleted: true };
   }
 
   async review(id: string, dto: ReviewEmployeeEventDto) {
@@ -597,7 +718,7 @@ export class EmployeeEventsService {
     return {
       id: event.id,
       type: event.type,
-      typeLabel: this.eventLabel(event.type),
+      typeLabel: this.eventSpecificLabel(event) || this.eventLabel(event.type),
       eventDate: this.formatDate(event.eventDate),
       eventDateInput: this.toDateInput(event.eventDate),
       createdAt: this.formatDate(event.createdAt),
@@ -636,6 +757,40 @@ export class EmployeeEventsService {
     return value.toISOString().slice(0, 10);
   }
 
+  private buildEventTypeOptions() {
+    const options = new Map<
+      string,
+      {
+        id: string;
+        value: EventType;
+        label: string;
+        code?: string;
+        days?: number;
+      }
+    >();
+    const add = (
+      id: string,
+      value: EventType,
+      label: string,
+      code?: string,
+      days?: number,
+    ) => {
+      options.set(id, { id, value, label, code, days });
+    };
+
+    for (const rule of EXCEPTIONAL_PERMISSION_RULES) {
+      add(
+        `leave-type:${rule.code}`,
+        rule.eventType,
+        `${rule.name} (${rule.defaultDays} jour${rule.defaultDays > 1 ? 's' : ''})`,
+        rule.code,
+        rule.defaultDays,
+      );
+    }
+
+    return Array.from(options.values());
+  }
+
   private eventLabel(type: EventType) {
     const labels: Record<EventType, string> = {
       BIRTH: 'Naissance / enfant',
@@ -646,6 +801,19 @@ export class EmployeeEventsService {
     };
 
     return labels[type];
+  }
+
+  private eventSpecificLabel(event: {
+    description: string | null;
+    type: EventType;
+  }) {
+    const description = event.description ?? '';
+    const codeMatch = description.match(/\[([A-Z0-9_]+)\]/);
+    const rule = codeMatch ? findExceptionalPermissionRule(codeMatch[1]) : null;
+
+    return rule
+      ? `${rule.name} (${rule.defaultDays} jour${rule.defaultDays > 1 ? 's' : ''})`
+      : null;
   }
 
   private eventStatus(status: LeaveRequestStatus) {

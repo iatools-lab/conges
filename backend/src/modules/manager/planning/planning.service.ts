@@ -36,6 +36,7 @@ const planningUserSelect = {
       endDate: true,
       days: true,
       status: true,
+      submittedAt: true,
       leaveType: { select: { code: true, name: true } },
     },
   },
@@ -155,6 +156,12 @@ export class ManagerPlanningService {
         endDate: this.formatDate(request.endDate),
         startDateIso: request.startDate.toISOString().slice(0, 10),
         endDateIso: request.endDate.toISOString().slice(0, 10),
+        submittedAt: request.submittedAt?.toISOString() ?? null,
+        submittedDate: request.submittedAt
+          ? this.formatDate(request.submittedAt)
+          : request.status === LeaveRequestStatus.DRAFT
+            ? 'Non soumise'
+            : '-',
         days: this.roundDays(request.days),
         type: request.leaveType.name,
         statusCode: request.status,
@@ -394,6 +401,12 @@ export class ManagerPlanningService {
         reference: request.reference,
         startDate: request.startDate.toISOString(),
         endDate: request.endDate.toISOString(),
+        submittedAt: request.submittedAt?.toISOString() ?? null,
+        submittedDate: request.submittedAt
+          ? this.formatDate(request.submittedAt)
+          : request.status === LeaveRequestStatus.DRAFT
+            ? 'Non soumise'
+            : '-',
         days: this.roundDays(request.days),
         type: request.leaveType.name,
         typeCode: request.leaveType.code,

@@ -9,6 +9,7 @@ import {
   LeaveEntitlementsService,
   MAX_PASSIVE_LEAVE_DAYS,
 } from '../../shared/leave-entitlements/leave-entitlements.service';
+import { EmailService } from '../../shared/notifications/email.service';
 import {
   ImportRhLeaveLiabilitiesDto,
   ImportRhLeaveLiabilityRowDto,
@@ -32,6 +33,7 @@ const liabilityUserSelect = {
   matricule: true,
   nom: true,
   prenom: true,
+  email: true,
   sexe: true,
   dateEmbauche: true,
   passifInitial: true,
@@ -59,6 +61,7 @@ type LiabilityUser = Prisma.UserGetPayload<{
   select: typeof liabilityUserSelect;
 }>;
 type LiabilityResponse = ReturnType<RhLeaveLiabilitiesService['toResponse']>;
+type LiabilityImportRow = LiabilityResponse & { employeeEmail: string };
 type PrismaClientLike = PrismaService | Prisma.TransactionClient;
 
 @Injectable()
@@ -66,6 +69,7 @@ export class RhLeaveLiabilitiesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly leaveEntitlements: LeaveEntitlementsService,
+    private readonly emailService: EmailService,
   ) {}
 
   async findAll(yearValue?: string) {
@@ -90,7 +94,7 @@ export class RhLeaveLiabilitiesService {
   async update(userId: string, dto: UpdateRhLeaveLiabilityDto) {
     const passifInitial = this.normalizePassiveDays(dto.passifInitial);
 
-    return this.prisma.$transaction(async (transaction) => {
+    const result = await this.prisma.$transaction(async (transaction) => {
       await this.ensureEmployeeExists(transaction, userId);
       const leaveType = await this.ensurePassiveLeaveType(transaction);
       await transaction.user.update({
@@ -100,8 +104,23 @@ export class RhLeaveLiabilitiesService {
       await this.syncPassiveBalances(transaction, userId, leaveType);
       const user = await this.findLiabilityUser(transaction, userId);
 
-      return this.toResponse(user, leaveType);
+      return {
+        row: this.toResponse(user, leaveType),
+        email: user.email,
+      };
     });
+
+    await this.emailService.sendMany([
+      {
+        to: result.email,
+        subject: 'Mise à jour de votre passif congés',
+        text: `${result.row.employeeName},\n\nVotre passif congés a été mis à jour par la RH. Nouveau passif initial: ${result.row.passifInitial} jour(s). Solde passif restant: ${result.row.remaining} jour(s).\n\nVous pouvez consulter le détail actualisé dans votre solde de congés.`,
+        link: '/solde',
+        actionLabel: 'Voir mon solde',
+      },
+    ]);
+
+    return result.row;
   }
 
   async importRows(dto: ImportRhLeaveLiabilitiesDto) {
@@ -109,9 +128,9 @@ export class RhLeaveLiabilitiesService {
       throw new BadRequestException('Aucune ligne de passif à importer');
     }
 
-    return this.prisma.$transaction(async (transaction) => {
+    const result = await this.prisma.$transaction(async (transaction) => {
       const leaveType = await this.ensurePassiveLeaveType(transaction);
-      const rows: LiabilityResponse[] = [];
+      const rows: LiabilityImportRow[] = [];
 
       for (const importRow of dto.rows) {
         const employee = await this.findEmployeeForImport(
@@ -126,19 +145,56 @@ export class RhLeaveLiabilitiesService {
           data: { passifInitial },
         });
         await this.syncPassiveBalances(transaction, employee.id, leaveType);
-        rows.push(
-          this.toResponse(
-            await this.findLiabilityUser(transaction, employee.id),
-            leaveType,
-          ),
+        const liabilityUser = await this.findLiabilityUser(
+          transaction,
+          employee.id,
         );
+        rows.push({
+          ...this.toResponse(liabilityUser, leaveType),
+          employeeEmail: liabilityUser.email,
+        });
       }
 
       return {
         imported: rows.length,
-        rows,
+        rows: rows.map((row) => this.toPublicImportRow(row)),
+        emails: rows
+          .filter((row) => Boolean(row.employeeEmail?.trim()))
+          .map((row) => ({
+            to: row.employeeEmail,
+            subject: 'Mise à jour de votre passif congés',
+            text: `${row.employeeName},\n\nVotre passif congés a été mis à jour par import RH. Nouveau passif initial: ${row.passifInitial} jour(s). Solde passif restant: ${row.remaining} jour(s).\n\nVous pouvez consulter le détail actualisé dans votre solde de congés.`,
+            link: '/solde',
+            actionLabel: 'Voir mon solde',
+          })),
       };
     });
+
+    await this.emailService.sendMany(result.emails);
+    return {
+      imported: result.imported,
+      rows: result.rows,
+    };
+  }
+
+  private toPublicImportRow(row: LiabilityImportRow): LiabilityResponse {
+    return {
+      id: row.id,
+      employeeId: row.employeeId,
+      matricule: row.matricule,
+      employeeName: row.employeeName,
+      department: row.department,
+      status: row.status,
+      passifInitial: row.passifInitial,
+      y2025: row.y2025,
+      y2026: row.y2026,
+      y2027: row.y2027,
+      consumed: row.consumed,
+      remaining: row.remaining,
+      liabilityStatus: row.liabilityStatus,
+      liabilityStatusLabel: row.liabilityStatusLabel,
+      years: row.years,
+    };
   }
 
   private async findPassiveLeaveType(client: PrismaClientLike) {

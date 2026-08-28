@@ -48,6 +48,7 @@ function createHarness() {
       findMany: jest.fn(),
     },
     leaveType: {
+      findMany: jest.fn(),
       findFirst: jest.fn(),
       findUnique: jest.fn(),
     },
@@ -86,6 +87,7 @@ function createHarness() {
     return Promise.resolve([]);
   });
   prisma.event.create.mockResolvedValue(event);
+  prisma.leaveType.findMany.mockResolvedValue([]);
 
   return {
     prisma,

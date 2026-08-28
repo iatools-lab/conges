@@ -6,7 +6,8 @@ export const managerModule: FrontendModule = {
   basePath: "/manager",
   submodules: [
     { id: "dashboard", label: "Dashboard pilotage", path: "/manager" },
-    { id: "requests", label: "Demandes & Validations", path: "/manager/demandes" },
+    { id: "requests", label: "Demandes & Planifications", path: "/manager/demandes" },
+    { id: "permissions", label: "Permissions", path: "/manager/permissions" },
     { id: "conflicts", label: "Conflits", path: "/manager/conflits" },
     { id: "calendar", label: "Planning équipe", path: "/manager/planning" },
     { id: "history", label: "Historique validations", path: "/manager/historique" },

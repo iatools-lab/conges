@@ -36,7 +36,10 @@ import {
 import { EmailService } from '../../shared/notifications/email.service';
 import { LeaveBalanceSyncService } from '../../shared/leave-balances/leave-balance-sync.service';
 import { LeaveBalanceInitializerService } from '../../shared/leave-balances/leave-balance-initializer.service';
-import { overlapDateWhere, resolveDateRange } from '../../../common/date-range';
+import {
+  resolveDateRange,
+  type ResolvedDateRange,
+} from '../../../common/date-range';
 import {
   getCurrentLeaveYear,
   getLeaveYearsForPeriod,
@@ -45,7 +48,10 @@ import {
   countWorkingDays,
   endDateForWorkingDays,
 } from '../../../common/working-days';
-import { summarizePaidLeavePool } from '../../shared/leave-balances/leave-balance-pools';
+import {
+  paidPassifRemaining,
+  summarizePaidLeavePool,
+} from '../../shared/leave-balances/leave-balance-pools';
 type BadgeTone =
   | 'valid'
   | 'pending'
@@ -100,10 +106,16 @@ export class RhGlobalViewService {
     const rhUser = await this.resolveRh(dto.rhId, dto.rhEmail);
     const targetTaken = this.roundDays(dto.taken);
 
-    return this.prisma.$transaction(async (transaction) => {
+    const result = await this.prisma.$transaction(async (transaction) => {
       const employee = await transaction.user.findUnique({
         where: { id: userId },
-        select: { id: true, matricule: true, nom: true, prenom: true },
+        select: {
+          id: true,
+          matricule: true,
+          nom: true,
+          prenom: true,
+          email: true,
+        },
       });
       if (!employee) throw new NotFoundException('Employé introuvable');
 
@@ -234,18 +246,38 @@ export class RhGlobalViewService {
         previousTaken,
         taken: targetTaken,
         takenAdjustment: totalTakenAdjustment,
+        employeeEmail: employee.email,
+        employeeName: this.fullName(employee),
       };
     });
+
+    await this.notifyBalanceAdjustment({
+      email: result.employeeEmail,
+      employeeName: result.employeeName,
+      subject: `Correction de vos jours de congés pris ${result.year}`,
+      text: `Votre compteur de jours de congés pris ${result.year} a été modifié par la RH: ${this.roundDays(result.previousTaken)} jour(s) → ${this.roundDays(result.taken)} jour(s).`,
+    });
+
+    const { employeeEmail, employeeName, ...response } = result;
+    void employeeEmail;
+    void employeeName;
+    return response;
   }
 
   async updateTotalDays(userId: string, dto: UpdateRhTotalDaysDto) {
     const rhUser = await this.resolveRh(dto.rhId, dto.rhEmail);
     const targetTotal = this.roundDays(dto.total);
 
-    return this.prisma.$transaction(async (transaction) => {
+    const result = await this.prisma.$transaction(async (transaction) => {
       const employee = await transaction.user.findUnique({
         where: { id: userId },
-        select: { id: true, matricule: true, nom: true, prenom: true },
+        select: {
+          id: true,
+          matricule: true,
+          nom: true,
+          prenom: true,
+          email: true,
+        },
       });
       if (!employee) throw new NotFoundException('Employé introuvable');
 
@@ -343,15 +375,29 @@ export class RhGlobalViewService {
         previousTotal,
         total: targetTotal,
         adjustmentDelta,
+        employeeEmail: employee.email,
+        employeeName: this.fullName(employee),
       };
     });
+
+    await this.notifyBalanceAdjustment({
+      email: result.employeeEmail,
+      employeeName: result.employeeName,
+      subject: `Correction de votre solde total de congés ${result.year}`,
+      text: `Votre solde total de congés ${result.year} a été modifié par la RH: ${this.roundDays(result.previousTotal)} jour(s) → ${this.roundDays(result.total)} jour(s).`,
+    });
+
+    const { employeeEmail, employeeName, ...response } = result;
+    void employeeEmail;
+    void employeeName;
+    return response;
   }
 
   async updatePlannedDays(requestId: string, dto: UpdateRhPlannedDaysDto) {
     const rhUser = await this.resolveRh(dto.rhId, dto.rhEmail);
     const targetDays = dto.days;
 
-    return this.prisma.$transaction(async (transaction) => {
+    const result = await this.prisma.$transaction(async (transaction) => {
       const request = await transaction.leaveRequest.findUnique({
         where: { id: requestId },
         select: {
@@ -371,6 +417,7 @@ export class RhGlobalViewService {
               matricule: true,
               nom: true,
               prenom: true,
+              email: true,
             },
           },
         },
@@ -463,8 +510,22 @@ export class RhGlobalViewService {
         startDate: this.toInputDate(updated.startDate),
         previousEndDate: this.toInputDate(previousEndDate),
         endDate: this.toInputDate(updated.endDate),
+        employeeEmail: request.owner.email,
+        employeeName: this.fullName(request.owner),
       };
     });
+
+    await this.notifyBalanceAdjustment({
+      email: result.employeeEmail,
+      employeeName: result.employeeName,
+      subject: `Correction d'une planification de congés — ${result.reference}`,
+      text: `La planification ${result.reference} a été modifiée par la RH: ${this.roundDays(result.previousDays)} jour(s) → ${this.roundDays(result.days)} jour(s), avec une nouvelle date de fin au ${result.endDate}.`,
+    });
+
+    const { employeeEmail, employeeName, ...response } = result;
+    void employeeEmail;
+    void employeeName;
+    return response;
   }
 
   async updateProcessedRequest(
@@ -524,8 +585,24 @@ export class RhGlobalViewService {
         : request.endDate;
       let days =
         dto.days !== undefined ? this.roundDays(dto.days) : request.days;
+      const periodWasProvided =
+        dto.startDate !== undefined || dto.endDate !== undefined;
 
-      if (dto.days !== undefined && !dto.endDate) {
+      if (!periodWasProvided && (!Number.isFinite(days) || days <= 0)) {
+        throw new BadRequestException(
+          'Le nombre de jours doit etre superieur a zero.',
+        );
+      }
+
+      if (startDate > endDate) {
+        throw new BadRequestException(
+          'La date de dÃƒÂ©but doit ÃƒÂªtre antÃƒÂ©rieure ou ÃƒÂ©gale ÃƒÂ  la date de fin.',
+        );
+      }
+
+      if (periodWasProvided) {
+        days = await this.countBusinessDays(startDate, endDate, transaction);
+      } else if (dto.days !== undefined) {
         const searchEnd = new Date(startDate);
         searchEnd.setUTCDate(searchEnd.getUTCDate() + days * 2 + 30);
         const holidays = await this.findPublicHolidays(
@@ -534,8 +611,12 @@ export class RhGlobalViewService {
           transaction,
         );
         endDate = endDateForWorkingDays(startDate, days, holidays);
-      } else if (dto.days === undefined && (dto.startDate || dto.endDate)) {
-        days = await this.countBusinessDays(startDate, endDate, transaction);
+      }
+
+      if (!Number.isFinite(days) || days <= 0) {
+        throw new BadRequestException(
+          'La periode doit contenir au moins un jour ouvre.',
+        );
       }
 
       if (startDate > endDate) {
@@ -1401,7 +1482,7 @@ export class RhGlobalViewService {
       status: { not: UserStatus.INACTIVE },
     };
     const requestWhere: Prisma.LeaveRequestWhereInput = {
-      ...overlapDateWhere(range),
+      ...this.startDateWhere(range),
       status: { in: TRACKED_REQUEST_STATUSES },
     };
 
@@ -1536,7 +1617,7 @@ export class RhGlobalViewService {
     );
     const planned = paidSummary.scheduled;
     const remaining = paidSummary.remaining;
-    const liability = remaining;
+    const liability = paidPassifRemaining(user.balances);
 
     return {
       id: user.id,
@@ -1595,6 +1676,12 @@ export class RhGlobalViewService {
       endDate: this.formatDate(request.endDate),
       startDateIso: request.startDate.toISOString().slice(0, 10),
       endDateIso: request.endDate.toISOString().slice(0, 10),
+      submittedAt: request.submittedAt?.toISOString() ?? null,
+      submittedDate: request.submittedAt
+        ? this.formatDate(request.submittedAt)
+        : request.status === LeaveRequestStatus.DRAFT
+          ? 'Non soumise'
+          : '-',
       days: this.roundDays(request.days),
       reason: request.reason ?? '',
       type: this.toParentLeaveTypeLabel(request.leaveType),
@@ -1607,6 +1694,19 @@ export class RhGlobalViewService {
       status: status.tone,
       label: status.label,
       month: request.startDate.getUTCMonth(),
+    };
+  }
+
+  private startDateWhere(
+    range: ResolvedDateRange,
+  ): Prisma.LeaveRequestWhereInput {
+    if (!range.dateFrom && !range.endExclusive) return {};
+
+    return {
+      startDate: {
+        ...(range.dateFrom ? { gte: range.dateFrom } : {}),
+        ...(range.endExclusive ? { lt: range.endExclusive } : {}),
+      },
     };
   }
 
@@ -1821,6 +1921,18 @@ export class RhGlobalViewService {
         'PRISE',
         'PRISES',
         'TAKEN',
+        'VALIDE',
+        'VALIDES',
+        'VALIDEE',
+        'VALIDEES',
+        'APPROUVE',
+        'APPROUVES',
+        'APPROUVEE',
+        'APPROUVEES',
+        'APPROVED',
+        'HISTORIQUEVALIDE',
+        'CONGEVALIDE',
+        'CONGESVALIDES',
         'CONSOMME',
         'CONSOMMES',
         'CONGEPRIS',
@@ -2025,6 +2137,25 @@ export class RhGlobalViewService {
 
   private formatDate(date: Date) {
     return new Intl.DateTimeFormat('fr-FR').format(date);
+  }
+
+  private async notifyBalanceAdjustment(params: {
+    email?: string | null;
+    employeeName: string;
+    subject: string;
+    text: string;
+  }) {
+    if (!params.email?.trim()) return;
+
+    await this.emailService.sendMany([
+      {
+        to: params.email,
+        subject: params.subject,
+        text: `${params.employeeName},\n\n${params.text}\n\nVous pouvez consulter le détail actualisé dans votre solde de congés.`,
+        link: '/solde',
+        actionLabel: 'Voir mon solde',
+      },
+    ]);
   }
 
   private toInputDate(date: Date) {

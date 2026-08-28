@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import {
   AuditAction,
+  EventType,
   LeaveCategory,
   LeaveRequestStatus,
   NotificationType,
@@ -27,8 +28,13 @@ import { overlapDateWhere, resolveDateRange } from '../../../common/date-range';
 import { countWorkingDays as countBusinessDays } from '../../../common/working-days';
 import {
   getLeaveYear,
+  getLeaveYearRange,
   getLeaveYearsForPeriod,
 } from '../../../common/leave-year';
+import {
+  eventDescriptionIncludesExceptionalRule,
+  findExceptionalPermissionRule,
+} from '../../shared/special-leaves/exceptional-permissions';
 
 const employeeLeaveRequestSelect = {
   id: true,
@@ -46,6 +52,7 @@ const employeeLeaveRequestSelect = {
       code: true,
       name: true,
       category: true,
+      defaultDays: true,
       requiresProof: true,
     },
   },
@@ -61,6 +68,7 @@ type EmployeeLeaveRequest = Prisma.LeaveRequestGetPayload<{
   select: typeof employeeLeaveRequestSelect;
 }>;
 type PrismaClientLike = PrismaService | Prisma.TransactionClient;
+type SpecialEventRule = { eventType: EventType; days: number; code?: string };
 
 const editableStatuses: LeaveRequestStatus[] = [
   LeaveRequestStatus.DRAFT,
@@ -86,8 +94,23 @@ const SPECIAL_POOL_CODE = 'SPECIAL';
 const MATERNITY_CODE = 'MAT';
 const MATERNITY_REQUIRED_DAYS = 90;
 const SPECIAL_POOL_CAP_DAYS = 12;
+const PATERNITY_REQUIRED_DAYS = 3;
+const SPECIAL_EVENT_DAYS: Record<EventType, number> = {
+  [EventType.BIRTH]: PATERNITY_REQUIRED_DAYS,
+  [EventType.MARRIAGE]: 3,
+  [EventType.DEATH]: 3,
+  [EventType.ILLNESS]: 1,
+  [EventType.OTHER]: 1,
+};
 const PAID_SOURCE_CODES = new Set(['CP', 'ANC', 'ENF', 'PASSIF']);
-const EXCLUDED_SPECIAL_CODES = new Set(['PASSIF', 'MAT', 'SS']);
+const EXCLUDED_SPECIAL_CODES = new Set([
+  'PASSIF',
+  'MAT',
+  'SS',
+  'SPE',
+  'MAL',
+  'ACC_EPOUSE',
+]);
 const ALLOWED_PROOF_MIME_TYPES = new Set([
   'application/pdf',
   'image/jpeg',
@@ -125,7 +148,7 @@ export class EmployeeLeaveRequestsService {
         orderBy: [{ createdAt: 'desc' }, { reference: 'desc' }],
         select: employeeLeaveRequestSelect,
       }),
-      this.findLeaveTypes(),
+      this.findLeaveTypes(user.id),
     ]);
 
     return {
@@ -178,6 +201,7 @@ export class EmployeeLeaveRequestsService {
       requestedSubtypeCode: dto.leaveSubtypeCode,
       year: getLeaveYear(startDate),
       requestedDays: days,
+      userSexe: user.sexe,
     });
     const attachment = this.toAttachment(proof);
 
@@ -193,6 +217,14 @@ export class EmployeeLeaveRequestsService {
       userId: user.id,
       leaveTypeId: leaveSelection.leaveType.id,
       leaveTypeCode: leaveSelection.leaveType.code,
+      userSexe: user.sexe,
+      year: getLeaveYear(startDate),
+      requestedDays: days,
+    });
+
+    await this.ensureSpecialEventEligibility({
+      userId: user.id,
+      leaveType: leaveSelection.leaveType,
       userSexe: user.sexe,
       year: getLeaveYear(startDate),
       requestedDays: days,
@@ -301,6 +333,7 @@ export class EmployeeLeaveRequestsService {
           requestedDays: days,
           existingLeaveTypeId: existing.leaveTypeId,
           existingCredit: draftPoolCredit,
+          userSexe: user.sexe,
         })
       : null;
 
@@ -336,6 +369,21 @@ export class EmployeeLeaveRequestsService {
       year: effectiveYear,
       requestedDays: days,
       balanceCredit,
+    });
+
+    await this.ensureSpecialEventEligibility({
+      userId: user.id,
+      leaveType: leaveSelection?.leaveType ?? {
+        id: existing.leaveTypeId,
+        code: existing.leaveType.code,
+        name: existing.leaveType.name,
+        category: existing.leaveType.category,
+        defaultDays: existing.leaveType.defaultDays,
+      },
+      userSexe: user.sexe,
+      year: effectiveYear,
+      requestedDays: days,
+      existingRequestId: existing.id,
     });
 
     const shouldResubmit = this.isReviewRequested(existing);
@@ -440,6 +488,21 @@ export class EmployeeLeaveRequestsService {
       year: getLeaveYear(existing.startDate),
       requestedDays: existing.days,
       balanceCredit: this.reservesBalance(existing) ? existing.days : 0,
+    });
+
+    await this.ensureSpecialEventEligibility({
+      userId: user.id,
+      leaveType: {
+        id: existing.leaveTypeId,
+        code: existing.leaveType.code,
+        name: existing.leaveType.name,
+        category: existing.leaveType.category,
+        defaultDays: existing.leaveType.defaultDays,
+      },
+      userSexe: user.sexe,
+      year: getLeaveYear(existing.startDate),
+      requestedDays: existing.days,
+      existingRequestId: existing.id,
     });
 
     const { updated, emails } = await this.prisma.$transaction(
@@ -592,6 +655,7 @@ export class EmployeeLeaveRequestsService {
             code: true,
             name: true,
             category: true,
+            defaultDays: true,
             requiresProof: true,
           },
         },
@@ -618,6 +682,7 @@ export class EmployeeLeaveRequestsService {
         code: true,
         name: true,
         category: true,
+        defaultDays: true,
         requiresProof: true,
       },
     });
@@ -635,6 +700,7 @@ export class EmployeeLeaveRequestsService {
     requestedDays: number;
     existingLeaveTypeId?: string;
     existingCredit?: number;
+    userSexe?: Sexe;
   }) {
     const normalizedCode = params.requestedCode.trim().toUpperCase();
     const normalizedSubtypeCode = params.requestedSubtypeCode
@@ -666,6 +732,7 @@ export class EmployeeLeaveRequestsService {
         code: true,
         name: true,
         category: true,
+        defaultDays: true,
         requiresProof: true,
       },
     });
@@ -770,11 +837,9 @@ export class EmployeeLeaveRequestsService {
       : 0;
 
     const preferredCodes =
-      poolKind === PAID_POOL_CODE
-        ? ['CP', 'ANC', 'ENF']
-        : ['SPE', 'PAT', 'MAL'];
+      poolKind === PAID_POOL_CODE ? ['CP', 'ANC', 'ENF'] : ['PAT'];
 
-    const rankedCandidates = [...candidates].sort((left, right) => {
+    let rankedCandidates = [...candidates].sort((left, right) => {
       const leftIndex = preferredCodes.indexOf(left.code);
       const rightIndex = preferredCodes.indexOf(right.code);
       const leftOrder = leftIndex === -1 ? Number.MAX_SAFE_INTEGER : leftIndex;
@@ -790,6 +855,38 @@ export class EmployeeLeaveRequestsService {
 
       return left.code.localeCompare(right.code);
     });
+
+    if (
+      poolKind === SPECIAL_POOL_CODE &&
+      !requestedCandidate &&
+      params.userSexe
+    ) {
+      const range = getLeaveYearRange(params.year);
+      const approvedEvents = await this.prisma.event.findMany({
+        where: {
+          userId: params.userId,
+          processed: true,
+          status: LeaveRequestStatus.APPROVED,
+          eventDate: { gte: range.start, lt: range.endExclusive },
+        },
+        select: { type: true },
+      });
+      const eventTypes = new Set(approvedEvents.map((event) => event.type));
+      const eligibleCandidates = rankedCandidates.filter((leaveType) =>
+        this.specialEventRulesForLeaveType(
+          leaveType,
+          params.userSexe as Sexe,
+        ).some(
+          (rule) =>
+            rule.days === this.roundDays(params.requestedDays) &&
+            eventTypes.has(rule.eventType),
+        ),
+      );
+
+      if (eligibleCandidates.length) {
+        rankedCandidates = eligibleCandidates;
+      }
+    }
 
     const selected =
       requestedCandidate ??
@@ -808,6 +905,7 @@ export class EmployeeLeaveRequestsService {
         code: selected.code,
         name: selected.name,
         category: selected.category,
+        defaultDays: selected.defaultDays,
         requiresProof: selected.requiresProof,
       },
       poolCode: poolKind,
@@ -881,25 +979,43 @@ export class EmployeeLeaveRequestsService {
     }
   }
 
-  private async findLeaveTypes() {
-    const leaveTypes = await this.prisma.leaveType.findMany({
-      where: { active: true },
-      orderBy: [{ category: 'asc' }, { name: 'asc' }],
-      select: {
-        id: true,
-        code: true,
-        name: true,
-        category: true,
-        requiresProof: true,
-      },
-    });
+  private async findLeaveTypes(userId?: string) {
+    const [leaveTypes, approvedSpecialEvents] = await Promise.all([
+      this.prisma.leaveType.findMany({
+        where: { active: true },
+        orderBy: [{ category: 'asc' }, { name: 'asc' }],
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          category: true,
+          defaultDays: true,
+          requiresProof: true,
+        },
+      }),
+      userId
+        ? this.prisma.event.findMany({
+            where: {
+              userId,
+              processed: true,
+              status: LeaveRequestStatus.APPROVED,
+            },
+            select: { type: true, description: true },
+          })
+        : Promise.resolve([]),
+    ]);
 
     const paidChildren = leaveTypes.filter((leaveType) =>
       this.isTypeInPool(leaveType, PAID_POOL_CODE),
     );
-    const specialChildren = leaveTypes.filter((leaveType) =>
-      this.isTypeInPool(leaveType, SPECIAL_POOL_CODE),
-    );
+    const specialChildren = leaveTypes
+      .filter((leaveType) => this.isTypeInPool(leaveType, SPECIAL_POOL_CODE))
+      .filter((leaveType) =>
+        this.isSpecialLeaveTypeOpenedByApprovedEvent(
+          leaveType,
+          approvedSpecialEvents,
+        ),
+      );
     const maternity = leaveTypes.find(
       (leaveType) => leaveType.code.trim().toUpperCase() === MATERNITY_CODE,
     );
@@ -915,6 +1031,7 @@ export class EmployeeLeaveRequestsService {
         code: string;
         name: string;
         category: LeaveCategory;
+        defaultDays: number;
         requiresProof: boolean;
       }>;
     }> = [];
@@ -958,6 +1075,33 @@ export class EmployeeLeaveRequestsService {
     );
 
     return options;
+  }
+
+  private isSpecialLeaveTypeOpenedByApprovedEvent(
+    leaveType: {
+      code: string;
+      name: string;
+      category: LeaveCategory;
+      defaultDays?: number;
+    },
+    approvedEvents: Array<{
+      type: EventType;
+      description: string | null;
+    }>,
+  ) {
+    if (!approvedEvents.length) return false;
+
+    const exceptionalRule = findExceptionalPermissionRule(leaveType.code);
+    if (!exceptionalRule) return true;
+
+    return approvedEvents.some(
+      (event) =>
+        event.type === exceptionalRule.eventType &&
+        eventDescriptionIncludesExceptionalRule(event.description, {
+          code: exceptionalRule.code,
+          name: exceptionalRule.name,
+        }),
+    );
   }
 
   private async ensureMaternityFullRequest(params: {
@@ -1019,6 +1163,172 @@ export class EmployeeLeaveRequestsService {
         `Le congé maternité doit être pris en totalité (${MATERNITY_REQUIRED_DAYS} jours) et votre solde disponible est insuffisant (${remaining}).`,
       );
     }
+  }
+
+  private async ensureSpecialEventEligibility(params: {
+    userId: string;
+    leaveType: {
+      id: string;
+      code: string;
+      name: string;
+      category: LeaveCategory;
+      defaultDays?: number;
+    };
+    userSexe: Sexe;
+    year: number;
+    requestedDays: number;
+    existingRequestId?: string;
+  }) {
+    if (!this.isTypeInPool(params.leaveType, SPECIAL_POOL_CODE)) return;
+
+    const rules = this.specialEventRulesForLeaveType(
+      params.leaveType,
+      params.userSexe,
+    );
+    if (!rules.length) {
+      throw new BadRequestException(
+        'Ce congé spécial n est pas accessible pour votre profil.',
+      );
+    }
+
+    const requestedDays = this.roundDays(params.requestedDays);
+    const exactRule = rules.find((rule) => rule.days === requestedDays);
+    if (!exactRule) {
+      const allowedDays = Array.from(new Set(rules.map((rule) => rule.days)))
+        .sort((left, right) => left - right)
+        .join(', ');
+      throw new BadRequestException(
+        `La durée demandée (${requestedDays} jour(s)) ne correspond pas au droit du congé spécial sélectionné (${allowedDays} jour(s)).`,
+      );
+    }
+
+    const range = getLeaveYearRange(params.year);
+    const approvedEvents = await this.prisma.event.findMany({
+      where: {
+        userId: params.userId,
+        processed: true,
+        status: LeaveRequestStatus.APPROVED,
+        type: { in: rules.map((rule) => rule.eventType) },
+        eventDate: { gte: range.start, lt: range.endExclusive },
+      },
+      select: {
+        type: true,
+        eventDate: true,
+        description: true,
+      },
+    });
+
+    const exactRuleCode = exactRule.code;
+    const matchingEvents = exactRuleCode
+      ? approvedEvents.filter((event) =>
+          eventDescriptionIncludesExceptionalRule(event.description, {
+            code: exactRuleCode,
+            name: params.leaveType.name,
+          }),
+        )
+      : approvedEvents;
+
+    if (!matchingEvents.length) {
+      throw new BadRequestException(
+        'Déclarez d abord l événement correspondant et attendez sa validation RH avant de demander ce congé spécial.',
+      );
+    }
+
+    const allowedDays = matchingEvents.reduce((sum, event) => {
+      const rule = rules.find((item) => item.eventType === event.type);
+      return sum + (rule?.days ?? 0);
+    }, 0);
+    const used = await this.prisma.leaveRequest.aggregate({
+      where: {
+        ownerId: params.userId,
+        leaveTypeId: params.leaveType.id,
+        status: {
+          in: [
+            LeaveRequestStatus.DRAFT,
+            LeaveRequestStatus.PENDING,
+            LeaveRequestStatus.IN_REVIEW,
+            LeaveRequestStatus.APPROVED,
+          ],
+        },
+        startDate: { lt: range.endExclusive },
+        endDate: { gte: range.start },
+        ...(params.existingRequestId
+          ? { id: { not: params.existingRequestId } }
+          : {}),
+      },
+      _sum: { days: true },
+    });
+    const available = this.roundDays(allowedDays - Number(used._sum.days ?? 0));
+
+    if (requestedDays > available) {
+      throw new BadRequestException(
+        `Le droit lié aux événements validés est insuffisant (${available} jour(s) disponible(s)).`,
+      );
+    }
+  }
+
+  private specialEventRulesForLeaveType(
+    leaveType: {
+      code: string;
+      name: string;
+      category: LeaveCategory;
+      defaultDays?: number;
+    },
+    userSexe: Sexe,
+  ): SpecialEventRule[] {
+    const code = leaveType.code.trim().toUpperCase();
+    const exceptionalRule = findExceptionalPermissionRule(code);
+    if (exceptionalRule) {
+      if (exceptionalRule.sex && exceptionalRule.sex !== userSexe) return [];
+
+      return [
+        {
+          eventType: exceptionalRule.eventType,
+          days:
+            this.roundDays(Number(leaveType.defaultDays ?? 0)) ||
+            exceptionalRule.defaultDays,
+          code: exceptionalRule.code,
+        },
+      ];
+    }
+
+    const configuredDays = this.roundDays(Number(leaveType.defaultDays ?? 0));
+    const daysOrFallback = (eventType: EventType) =>
+      configuredDays > 0 && code !== 'SPE'
+        ? configuredDays
+        : SPECIAL_EVENT_DAYS[eventType];
+
+    if (
+      code === 'PAT' ||
+      leaveType.category === LeaveCategory.CONGE_PATERNITE
+    ) {
+      return userSexe === Sexe.M
+        ? [
+            {
+              eventType: EventType.BIRTH,
+              days: daysOrFallback(EventType.BIRTH),
+            },
+          ]
+        : [];
+    }
+
+    if (code === 'MAL' || leaveType.category === LeaveCategory.CONGE_MALADIE) {
+      return [
+        {
+          eventType: EventType.ILLNESS,
+          days: daysOrFallback(EventType.ILLNESS),
+        },
+      ];
+    }
+
+    return [
+      {
+        eventType: EventType.MARRIAGE,
+        days: SPECIAL_EVENT_DAYS[EventType.MARRIAGE],
+      },
+      { eventType: EventType.DEATH, days: SPECIAL_EVENT_DAYS[EventType.DEATH] },
+      { eventType: EventType.OTHER, days: SPECIAL_EVENT_DAYS[EventType.OTHER] },
+    ];
   }
 
   private toResponse(request: EmployeeLeaveRequest) {
@@ -1303,8 +1613,7 @@ export class EmployeeLeaveRequestsService {
       !this.isTypeInPool(leaveType, PAID_POOL_CODE) &&
       !EXCLUDED_SPECIAL_CODES.has(normalizedCode) &&
       (leaveType.category === LeaveCategory.CONGE_SPECIAL ||
-        leaveType.category === LeaveCategory.CONGE_PATERNITE ||
-        leaveType.category === LeaveCategory.CONGE_MALADIE)
+        leaveType.category === LeaveCategory.CONGE_PATERNITE)
     );
   }
 

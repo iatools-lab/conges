@@ -70,6 +70,9 @@ export function AccountProfilePage({ title, subtitle, roleScope }: AccountPagePr
   const profileQuery = useQuery({
     enabled: !!session,
     queryKey: ["account-profile", session?.id, session?.email],
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: "always",
     queryFn: () =>
       apiFetch<AccountProfileResponse>(
         `/auth/profile?userId=${encodeURIComponent(session!.id)}&userEmail=${encodeURIComponent(
@@ -157,7 +160,7 @@ export function AccountProfilePage({ title, subtitle, roleScope }: AccountPagePr
               <div>
                 <h3 className="font-semibold">Informations du compte</h3>
                 <p className="text-sm text-muted-foreground">
-                  Les informations affichées proviennent de votre session active.
+                  Les informations affichées proviennent des données RH actualisées.
                 </p>
               </div>
             </div>

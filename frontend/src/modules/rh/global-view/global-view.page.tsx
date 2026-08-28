@@ -72,8 +72,11 @@ type PlanificationRow = {
   reference: string;
   ownerId: string;
   employee: string;
+  manager?: string;
   departmentCode: string;
   departmentName: string;
+  submittedAt?: string | null;
+  submittedDate?: string | null;
   startDate: string;
   endDate: string;
   startDateIso: string;
@@ -92,6 +95,11 @@ type MonthlyLoadRow = {
   departmentCode: string;
   departmentName: string;
   months: number[];
+};
+
+type CalendarDetail = {
+  title: string;
+  plans: PlanificationRow[];
 };
 
 type GlobalViewResponse = {
@@ -560,10 +568,12 @@ function MonthCalendar({
   year,
   month,
   plans,
+  onOpenDay,
 }: {
   year: number;
   month: number;
   plans: PlanificationRow[];
+  onOpenDay: (title: string, plans: PlanificationRow[]) => void;
 }) {
   const total = daysInMonth(year, month);
   const offset = firstWeekday(year, month);
@@ -584,11 +594,26 @@ function MonthCalendar({
             ? plans.filter((plan) => planCoversDay(plan, year, month, day))
             : [];
 
+          const clickable = inMonth && dayPlans.length > 0;
+
           return (
-            <div
+            <button
               key={index}
+              type="button"
+              disabled={!clickable}
+              onClick={() => {
+                if (!clickable) return;
+                onOpenDay(
+                  `${String(day).padStart(2, "0")} ${monthLabelsLong[month]} ${year}`,
+                  dayPlans,
+                );
+              }}
               className={`min-h-24 rounded border p-2 text-sm ${
-                !inMonth ? "bg-muted/30 text-muted-foreground/40" : "hover:bg-accent"
+                !inMonth
+                  ? "bg-muted/30 text-muted-foreground/40"
+                  : clickable
+                    ? "text-left hover:bg-accent focus:outline-none focus:ring-2 focus:ring-primary/40"
+                    : "text-left"
               }`}
             >
               <div className="text-xs">{inMonth ? day : ""}</div>
@@ -606,7 +631,7 @@ function MonthCalendar({
                   <div className="text-[10px] text-muted-foreground">+{dayPlans.length - 3}</div>
                 )}
               </div>
-            </div>
+            </button>
           );
         })}
       </div>
@@ -619,12 +644,14 @@ function MonthMini({
   month,
   plans,
   onClick,
+  onOpenMonth,
   selected,
 }: {
   year: number;
   month: number;
   plans: PlanificationRow[];
   onClick: () => void;
+  onOpenMonth: (title: string, plans: PlanificationRow[]) => void;
   selected: boolean;
 }) {
   const total = daysInMonth(year, month);
@@ -634,19 +661,24 @@ function MonthMini({
     ...Array.from({ length: total }, (_, index) => index + 1),
   ];
 
+  const monthPlans = plans.filter((plan) => planOverlapsMonth(plan, year, month));
+
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={() => {
+        onClick();
+        if (monthPlans.length) {
+          onOpenMonth(`${monthLabelsLong[month]} ${year}`, monthPlans);
+        }
+      }}
       className={`rounded-lg border p-3 text-left transition ${
         selected ? "border-primary ring-1 ring-primary/40" : "hover:bg-accent"
       }`}
     >
       <div className="mb-2 flex items-center justify-between text-sm">
         <span className="font-medium">{monthLabelsLong[month]}</span>
-        <span className="text-xs text-muted-foreground">
-          {plans.filter((plan) => planOverlapsMonth(plan, year, month)).length}
-        </span>
+        <span className="text-xs text-muted-foreground">{monthPlans.length}</span>
       </div>
       <div className="mb-1 grid grid-cols-7 gap-1 text-center text-[10px] text-muted-foreground">
         {["L", "M", "M", "J", "V", "S", "D"].map((day, index) => (
@@ -656,13 +688,17 @@ function MonthMini({
       <div className="grid grid-cols-7 gap-1">
         {cells.map((day, index) => {
           if (day === null) return <div key={index} />;
-          const hasPlan = plans.some((plan) => planCoversDay(plan, year, month, day));
+          const dayPlans = plans.filter((plan) => planCoversDay(plan, year, month, day));
+          const firstPlan = dayPlans[0];
           return (
             <div
               key={index}
               className={`flex aspect-square items-center justify-center rounded text-[10px] ${
-                hasPlan ? "bg-stat-blue font-semibold text-stat-blue-fg" : "text-foreground/70"
+                firstPlan
+                  ? `${STATUS_STYLES[firstPlan.status]} font-semibold`
+                  : "text-foreground/70"
               }`}
+              title={firstPlan ? `${dayPlans.length} absence(s) - ${firstPlan.label}` : undefined}
             >
               {day}
             </div>
@@ -706,6 +742,69 @@ function StatusFilterRow({
   );
 }
 
+function CalendarDetailDialog({
+  detail,
+  onClose,
+}: {
+  detail: CalendarDetail | null;
+  onClose: () => void;
+}) {
+  return (
+    <Dialog open={Boolean(detail)} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-h-[calc(100vh-2rem)] overflow-y-auto sm:max-w-[760px]">
+        <DialogHeader>
+          <DialogTitle>{detail?.title ?? "Détail des absences"}</DialogTitle>
+          <DialogDescription>
+            Toutes les personnes présentes dans la case sélectionnée.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="overflow-x-auto rounded-md border">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/40 text-left text-xs text-muted-foreground">
+              <tr>
+                <th className="px-4 py-3">Employé</th>
+                <th className="px-4 py-3">Département</th>
+                <th className="px-4 py-3">Période</th>
+                <th className="px-4 py-3">Jours</th>
+                <th className="px-4 py-3">Type</th>
+                <th className="px-4 py-3">Statut</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {(detail?.plans ?? []).map((plan) => (
+                <tr key={plan.id}>
+                  <td className="px-4 py-3 font-medium">{plan.employee}</td>
+                  <td className="px-4 py-3">{plan.departmentName}</td>
+                  <td className="px-4 py-3">
+                    {plan.startDate} - {plan.endDate}
+                  </td>
+                  <td className="px-4 py-3">{formatNumber(plan.days)}</td>
+                  <td className="px-4 py-3">{plan.type}</td>
+                  <td className="px-4 py-3">
+                    <Badge tone={plan.status}>{plan.label}</Badge>
+                  </td>
+                </tr>
+              ))}
+              {!detail?.plans.length && (
+                <tr>
+                  <td className="px-4 py-8 text-center text-muted-foreground" colSpan={6}>
+                    Aucune absence dans cette sélection.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            Fermer
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function VueGlobale() {
   const queryClient = useQueryClient();
   const [department, setDepartment] = useState("ALL");
@@ -716,6 +815,7 @@ export function VueGlobale() {
     STATUS_FILTERS.map((item) => item.status),
   );
   const [query, setQuery] = useState("");
+  const [calendarDetail, setCalendarDetail] = useState<CalendarDetail | null>(null);
 
   const { data, isError, isFetching, isLoading, refetch } = useQuery({
     queryKey: ["rh-global-view", department, ...dateRangeQueryKey(dateRange)],
@@ -830,6 +930,12 @@ export function VueGlobale() {
   const monthPlanifications = planifications.filter((plan) =>
     planOverlapsMonth(plan, Number(year), month),
   );
+  const openCalendarDetail = (title: string, plans: PlanificationRow[]) => {
+    setCalendarDetail({
+      title,
+      plans: [...plans].sort((left, right) => left.employee.localeCompare(right.employee, "fr")),
+    });
+  };
   const totalConge = rows.reduce((sum, row) => sum + row.total, 0);
   const totalPris = rows.reduce((sum, row) => sum + row.taken, 0);
   const totalPlanifie = rows.reduce((sum, row) => sum + row.planned, 0);
@@ -981,7 +1087,12 @@ export function VueGlobale() {
               }
             />
             <div className="p-5">
-              <MonthCalendar year={Number(year)} month={month} plans={planifications} />
+              <MonthCalendar
+                year={Number(year)}
+                month={month}
+                plans={planifications}
+                onOpenDay={openCalendarDetail}
+              />
             </div>
           </Card>
 
@@ -1044,6 +1155,7 @@ export function VueGlobale() {
                   plans={planifications}
                   selected={monthIndex === month}
                   onClick={() => setMonth(monthIndex)}
+                  onOpenMonth={openCalendarDetail}
                 />
               ))}
             </div>
@@ -1174,6 +1286,8 @@ export function VueGlobale() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      <CalendarDetailDialog detail={calendarDetail} onClose={() => setCalendarDetail(null)} />
     </AppShell>
   );
 }

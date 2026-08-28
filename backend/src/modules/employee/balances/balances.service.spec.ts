@@ -86,13 +86,6 @@ describe('EmployeeBalancesService', () => {
   it('uses one shared 12-day balance while returning every special leave type', async () => {
     const leaveTypes = [
       {
-        id: 'special-type',
-        code: 'SPE',
-        name: 'Congé spécial',
-        category: LeaveCategory.CONGE_SPECIAL,
-        defaultDays: 12,
-      },
-      {
         id: 'paternity-type',
         code: 'PAT',
         name: 'Congé paternité',
@@ -100,11 +93,18 @@ describe('EmployeeBalancesService', () => {
         defaultDays: 3,
       },
       {
-        id: 'sick-type',
-        code: 'MAL',
-        name: 'Congé maladie',
-        category: LeaveCategory.CONGE_MALADIE,
-        defaultDays: 0,
+        id: 'death-spouse-type',
+        code: 'DEC_CONJ',
+        name: 'Décès du conjoint du travailleur',
+        category: LeaveCategory.CONGE_SPECIAL,
+        defaultDays: 5,
+      },
+      {
+        id: 'child-baptism-type',
+        code: 'BAP_ENF',
+        name: "Baptême d'un enfant du travailleur",
+        category: LeaveCategory.CONGE_SPECIAL,
+        defaultDays: 1,
       },
     ];
     const prisma = {
@@ -149,14 +149,9 @@ describe('EmployeeBalancesService', () => {
           .mockResolvedValueOnce(
             leaveTypes.map((leaveType) => ({
               id: `balance-${leaveType.code}`,
-              acquired:
-                leaveType.code === 'SPE'
-                  ? 12
-                  : leaveType.code === 'PAT'
-                    ? 3
-                    : 0,
+              acquired: leaveType.defaultDays,
               taken: leaveType.code === 'PAT' ? 3 : 0,
-              scheduled: leaveType.code === 'SPE' ? 2 : 0,
+              scheduled: leaveType.code === 'DEC_CONJ' ? 2 : 0,
               carryover: 0,
               leaveType,
             })),
@@ -165,9 +160,7 @@ describe('EmployeeBalancesService', () => {
       },
     } as any;
     const leaveEntitlements = {
-      getAcquiredDays: jest.fn(({ leaveType }) =>
-        leaveType.code === 'SPE' ? 12 : leaveType.code === 'PAT' ? 3 : 0,
-      ),
+      getAcquiredDays: jest.fn(({ leaveType }) => leaveType.defaultDays),
       getBalanceLabel: jest.fn((leaveType) => leaveType.name),
     } as any;
     const leaveBalanceSync = {

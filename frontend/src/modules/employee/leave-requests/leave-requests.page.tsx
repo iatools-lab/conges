@@ -11,6 +11,14 @@ import {
   type DateRangeValue,
 } from "@/components/DateRangeFilter";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge, Button, Card, CardHeader } from "@/components/ui-kit";
 import { apiFetch } from "@/lib/api";
@@ -44,6 +52,11 @@ type DepartmentPlan = {
 type DepartmentPlanningResponse = {
   year: number;
   department: { id: string; code: string; name: string } | null;
+  plans: DepartmentPlan[];
+};
+
+type CalendarDetail = {
+  title: string;
   plans: DepartmentPlan[];
 };
 
@@ -131,10 +144,12 @@ function MonthCalendar({
   year,
   month,
   plans,
+  onOpenDay,
 }: {
   year: number;
   month: number;
   plans: DepartmentPlan[];
+  onOpenDay: (title: string, plans: DepartmentPlan[]) => void;
 }) {
   const total = daysInMonth(year, month);
   const offset = firstWeekday(year, month);
@@ -154,12 +169,23 @@ function MonthCalendar({
           const dayPlans = inMonth
             ? plans.filter((plan) => planCoversDay(plan, year, month, day))
             : [];
+          const clickable = inMonth && dayPlans.length > 0;
 
           return (
-            <div
+            <button
               key={index}
+              type="button"
+              disabled={!clickable}
+              onClick={() => {
+                if (!clickable) return;
+                onOpenDay(`${String(day).padStart(2, "0")} ${MONTHS_FR[month]} ${year}`, dayPlans);
+              }}
               className={`min-h-24 rounded border p-2 text-sm ${
-                !inMonth ? "bg-muted/30 text-muted-foreground/40" : "hover:bg-accent"
+                !inMonth
+                  ? "bg-muted/30 text-muted-foreground/40"
+                  : clickable
+                    ? "text-left hover:bg-accent focus:outline-none focus:ring-2 focus:ring-primary/40"
+                    : "text-left"
               }`}
             >
               <div className="text-xs">{inMonth ? day : ""}</div>
@@ -177,7 +203,7 @@ function MonthCalendar({
                   <div className="text-[10px] text-muted-foreground">+{dayPlans.length - 3}</div>
                 )}
               </div>
-            </div>
+            </button>
           );
         })}
       </div>
@@ -189,10 +215,12 @@ function MonthMini({
   year,
   month,
   plans,
+  onOpenMonth,
 }: {
   year: number;
   month: number;
   plans: DepartmentPlan[];
+  onOpenMonth: (title: string, plans: DepartmentPlan[]) => void;
 }) {
   const total = daysInMonth(year, month);
   const offset = firstWeekday(year, month);
@@ -200,14 +228,23 @@ function MonthMini({
     ...Array.from({ length: offset }, () => null),
     ...Array.from({ length: total }, (_, index) => index + 1),
   ];
+  const monthPlans = plans.filter((plan) => planOverlapsMonth(plan, year, month));
+  const clickable = monthPlans.length > 0;
 
   return (
-    <div className="rounded-lg border p-3">
+    <button
+      type="button"
+      disabled={!clickable}
+      onClick={() => {
+        if (clickable) onOpenMonth(`${MONTHS_FR[month]} ${year}`, monthPlans);
+      }}
+      className={`rounded-lg border p-3 text-left transition ${
+        clickable ? "hover:bg-accent focus:outline-none focus:ring-2 focus:ring-primary/40" : ""
+      }`}
+    >
       <div className="mb-2 flex items-center justify-between text-sm">
         <span className="font-medium">{MONTHS_FR[month]}</span>
-        <span className="text-xs text-muted-foreground">
-          {plans.filter((plan) => planOverlapsMonth(plan, year, month)).length}
-        </span>
+        <span className="text-xs text-muted-foreground">{monthPlans.length}</span>
       </div>
       <div className="mb-1 grid grid-cols-7 gap-1 text-center text-[10px] text-muted-foreground">
         {["L", "M", "M", "J", "V", "S", "D"].map((day, index) => (
@@ -217,20 +254,24 @@ function MonthMini({
       <div className="grid grid-cols-7 gap-1">
         {cells.map((day, index) => {
           if (day === null) return <div key={index} />;
-          const hasPlan = plans.some((plan) => planCoversDay(plan, year, month, day));
+          const dayPlans = plans.filter((plan) => planCoversDay(plan, year, month, day));
+          const firstPlan = dayPlans[0];
           return (
             <div
               key={index}
               className={`flex aspect-square items-center justify-center rounded text-[10px] ${
-                hasPlan ? "bg-stat-blue font-semibold text-stat-blue-fg" : "text-foreground/70"
+                firstPlan
+                  ? `${STATUS_STYLES[firstPlan.status]} font-semibold`
+                  : "text-foreground/70"
               }`}
+              title={firstPlan ? `${dayPlans.length} absence(s) - ${firstPlan.label}` : undefined}
             >
               {day}
             </div>
           );
         })}
       </div>
-    </div>
+    </button>
   );
 }
 
@@ -267,6 +308,74 @@ function StatusFilterRow({
   );
 }
 
+function CalendarDetailDialog({
+  detail,
+  onClose,
+}: {
+  detail: CalendarDetail | null;
+  onClose: () => void;
+}) {
+  return (
+    <Dialog open={Boolean(detail)} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-h-[calc(100vh-2rem)] overflow-y-auto sm:max-w-[760px]">
+        <DialogHeader>
+          <DialogTitle>{detail?.title ?? "Détail des absences"}</DialogTitle>
+          <DialogDescription>
+            Toutes les personnes présentes dans la case sélectionnée.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="overflow-x-auto rounded-md border">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/40 text-left text-xs text-muted-foreground">
+              <tr>
+                <th className="px-4 py-3">Collaborateur</th>
+                <th className="px-4 py-3">Département</th>
+                <th className="px-4 py-3">Période</th>
+                <th className="px-4 py-3">Jours</th>
+                <th className="px-4 py-3">Type</th>
+                <th className="px-4 py-3">Statut</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {(detail?.plans ?? []).map((plan) => (
+                <tr key={plan.id}>
+                  <td className="px-4 py-3">
+                    <div className="font-medium">{plan.employee.name}</div>
+                    <div className="text-xs text-muted-foreground">{plan.employee.poste}</div>
+                  </td>
+                  <td className="px-4 py-3">
+                    {plan.employee.department?.name ?? "Sans département"}
+                  </td>
+                  <td className="px-4 py-3">
+                    {plan.debut} → {plan.fin}
+                  </td>
+                  <td className="px-4 py-3">{formatNumber(plan.jours)}</td>
+                  <td className="px-4 py-3">{plan.typeLabel}</td>
+                  <td className="px-4 py-3">
+                    <Badge tone={plan.status}>{plan.label}</Badge>
+                  </td>
+                </tr>
+              ))}
+              {!detail?.plans.length && (
+                <tr>
+                  <td className="px-4 py-8 text-center text-muted-foreground" colSpan={6}>
+                    Aucune absence dans cette sélection.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            Fermer
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function Demandes() {
   const { session } = useAuthSession();
   const today = new Date();
@@ -276,6 +385,7 @@ export function Demandes() {
   const [selectedStatuses, setSelectedStatuses] = useState<CalendarStatus[]>(
     STATUS_FILTERS.map((item) => item.status),
   );
+  const [calendarDetail, setCalendarDetail] = useState<CalendarDetail | null>(null);
 
   const calendarQuery = useQuery({
     queryKey: [
@@ -298,6 +408,14 @@ export function Demandes() {
     () => filteredPlans.filter((plan) => planOverlapsMonth(plan, year, month)),
     [filteredPlans, month, year],
   );
+  const openCalendarDetail = (title: string, plans: DepartmentPlan[]) => {
+    setCalendarDetail({
+      title,
+      plans: [...plans].sort((left, right) =>
+        left.employee.name.localeCompare(right.employee.name, "fr"),
+      ),
+    });
+  };
 
   const toggleStatus = (status: CalendarStatus) => {
     setSelectedStatuses((current) => {
@@ -426,7 +544,12 @@ export function Demandes() {
                   Chargement du calendrier...
                 </div>
               ) : (
-                <MonthCalendar year={year} month={month} plans={filteredPlans} />
+                <MonthCalendar
+                  year={year}
+                  month={month}
+                  plans={filteredPlans}
+                  onOpenDay={openCalendarDetail}
+                />
               )}
             </div>
           </Card>
@@ -519,12 +642,19 @@ export function Demandes() {
             </div>
             <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4">
               {Array.from({ length: 12 }, (_, monthIndex) => (
-                <MonthMini key={monthIndex} year={year} month={monthIndex} plans={filteredPlans} />
+                <MonthMini
+                  key={monthIndex}
+                  year={year}
+                  month={monthIndex}
+                  plans={filteredPlans}
+                  onOpenMonth={openCalendarDetail}
+                />
               ))}
             </div>
           </Card>
         </TabsContent>
       </Tabs>
+      <CalendarDetailDialog detail={calendarDetail} onClose={() => setCalendarDetail(null)} />
     </AppShell>
   );
 }

@@ -15,6 +15,7 @@ import {
   InitializeRhBalancesDto,
   UpdateRhLeaveTypeDto,
 } from './dto/rh-settings.dto';
+import { exceptionalPermissionDefaults } from '../../shared/special-leaves/exceptional-permissions';
 
 const leaveTypeSelect = {
   id: true,
@@ -84,6 +85,7 @@ const DEFAULT_LEAVE_TYPES = [
     description:
       'Quota annuel séparé de 12 jours, non déduit des congés payés.',
   },
+  ...exceptionalPermissionDefaults(),
   {
     code: 'MAT',
     name: 'Congé maternité',

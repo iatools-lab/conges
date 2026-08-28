@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -19,8 +20,10 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
   CreateEmployeeEventDto,
+  DeleteEmployeeEventDto,
   FindEmployeeEventsQueryDto,
   ReviewEmployeeEventDto,
+  UpdateEmployeeEventDto,
 } from './dto/employee-event.dto';
 import {
   EmployeeEventsService,
@@ -54,6 +57,35 @@ export class EmployeeEventsController {
     return this.eventsService.create(
       withAuthenticatedUser(dto, requireAuthSession(req)),
       proof,
+    );
+  }
+
+  @Patch(':id')
+  @UseInterceptors(
+    FileInterceptor('proof', { limits: { fileSize: EVENT_PROOF_MAX_BYTES } }),
+  )
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateEmployeeEventDto,
+    @Req() req: AuthenticatedRequest,
+    @UploadedFile() proof?: UploadedEventProof,
+  ) {
+    return this.eventsService.update(
+      id,
+      withAuthenticatedUser(dto, requireAuthSession(req)),
+      proof,
+    );
+  }
+
+  @Delete(':id')
+  remove(
+    @Param('id') id: string,
+    @Body() dto: DeleteEmployeeEventDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.eventsService.remove(
+      id,
+      withAuthenticatedUser(dto, requireAuthSession(req)),
     );
   }
 

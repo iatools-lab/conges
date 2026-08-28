@@ -11,6 +11,7 @@ import { RhHolidaysModule } from './holidays/holidays.module';
 import { RhHierarchyModule } from './hierarchy/hierarchy.module';
 import { RhLeaveBalancesModule } from './leave-balances/leave-balances.module';
 import { RhLeaveLiabilitiesModule } from './leave-liabilities/leave-liabilities.module';
+import { RhPermissionsModule } from './permissions/permissions.module';
 import { RhSettingsModule } from './settings/settings.module';
 import { RhSpecialLeavesModule } from './special-leaves/special-leaves.module';
 
@@ -27,6 +28,7 @@ import { RhSpecialLeavesModule } from './special-leaves/special-leaves.module';
     RhSpecialLeavesModule,
     RhLeaveBalancesModule,
     RhLeaveLiabilitiesModule,
+    RhPermissionsModule,
     RhExportsModule,
     RhAuditModule,
     RhSettingsModule,

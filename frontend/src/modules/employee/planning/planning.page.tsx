@@ -339,11 +339,6 @@ export function Planifier() {
     planningQuery.data?.leaveTypes ?? requestsQuery.data?.leaveTypes ?? emptyLeaveTypes;
   const user = planningQuery.data?.user;
   const stats = planningQuery.data?.stats;
-  const selectedEditLeaveType = useMemo(
-    () => leaveTypes.find((type) => type.code === editLeaveTypeCode),
-    [editLeaveTypeCode, leaveTypes],
-  );
-  const editSubtypeOptions = selectedEditLeaveType?.children ?? [];
   const createDirectRequest = useMutation({
     mutationFn: (payload: NewRequestPayload) =>
       apiFetch<LeaveRequestRow>("/employee/leave-requests", {
@@ -884,26 +879,6 @@ export function Planifier() {
                 ))}
               </select>
             </label>
-
-            {editSubtypeOptions.length > 0 && (
-              <label className="grid gap-1.5 text-sm">
-                <span className="text-xs font-medium text-muted-foreground">
-                  Précision du congé
-                </span>
-                <select
-                  className="w-full rounded-md border px-3 py-2 text-sm bg-background"
-                  value={editLeaveSubtypeCode}
-                  onChange={(event) => setEditLeaveSubtypeCode(event.target.value)}
-                  required
-                >
-                  {editSubtypeOptions.map((type) => (
-                    <option key={type.code} value={type.code}>
-                      {type.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
 
             <div className="grid grid-cols-2 gap-3">
               <label className="grid gap-1.5 text-sm">

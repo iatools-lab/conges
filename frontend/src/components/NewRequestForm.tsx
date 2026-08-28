@@ -45,7 +45,7 @@ const MATERNITY_CODE = "MAT";
 const MATERNITY_REQUIRED_DAYS = 90;
 const SPECIAL_POOL_CAP_DAYS = 12;
 const PAID_SOURCE_CODES = new Set(["CP", "ANC", "ENF", "PASSIF"]);
-const EXCLUDED_SPECIAL_CODES = new Set(["PASSIF", "MAT", "SS"]);
+const EXCLUDED_SPECIAL_CODES = new Set(["PASSIF", "MAT", "SS", "SPE", "MAL", "ACC_EPOUSE"]);
 
 type BalancesResponse = {
   rows: BalanceRow[];
@@ -462,11 +462,7 @@ export function isSpecialLeaveSelection(leaveType?: LeaveTypeOption) {
   const category = leaveType.category?.trim().toUpperCase();
 
   return (
-    code === POOL_SPECIAL_CODE ||
-    code === "SPE" ||
-    category === "CONGE_SPECIAL" ||
-    category === "CONGE_PATERNITE" ||
-    category === "CONGE_MALADIE"
+    code === POOL_SPECIAL_CODE || category === "CONGE_SPECIAL" || category === "CONGE_PATERNITE"
   );
 }
 
