@@ -104,8 +104,10 @@ Date: 2026-08-28
 
 - La synchronisation des soldes utilise maintenant `LeaveRequest.days` comme source de verite pour les jours pris et planifies, afin d'aligner les soldes avec l'historique affiche aux RH, managers et employes.
 - Cela corrige les ecarts crees lorsque des demandes importees ou corrigees manuellement avaient un nombre de jours different du recalcul automatique depuis la periode.
+- Le pool des conges payes est maintenant reconcilie depuis toutes les demandes payees de l'employe sur l'exercice: les ecarts du type "historique a 6 jours pris mais solde RH a 1 jour" sont recalcules au niveau du total.
 - Les demandes qui traversent deux exercices restent correctement decoupees: les jours stockes sont repartis proportionnellement selon les jours ouvres de chaque exercice concerne.
 - Les chemins de recalcul des conges speciaux/evenements RH ont ete alignes sur la meme logique pour eviter un deuxieme ecart cache.
+- Un garde-fou evite de remettre a zero un solde CP lorsqu'une synchronisation est declenchee par un autre type de conge sans aucune demande payee sur l'exercice.
 - Apres deploiement, ouvrir les vues qui declenchent la resynchronisation annuelle realignera les soldes; pour une correction immediate de toute la production, lancer une resynchronisation annuelle globale apres sauvegarde.
 
 ## Nouveau module Permissions

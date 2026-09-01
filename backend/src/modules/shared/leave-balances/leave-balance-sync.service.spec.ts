@@ -12,6 +12,7 @@ function createHarness() {
     },
     leaveBalance: {
       findUnique: jest.fn().mockResolvedValue(null),
+      findMany: jest.fn().mockResolvedValue([]),
       upsert: jest.fn(),
     },
     user: {
@@ -34,6 +35,15 @@ function createHarness() {
       }),
     },
   } as any;
+  prisma.leaveType.findMany = jest.fn().mockResolvedValue([
+    {
+      id: 'type-1',
+      code: 'CP',
+      name: 'Conges payes',
+      category: LeaveCategory.CONGE_PAYE,
+      defaultDays: 24,
+    },
+  ]);
   const leaveEntitlements = {
     getAcquiredDays: jest.fn().mockReturnValue(24),
   } as any;
@@ -213,6 +223,52 @@ describe('LeaveBalanceSyncService', () => {
     );
   });
 
+  it('reconciles the paid leave pool from approved paid requests for RH balances', async () => {
+    const { prisma, service } = createHarness();
+    prisma.leaveType.findMany.mockResolvedValue([
+      {
+        id: 'type-anc',
+        code: 'ANC',
+        name: 'Anciennete',
+        category: LeaveCategory.CONGE_PAYE,
+        defaultDays: 2,
+      },
+      {
+        id: 'type-cp',
+        code: 'CP',
+        name: 'Conges payes',
+        category: LeaveCategory.CONGE_PAYE,
+        defaultDays: 24,
+      },
+    ]);
+    prisma.leaveRequest.findMany.mockResolvedValue([
+      {
+        startDate: new Date('2026-06-01T00:00:00.000Z'),
+        endDate: new Date('2026-06-08T00:00:00.000Z'),
+        days: 6,
+        status: LeaveRequestStatus.APPROVED,
+        submittedAt: new Date('2026-05-01T00:00:00.000Z'),
+      },
+    ]);
+
+    await service.syncForKeys([
+      { userId: 'employee-1', leaveTypeId: 'type-cp', year: 2026 },
+    ]);
+
+    expect(prisma.leaveBalance.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          userId_leaveTypeId_year: {
+            userId: 'employee-1',
+            leaveTypeId: 'type-anc',
+            year: 2026,
+          },
+        },
+        update: expect.objectContaining({ taken: 6, scheduled: 0 }),
+      }),
+    );
+  });
+
   it('restores scheduled days when RH rejects a request approved by N+1', async () => {
     const { prisma, service } = createHarness();
     const requestSnapshot = {
@@ -255,14 +311,12 @@ describe('LeaveBalanceSyncService', () => {
         submittedAt: true,
       },
     });
-    expect(prisma.leaveBalance.upsert).toHaveBeenNthCalledWith(
-      1,
+    expect(prisma.leaveBalance.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         update: { taken: 0, scheduled: 5 },
       }),
     );
-    expect(prisma.leaveBalance.upsert).toHaveBeenNthCalledWith(
-      2,
+    expect(prisma.leaveBalance.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         update: { taken: 0, scheduled: 0 },
       }),
