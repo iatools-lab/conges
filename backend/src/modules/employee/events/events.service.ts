@@ -544,6 +544,7 @@ export class EmployeeEventsService {
             select: {
               startDate: true,
               endDate: true,
+              days: true,
               status: true,
               submittedAt: true,
             },
@@ -663,20 +664,35 @@ export class EmployeeEventsService {
   }
 
   private daysInLeaveYear(
-    request: { startDate: Date; endDate: Date },
+    request: { startDate: Date; endDate: Date; days?: number },
     year: number,
     holidays: { date: Date; recurring: boolean }[],
   ) {
-    return this.toNumber(
-      splitPeriodByLeaveYear(request.startDate, request.endDate)
-        .filter((segment) => segment.year === year)
-        .reduce(
-          (total, segment) =>
-            total +
-            countWorkingDays(segment.startDate, segment.endDate, holidays),
-          0,
-        ),
+    const segments = splitPeriodByLeaveYear(request.startDate, request.endDate);
+    const weightedSegments = segments.map((segment) => ({
+      ...segment,
+      workingDays: countWorkingDays(
+        segment.startDate,
+        segment.endDate,
+        holidays,
+      ),
+    }));
+    const segmentWorkingDays = weightedSegments
+      .filter((segment) => segment.year === year)
+      .reduce((total, segment) => total + segment.workingDays, 0);
+    const storedDays = this.toNumber(request.days);
+    const totalWorkingDays = weightedSegments.reduce(
+      (total, segment) => total + segment.workingDays,
+      0,
     );
+
+    if (storedDays > 0 && totalWorkingDays > 0) {
+      return this.toNumber(
+        (storedDays * segmentWorkingDays) / totalWorkingDays,
+      );
+    }
+
+    return this.toNumber(segmentWorkingDays);
   }
 
   private async resolveRh(rhId?: string, rhEmail?: string) {

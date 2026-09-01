@@ -103,6 +103,7 @@ describe('LeaveBalanceSyncService', () => {
       select: {
         startDate: true,
         endDate: true,
+        days: true,
         status: true,
         submittedAt: true,
       },
@@ -189,6 +190,29 @@ describe('LeaveBalanceSyncService', () => {
     );
   });
 
+  it('uses the stored request days as the source of truth for taken balances', async () => {
+    const { prisma, service } = createHarness();
+    prisma.leaveRequest.findMany.mockResolvedValue([
+      {
+        startDate: new Date('2026-06-01T00:00:00.000Z'),
+        endDate: new Date('2026-06-05T00:00:00.000Z'),
+        days: 7,
+        status: LeaveRequestStatus.APPROVED,
+        submittedAt: new Date('2026-05-01T00:00:00.000Z'),
+      },
+    ]);
+
+    await service.syncForKeys([
+      { userId: 'employee-1', leaveTypeId: 'type-1', year: 2026 },
+    ]);
+
+    expect(prisma.leaveBalance.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: { taken: 7, scheduled: 0 },
+      }),
+    );
+  });
+
   it('restores scheduled days when RH rejects a request approved by N+1', async () => {
     const { prisma, service } = createHarness();
     const requestSnapshot = {
@@ -226,6 +250,7 @@ describe('LeaveBalanceSyncService', () => {
       select: {
         startDate: true,
         endDate: true,
+        days: true,
         status: true,
         submittedAt: true,
       },

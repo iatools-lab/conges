@@ -100,6 +100,14 @@ Date: 2026-08-28
 - Cela evite les ecarts entre interfaces lorsque le passif initial, les jours pris ou les jours planifies evoluent.
 - Les retours API d'import passif ont ete nettoyes pour ne plus exposer les champs internes utilises uniquement pour les emails.
 
+## Synchronisation des jours pris avec les soldes
+
+- La synchronisation des soldes utilise maintenant `LeaveRequest.days` comme source de verite pour les jours pris et planifies, afin d'aligner les soldes avec l'historique affiche aux RH, managers et employes.
+- Cela corrige les ecarts crees lorsque des demandes importees ou corrigees manuellement avaient un nombre de jours different du recalcul automatique depuis la periode.
+- Les demandes qui traversent deux exercices restent correctement decoupees: les jours stockes sont repartis proportionnellement selon les jours ouvres de chaque exercice concerne.
+- Les chemins de recalcul des conges speciaux/evenements RH ont ete alignes sur la meme logique pour eviter un deuxieme ecart cache.
+- Apres deploiement, ouvrir les vues qui declenchent la resynchronisation annuelle realignera les soldes; pour une correction immediate de toute la production, lancer une resynchronisation annuelle globale apres sauvegarde.
+
 ## Nouveau module Permissions
 
 - Ajout d'un modele `PermissionRequest` dedie aux permissions d'une journee.
@@ -127,3 +135,4 @@ Date: 2026-08-28
 - Verification patch: `git diff --check`
 - Tests backend conges speciaux/evenements: `npm test -- --runInBand employee/leave-requests/leave-requests.service.spec.ts employee/events/events.service.spec.ts rh/special-leaves/special-leaves.service.spec.ts employee/balances/balances.service.spec.ts`
 - Lint frontend apres corrections permissions/import/evenements: `npm run lint`
+- Tests backend synchronisation soldes/historique: `npm test -- --runInBand shared/leave-balances/leave-balance-sync.service.spec.ts employee/events/events.service.spec.ts rh/special-leaves/special-leaves.service.spec.ts`
