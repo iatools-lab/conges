@@ -33,7 +33,26 @@ MAIL_FROM="Conges <conges@upowa.org>"
 RH_AUTO_REJECT_DAYS=7
 ```
 
-En production, l'API refuse de demarrer sans `CORS_ORIGINS`, `AUTH_SESSION_SECRET` et `AUTH_ADMIN_PASSWORD_HASH`. La connexion Google exige aussi `GOOGLE_CLIENT_ID`. Swagger est desactive par defaut; mettez `ENABLE_SWAGGER=true` uniquement si l'exposition de `/docs` est voulue.
+En production, l'API refuse de demarrer sans `CORS_ORIGINS`, `AUTH_SESSION_SECRET` et `AUTH_ADMIN_PASSWORD_HASH`. La connexion Google exige aussi `GOOGLE_CLIENT_ID`. Swagger est desactive par defaut.
+
+### Activer Swagger avec Docker
+
+Sur le serveur, modifiez le fichier `.env` (jamais le fichier compose) :
+
+```env
+ENABLE_SWAGGER=true
+```
+
+Reconstruisez et recréez le backend et Nginx pour appliquer la variable et la nouvelle configuration du proxy :
+
+```bash
+docker compose up -d --build backend nginx
+docker compose ps
+```
+
+Ouvrez ensuite `https://<votre-domaine>:<NGINX_HTTPS_PORT>/docs` (port Docker par défaut : `8443`) ou `http://<votre-domaine>:<NGINX_HTTP_PORT>/docs` (port par défaut : `8080`, si HTTPS n'est pas activé). Si un reverse proxy de l'hôte publie déjà les ports standards 80/443 vers ces ports Docker, utilisez simplement `https://<votre-domaine>/docs`. L'interface utilise l'API `/api/v1`; pour tester les routes protégées, cliquez sur **Authorize** et collez le jeton de session obtenu via une route de connexion. Le JSON OpenAPI est disponible à `/docs-json` sur le même port.
+
+Swagger est public lorsqu'il est activé : le jeton protège les routes métier, pas l'interface de documentation. N'activez le flag que si cette exposition est acceptable. Pour un accès réservé à l'équipe, limitez `/docs`, `/docs/` et `/docs-json` par une règle IP ou une authentification au niveau du reverse proxy. Pour le désactiver, remettez `ENABLE_SWAGGER=false` puis recréez le backend et Nginx.
 
 Pour generer `AUTH_ADMIN_PASSWORD_HASH`:
 
