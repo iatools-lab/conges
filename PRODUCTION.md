@@ -37,22 +37,21 @@ En production, l'API refuse de demarrer sans `CORS_ORIGINS`, `AUTH_SESSION_SECRE
 
 ### Activer Swagger avec Docker
 
-Sur le serveur, modifiez le fichier `.env` (jamais le fichier compose) :
+Sur le serveur, vérifiez que le fichier `.env` contient (ne modifiez pas le fichier compose) :
 
 ```env
 ENABLE_SWAGGER=true
 ```
 
-Reconstruisez et recréez le backend et Nginx pour appliquer la variable et la nouvelle configuration du proxy :
+Le déploiement standard construit et démarre le backend et Nginx, vérifie que `/docs-json` répond, puis affiche l'URL Swagger. Relancez simplement le script habituel :
 
 ```bash
-docker compose up -d --build backend nginx
-docker compose ps
+bash docker/deploy.sh
 ```
 
-Ouvrez ensuite `https://<votre-domaine>:<NGINX_HTTPS_PORT>/docs` (port Docker par défaut : `8443`) ou `http://<votre-domaine>:<NGINX_HTTP_PORT>/docs` (port par défaut : `8080`, si HTTPS n'est pas activé). Si un reverse proxy de l'hôte publie déjà les ports standards 80/443 vers ces ports Docker, utilisez simplement `https://<votre-domaine>/docs`. L'interface utilise l'API `/api/v1`; pour tester les routes protégées, cliquez sur **Authorize** et collez le jeton de session obtenu via une route de connexion. Le JSON OpenAPI est disponible à `/docs-json` sur le même port.
+Le script affiche `https://<votre-domaine>:<NGINX_HTTPS_PORT>/docs` (port par défaut : `8443`) si `ENABLE_HTTPS=true`, ou `http://<votre-domaine>:<NGINX_HTTP_PORT>/docs` (port par défaut : `8080`) sinon. Si un reverse proxy de l'hôte publie les ports standards 80/443 vers ces ports Docker, l'URL publique peut être `https://<votre-domaine>/docs`. L'interface utilise l'API `/api/v1`; pour tester les routes protégées, cliquez sur **Authorize** et collez le jeton de session obtenu via une route de connexion. Le JSON OpenAPI est disponible sur `/docs-json`.
 
-Swagger est public lorsqu'il est activé : le jeton protège les routes métier, pas l'interface de documentation. N'activez le flag que si cette exposition est acceptable. Pour un accès réservé à l'équipe, limitez `/docs`, `/docs/` et `/docs-json` par une règle IP ou une authentification au niveau du reverse proxy. Pour le désactiver, remettez `ENABLE_SWAGGER=false` puis recréez le backend et Nginx.
+Swagger est public lorsqu'il est activé : le jeton protège les routes métier, pas l'interface de documentation. N'activez le flag que si cette exposition est acceptable. Pour un accès réservé à l'équipe, limitez `/docs`, `/docs/` et `/docs-json` par une règle IP ou une authentification au niveau du reverse proxy. Pour le désactiver, remettez `ENABLE_SWAGGER=false` puis relancez `bash docker/deploy.sh`.
 
 Pour generer `AUTH_ADMIN_PASSWORD_HASH`:
 

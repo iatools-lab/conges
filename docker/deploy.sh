@@ -68,6 +68,23 @@ wait_for_postgres() {
   done
 }
 
+wait_for_swagger() {
+  local attempts=30
+
+  echo "Verification du demarrage de Swagger..."
+  until docker compose exec -T backend node -e \
+    "fetch('http://127.0.0.1:3000/docs-json').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))" \
+    >/dev/null 2>&1; do
+    attempts=$((attempts - 1))
+    if [ "$attempts" -le 0 ]; then
+      echo "ERREUR: Swagger est active dans .env mais /docs-json ne repond pas."
+      docker compose logs --tail=120 backend || true
+      exit 1
+    fi
+    sleep 2
+  done
+}
+
 ensure_postgres_database() {
   local postgres_user="$1"
   local postgres_db="$2"
@@ -154,6 +171,7 @@ nginx_bind_address="$(read_env_value NGINX_BIND_ADDRESS "0.0.0.0")"
 nginx_http_port="$(read_env_value NGINX_HTTP_PORT "8080")"
 nginx_https_port="$(read_env_value NGINX_HTTPS_PORT "8443")"
 enable_https="$(read_env_value ENABLE_HTTPS "false")"
+enable_swagger="$(read_env_value ENABLE_SWAGGER "false")"
 email_mode="$(read_env_value EMAIL_MODE "off")"
 mail_host="$(read_env_value MAIL_HOST "")"
 mail_port="$(read_env_value MAIL_PORT "")"
@@ -199,6 +217,21 @@ if [ "$enable_https" = "true" ]; then
     echo "Verifiez DNS et ouverture du port 80 vers ce serveur."
     exit 1
   fi
+fi
+
+if [ "$enable_swagger" = "true" ]; then
+  wait_for_swagger
+
+  if [ "$enable_https" = "true" ]; then
+    swagger_url="https://${domain_name}:${nginx_https_port}/docs"
+  else
+    swagger_url="http://${domain_name}:${nginx_http_port}/docs"
+  fi
+  swagger_json_url="${swagger_url%/docs}/docs-json"
+
+  echo "Swagger est actif: ${swagger_url}"
+  echo "Specification OpenAPI: ${swagger_json_url}"
+  echo "AVERTISSEMENT: la documentation Swagger est publiquement accessible."
 fi
 
 docker compose ps
