@@ -299,10 +299,6 @@ export class LeaveBalanceSyncService {
 
   private async syncForKey(key: BalanceKey, client: PrismaClientLike) {
     const range = getLeaveYearRange(key.year);
-    const now = new Date();
-    const today = new Date(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
-    );
     const [requests, holidays, existingBalance, user, leaveType] =
       await Promise.all([
         client.leaveRequest.findMany({
@@ -371,7 +367,7 @@ export class LeaveBalanceSyncService {
     );
     const taken = this.toNumber(
       requests
-        .filter((request) => this.isTakenRequest(request, today))
+        .filter((request) => this.isTakenRequest(request))
         .reduce(
           (total, request) =>
             total + this.daysInLeaveYear(request, key.year, holidays),
@@ -380,7 +376,7 @@ export class LeaveBalanceSyncService {
     );
     const scheduled = this.toNumber(
       requests
-        .filter((request) => this.isScheduledRequest(request, today))
+        .filter((request) => this.isScheduledRequest(request))
         .reduce(
           (total, request) =>
             total + this.daysInLeaveYear(request, key.year, holidays),
@@ -427,10 +423,6 @@ export class LeaveBalanceSyncService {
     client: PrismaClientLike,
   ) {
     const range = getLeaveYearRange(key.year);
-    const now = new Date();
-    const today = new Date(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
-    );
     const [user, leaveTypes, requests, holidays, existingBalances] =
       await Promise.all([
         client.user.findUnique({
@@ -513,7 +505,7 @@ export class LeaveBalanceSyncService {
         }),
       ]);
 
-    if (!user || leaveTypes.length === 0 || requests.length === 0) return;
+    if (!user || leaveTypes.length === 0) return;
 
     const existingBalanceByLeaveTypeId = new Map(
       existingBalances.map((balance) => [balance.leaveTypeId, balance]),
@@ -526,7 +518,7 @@ export class LeaveBalanceSyncService {
     );
     const totalTaken = this.toNumber(
       requests
-        .filter((request) => this.isTakenRequest(request, today))
+        .filter((request) => this.isTakenRequest(request))
         .reduce(
           (total, request) =>
             total + this.daysInLeaveYear(request, key.year, holidays),
@@ -535,7 +527,7 @@ export class LeaveBalanceSyncService {
     );
     const totalScheduled = this.toNumber(
       requests
-        .filter((request) => this.isScheduledRequest(request, today))
+        .filter((request) => this.isScheduledRequest(request))
         .reduce(
           (total, request) =>
             total + this.daysInLeaveYear(request, key.year, holidays),
@@ -578,11 +570,6 @@ export class LeaveBalanceSyncService {
             scheduled: isConsumptionHolder ? totalScheduled : 0,
           },
           update: {
-            acquired: this.leaveEntitlements.getAcquiredDays({
-              leaveType,
-              user,
-              year: key.year,
-            }),
             taken: isConsumptionHolder ? totalTaken : 0,
             scheduled: isConsumptionHolder ? totalScheduled : 0,
           },
@@ -622,26 +609,16 @@ export class LeaveBalanceSyncService {
     );
   }
 
-  private isTakenRequest(
-    request: { status: LeaveRequestStatus; endDate: Date },
-    today: Date,
-  ) {
-    return (
-      request.status === LeaveRequestStatus.APPROVED && request.endDate < today
-    );
+  private isTakenRequest(request: { status: LeaveRequestStatus }) {
+    // RH approval consumes the entitlement immediately, even for future leave.
+    return request.status === LeaveRequestStatus.APPROVED;
   }
 
-  private isScheduledRequest(
-    request: {
-      status: LeaveRequestStatus;
-      endDate: Date;
-      submittedAt: Date | null;
-    },
-    today: Date,
-  ) {
+  private isScheduledRequest(request: {
+    status: LeaveRequestStatus;
+    submittedAt: Date | null;
+  }) {
     return (
-      (request.status === LeaveRequestStatus.APPROVED &&
-        request.endDate >= today) ||
       request.status === LeaveRequestStatus.PENDING ||
       request.status === LeaveRequestStatus.IN_REVIEW ||
       (request.status === LeaveRequestStatus.DRAFT && !request.submittedAt)
